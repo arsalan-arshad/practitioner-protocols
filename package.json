@@ -1,0 +1,17 @@
+{
+  "name": "practitioner-protocols",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Open-source Shopify app that lets professionals share reusable product protocols by link or QR code, with one-tap add-to-cart and per-protocol attribution.",
+  "license": "MIT",
+  "author": "Arsalan Arshad",
+  "engines": {
+    "node": ">=22.12"
+  },
+  "scripts": {
+    "test": "node --test test/token.test.js test/validation.test.js test/permissions.test.js test/attribution.test.js test/handout.test.js test/proxy.test.js test/webhooks.test.js test/portal.test.js test/admin.test.js test/rate-limit.test.js test/routes.test.js",
+    "test:db": "node --test test/database.integration.test.js",
+    "test:all": "node --test test/**/*.test.js"
+  }
+}

@@ -1,0 +1,130 @@
+// Practitioner Protocols — Data model (SPEC §6).
+//
+// Privacy by design (rule 2): no client-identifying data (name, email, phone, medical records)
+// is ever accepted, stored, or transmitted. Attribution is strictly aggregate monthly counters.
+//
+// Database: PostgreSQL via Prisma.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+/// A product recommendation protocol created by a practitioner or brand administrator.
+model Protocol {
+  id               String              @id @default(cuid())
+  shop             String
+  token            String              @unique // Cryptographic URL-safe share token (>=16 chars)
+  name             String              // Protocol name (1-60 chars)
+  introNote        String?             // Optional guidance note for the client (<=500 chars)
+  displayName      String?             // Optional practice/practitioner display override (<=60 chars)
+  ownerType        String              // 'customer' (Tag Mode) or 'company' (B2B Mode)
+  ownerId          String              // Shopify GID: gid://shopify/Customer/... or gid://shopify/Company/...
+  createdBy        String?             // Shopify Customer GID of the author
+  updatedBy        String?             // Shopify Customer GID of the last editor
+  status           String              @default("active") // 'active' | 'archived' | 'disabled'
+  isStarter        Boolean             @default(false)    // Brand-owned template if true (read/duplicate only)
+  sourceProtocolId String?             // Links duplicate back to original starter protocol
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
+
+  lines            ProtocolLine[]
+  orderStats       ProtocolOrderStat[]
+
+  @@index([shop, ownerType, ownerId])
+  @@index([shop, token])
+  @@index([shop, isStarter])
+  @@index([shop, status])
+}
+
+/// Individual product line item within a protocol.
+model ProtocolLine {
+  id          String   @id @default(cuid())
+  protocolId  String
+  protocol    Protocol @relation(fields: [protocolId], references: [id], onDelete: Cascade)
+  position    Int      @default(0)
+  variantGid  String   // gid://shopify/ProductVariant/...
+  quantity    Int      @default(1) // 1 to 10
+  usageNote   String?  // Usage instructions for client (<=200 chars)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([protocolId, variantGid])
+  @@index([protocolId])
+}
+
+/// Verified profile for a practitioner (Tag mode) or practice organization (Company mode).
+/// Merchant admin controls practice names to prevent impersonation.
+model PractitionerProfile {
+  id           String   @id @default(cuid())
+  shop         String
+  ownerType    String   @default("customer") // 'customer' | 'company'
+  ownerGid     String   // gid://shopify/Customer/... or gid://shopify/Company/...
+  practiceName String   // Merchant-controlled practice or clinic name
+  logoUrl      String?  // Optional logo asset URL
+  isApproved   Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@unique([shop, ownerGid])
+  @@index([shop])
+}
+
+/// Monthly aggregate attribution counters by practice/protocol.
+/// Never stores individual order IDs or client identities.
+model ProtocolOrderStat {
+  id           String   @id @default(cuid())
+  shop         String
+  protocolId   String
+  protocol     Protocol @relation(fields: [protocolId], references: [id], onDelete: Cascade)
+  ownerId      String   // Owner GID for practice-level rollups
+  month        String   // 'YYYY-MM'
+  orders       Int      @default(0) // Total orders with protocol lines
+  units        Int      @default(0) // Total units sold
+  revenueMinor BigInt   @default(0) // Total revenue in cents / minor currency units
+  currency     String   @default("USD")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@unique([shop, protocolId, month])
+  @@index([shop, month])
+  @@index([shop, ownerId, month])
+}
+
+/// Shop-level app settings configured in merchant admin.
+model Setting {
+  shop             String   @id
+  identityMode     String   @default("tag") // 'tag' (default) | 'company' (B2B)
+  footerDisclaimer String?  // Optional custom legal or brand disclaimer
+  handoutText      String?  // Custom print instructions for handouts
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+}
+
+/// Required by @shopify/shopify-app-session-storage-prisma.
+/// Offline sessions only; user columns exist for Shopify package compatibility.
+model Session {
+  id                  String    @id
+  shop                String
+  state               String
+  isOnline            Boolean   @default(false)
+  scope               String?
+  expires             DateTime?
+  accessToken         String
+  userId              BigInt?
+  firstName           String?
+  lastName            String?
+  email               String?
+  accountOwner        Boolean   @default(false)
+  locale              String?
+  collaborator        Boolean?  @default(false)
+  emailVerified       Boolean?  @default(false)
+  refreshToken        String?
+  refreshTokenExpires DateTime?
+
+  @@index([shop])
+}

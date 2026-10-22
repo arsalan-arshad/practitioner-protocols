@@ -197,5 +197,219 @@ describe('Shopify Compliance & Attribution Webhooks (app/lib/protocols/webhooks.
       assert.equal(res.attributions[0].protocolToken, 'tok_test123456789');
       assert.equal(res.updatedCount, 1);
     });
+
+    it('handleOrdersPaid ignores duplicate webhooks idempotently (Defect 6)', async () => {
+      const processedWebhooks = new Set();
+      const mockDb = {
+        queries: [],
+        async query(sql, params) {
+          this.queries.push({ sql, params });
+          if (sql.includes('INSERT INTO "ProcessedWebhook"')) {
+            const key = `${params[0]}:${params[1]}`;
+            if (processedWebhooks.has(key)) {
+              return { rowCount: 0, rows: [] }; // duplicate
+            }
+            processedWebhooks.add(key);
+            return { rowCount: 1, rows: [{ id: 'pw_1' }] };
+          }
+          if (sql.includes('SELECT id, "ownerId" FROM "Protocol"')) {
+            return { rows: [{ id: 'proto_1', ownerId: 'gid://shopify/Customer/100' }] };
+          }
+          return { rowCount: 1, rows: [{ id: 'stat_1' }] };
+        }
+      };
+
+      const payload = {
+        id: 7788990011,
+        shop_domain: 'test.myshopify.com',
+        line_items: [
+          {
+            id: 111,
+            variant_id: 222,
+            quantity: 1,
+            price: '20.00',
+            properties: [{ name: '_protocol_token', value: 'tok_test123456789' }]
+          }
+        ]
+      };
+
+      // First run: processes normally
+      const res1 = await handleOrdersPaid(mockDb, payload, { month: '2026-10' });
+      assert.equal(res1.success, true);
+      assert.equal(res1.updatedCount, 1);
+      assert.equal(res1.duplicate, undefined);
+
+      // Second run with same webhook ID: recognized as duplicate and skipped
+      const res2 = await handleOrdersPaid(mockDb, payload, { month: '2026-10' });
+      assert.equal(res2.success, true);
+      assert.equal(res2.duplicate, true);
+      assert.equal(res2.updatedCount, 0);
+    });
+
+    it('handleOrdersPaid guarantees atomicity across multiple protocol attributions (Defect 6)', async () => {
+      let rollbackCalled = false;
+      let secondProtocolQueryCount = 0;
+
+      const mockDb = {
+        queries: [],
+        async query(sql, params) {
+          this.queries.push({ sql, params });
+          if (sql === 'ROLLBACK') {
+            rollbackCalled = true;
+            return {};
+          }
+          if (sql.includes('SELECT id, "ownerId" FROM "Protocol"')) {
+            if (params[1] === 'tok_success') {
+              return { rows: [{ id: 'proto_1', ownerId: 'gid://shopify/Customer/1' }] };
+            }
+            if (params[1] === 'tok_fail') {
+              secondProtocolQueryCount++;
+              throw new Error('Database connection failure during protocol B update');
+            }
+          }
+          return { rowCount: 1, rows: [{ id: 'ok' }] };
+        }
+      };
+
+      const payload = {
+        id: 999111,
+        shop_domain: 'test.myshopify.com',
+        line_items: [
+          {
+            id: 1,
+            variant_id: 10,
+            quantity: 1,
+            price: '10.00',
+            properties: [{ name: '_protocol_token', value: 'tok_success' }]
+          },
+          {
+            id: 2,
+            variant_id: 20,
+            quantity: 1,
+            price: '20.00',
+            properties: [{ name: '_protocol_token', value: 'tok_fail' }]
+          }
+        ]
+      };
+
+      await assert.rejects(
+        async () => {
+          await handleOrdersPaid(mockDb, payload, { month: '2026-10' });
+        },
+        /Database connection failure/
+      );
+
+      assert.equal(rollbackCalled, true, 'Transaction must rollback atomically when any protocol attribution fails');
+    });
+
+    it('handleCustomersRedact propagates database errors (Defect 7)', async () => {
+      const failingDb = {
+        async query(sql) {
+          if (sql.includes('DELETE FROM "PractitionerProfile"')) {
+            throw new Error('Database disk error during redaction');
+          }
+          return { rowCount: 1, rows: [] };
+        }
+      };
+
+      const payload = { shop_domain: 'test.myshopify.com', customer: { id: 100 } };
+
+      await assert.rejects(
+        async () => {
+          await handleCustomersRedact(failingDb, payload, { mode: 'tag' });
+        },
+        /Database disk error during redaction/
+      );
+    });
+
+    it('handleCustomersRedact rejects when required identifiers are missing (Defect 7)', async () => {
+      const mockDb = { async query() { return { rowCount: 1, rows: [] }; } };
+
+      await assert.rejects(
+        async () => {
+          await handleCustomersRedact(mockDb, { customer: { id: 100 } }); // missing shop
+        },
+        /Redaction failed/
+      );
+
+      await assert.rejects(
+        async () => {
+          await handleCustomersRedact(mockDb, { shop_domain: 'test.myshopify.com' }); // missing customer
+        },
+        /Redaction failed/
+      );
+    });
+
+    it('handleShopRedact propagates database errors (Defect 7)', async () => {
+      const failingDb = {
+        async query(sql) {
+          if (sql.includes('DELETE FROM "Protocol"')) {
+            throw new Error('Database timeout during shop redaction');
+          }
+          return { rowCount: 1, rows: [] };
+        }
+      };
+
+      const payload = { shop_domain: 'test.myshopify.com' };
+
+      await assert.rejects(
+        async () => {
+          await handleShopRedact(failingDb, payload);
+        },
+        /Database timeout during shop redaction/
+      );
+    });
+
+    it('handleShopRedact rejects when shop identifier is missing (Defect 7)', async () => {
+      const mockDb = { async query() { return { rowCount: 1, rows: [] }; } };
+
+      await assert.rejects(
+        async () => {
+          await handleShopRedact(mockDb, {});
+        },
+        /Redaction failed/
+      );
+    });
+
+    it('handleOrdersPaid tracks separate stats per currency for the same protocol and month (Defect 6)', async () => {
+      const upsertParams = [];
+      const mockDb = {
+        async query(sql, params) {
+          if (sql.includes('SELECT id, "ownerId" FROM "Protocol"')) {
+            return { rows: [{ id: 'proto_1', ownerId: 'gid://shopify/Customer/100' }] };
+          }
+          if (sql.includes('INSERT INTO "ProtocolOrderStat"')) {
+            upsertParams.push(params);
+            return { rowCount: 1, rows: [{ id: 'stat_1' }] };
+          }
+          return { rowCount: 1, rows: [] };
+        }
+      };
+
+      const usdPayload = {
+        id: 1001,
+        shop_domain: 'test.myshopify.com',
+        currency: 'USD',
+        line_items: [
+          { id: 1, variant_id: 10, quantity: 1, price: '20.00', properties: [{ name: '_protocol_token', value: 'tok_1' }] }
+        ]
+      };
+
+      const eurPayload = {
+        id: 1002,
+        shop_domain: 'test.myshopify.com',
+        currency: 'EUR',
+        line_items: [
+          { id: 2, variant_id: 10, quantity: 2, price: '18.00', properties: [{ name: '_protocol_token', value: 'tok_1' }] }
+        ]
+      };
+
+      await handleOrdersPaid(mockDb, usdPayload, { month: '2026-10' });
+      await handleOrdersPaid(mockDb, eurPayload, { month: '2026-10' });
+
+      assert.equal(upsertParams.length, 2);
+      assert.equal(upsertParams[0][6], 'USD');
+      assert.equal(upsertParams[1][6], 'EUR');
+    });
   });
 });

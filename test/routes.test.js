@@ -11,7 +11,6 @@ import {
   handleArchiveProtocolRequest,
   handleRestoreProtocolRequest,
   handleWebhookRequest,
-  InMemoryRateLimiter,
   createRateLimiter,
   getHeader,
   handleErrorResponse
@@ -19,6 +18,7 @@ import {
 import { calculateAppProxySignature } from '../app/lib/protocols/proxy.js';
 import { ProtocolValidationError } from '../app/lib/protocols/validation.js';
 import { ProtocolServiceError } from '../app/lib/protocols/service.js';
+import { DENIAL_REASONS } from '../app/lib/protocols/permissions.js';
 
 describe('HTTP Routes & Request Handlers (app/lib/protocols/routes.js)', () => {
   const testShop = 'wellness-store.myshopify.com';
@@ -312,6 +312,35 @@ describe('HTTP Routes & Request Handlers (app/lib/protocols/routes.js)', () => {
       const genericRes = handleErrorResponse(new Error('Unexpected disk fail'));
       assert.equal(genericRes.status, 500);
     });
+
+    it('maps every real code from permissions.js DENIAL_REASONS to explicit HTTP status codes', async () => {
+      const expectedStatusMap = {
+        [DENIAL_REASONS.UNAUTHENTICATED]: 401,
+        [DENIAL_REASONS.UNAUTHORIZED_ROLE]: 403,
+        [DENIAL_REASONS.INVALID_ACTION]: 400,
+        [DENIAL_REASONS.PROTOCOL_NOT_FOUND]: 404,
+        [DENIAL_REASONS.ADMIN_ONLY_DISABLED_PROTOCOL]: 403,
+        [DENIAL_REASONS.STARTER_CREATION_ADMIN_ONLY]: 403,
+        [DENIAL_REASONS.STARTER_MODIFICATION_FORBIDDEN]: 403,
+        [DENIAL_REASONS.ARCHIVED_PROTOCOL_READ_ONLY]: 403,
+        [DENIAL_REASONS.FORBIDDEN_OWNERSHIP_MISMATCH]: 403
+      };
+
+      for (const key of Object.keys(DENIAL_REASONS)) {
+        const code = DENIAL_REASONS[key];
+        const err = new ProtocolServiceError(`Denied reason: ${code}`, code);
+        const res = handleErrorResponse(err);
+        const expectedStatus = expectedStatusMap[code];
+        assert.ok(expectedStatus, `DENIAL_REASON ${code} must be defined in expectedStatusMap`);
+        assert.equal(
+          res.status,
+          expectedStatus,
+          `DENIAL_REASON ${code} must map to HTTP ${expectedStatus}, but got ${res.status}`
+        );
+        const body = await res.json();
+        assert.equal(body.code, code);
+      }
+    });
   });
 
   describe('handleAppProxyRequest (M2 & SPEC §5)', () => {
@@ -413,7 +442,23 @@ describe('HTTP Routes & Request Handlers (app/lib/protocols/routes.js)', () => {
       assert.ok(text.includes('Unauthorized'));
     });
 
-    it('blocks request with 429 Too Many Requests when rate limit exceeded', async () => {
+    it('fails closed (500) when apiSecret is missing or undefined', async () => {
+      const url = `https://${testShop}/apps/protocols?shop=${testShop}&token=${testProtocol.token}&timestamp=1729500000`;
+
+      const resWithoutOptions = await handleAppProxyRequest(db, new Request(url));
+      assert.equal(resWithoutOptions.status, 500, 'Must fail closed with 500 when options/apiSecret is omitted');
+
+      const resWithEmptySecret = await handleAppProxyRequest(db, new Request(url), { apiSecret: '' });
+      assert.equal(resWithEmptySecret.status, 500, 'Must fail closed with 500 when apiSecret is empty');
+    });
+
+    it('fails closed (401) when signature parameter is missing from request', async () => {
+      const url = `https://${testShop}/apps/protocols?shop=${testShop}&token=${testProtocol.token}&timestamp=1729500000`;
+      const res = await handleAppProxyRequest(db, new Request(url), { apiSecret });
+      assert.equal(res.status, 401, 'Must reject unsigned request with 401');
+    });
+
+    it('blocks request with 429 Too Many Requests and returns Liquid 429 page from rate-limit.js', async () => {
       const limiter = createRateLimiter({ windowMs: 60000, maxRequests: 1 });
       const params = {
         shop: testShop,
@@ -431,6 +476,11 @@ describe('HTTP Routes & Request Handlers (app/lib/protocols/routes.js)', () => {
       const res2 = await handleAppProxyRequest(db, req2, { apiSecret, rateLimiter: limiter });
       assert.equal(res2.status, 429);
       assert.equal(res2.headers.get('retry-after'), '60');
+      assert.ok(res2.headers.get('content-type').includes('application/liquid'), '429 response must have Content-Type: application/liquid');
+      const text2 = await res2.text();
+      assert.ok(text2.includes('<meta name="robots" content="noindex, nofollow">'), '429 page must include robots noindex');
+      assert.ok(text2.includes('Too Many Requests'), '429 page must include user-friendly title');
+      assert.ok(text2.includes('Please retry in'), '429 page must include retry-after notice');
     });
 
     it('renders 404 Liquid for non-existent or invalid protocol token', async () => {

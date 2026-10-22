@@ -25,8 +25,16 @@ describe('PostgreSQL Database Integration (app/lib/protocols/service.js)', () =>
   };
 
   before(async () => {
-    // Dynamically import pg and service
-    const { default: pg } = await import('/Users/macbook/work/shopify/03-bridge-core-recipes/node_modules/pg/lib/index.js');
+    // Dynamically import local pg devDependency and service
+    let pg = null;
+    try {
+      const pgModule = await import('pg');
+      pg = pgModule.default || pgModule;
+    } catch (e) {
+      console.warn('⚠️  PostgreSQL Integration Skipped: "pg" driver is not installed in local devDependencies. Run "npm install --save-dev pg" to enable database tests. Details: %s', e.message);
+      return;
+    }
+
     service = await import('../app/lib/protocols/service.js');
 
     pgClient = new pg.Client({
@@ -38,15 +46,15 @@ describe('PostgreSQL Database Integration (app/lib/protocols/service.js)', () =>
     try {
       await pgClient.connect();
     } catch (e) {
-      // If unable to connect in sandboxed environment, mark for skipping
-      console.warn('Postgres connection skipped (running without bypass permissions):', e.message);
+      // If unable to connect to Postgres, skip loudly with detailed instructions
+      console.warn('⚠️  PostgreSQL Integration Skipped: Could not connect to PostgreSQL server on localhost:5432. Ensure PostgreSQL is running with database "practitioner_protocols" and migrations applied. Error: %s', e.message);
       return;
     }
 
-    // Insert practice profile for practitionerA
+    // Insert practice profile for practitionerA with neutral fictional name
     await pgClient.query(`
       INSERT INTO "PractitionerProfile" ("id", "shop", "ownerType", "ownerGid", "practiceName", "isApproved", "createdAt", "updatedAt")
-      VALUES (gen_random_uuid()::text, $1, 'customer', $2, 'Dr. Arsalan Functional Medicine', true, NOW(), NOW())
+      VALUES (gen_random_uuid()::text, $1, 'customer', $2, 'Apex Integrative Wellness', true, NOW(), NOW())
       ON CONFLICT ("shop", "ownerGid") DO NOTHING
     `, [testShop, practitionerA.ownerId]);
   });
@@ -66,7 +74,7 @@ describe('PostgreSQL Database Integration (app/lib/protocols/service.js)', () =>
 
   it('creates and reads a protocol with lines and practice branding', async (t) => {
     if (!pgClient || !pgClient._connected) {
-      t.skip('Database not connected');
+      t.skip('Skipped loudly: PostgreSQL connection not available on localhost:5432');
       return;
     }
 
@@ -104,13 +112,13 @@ describe('PostgreSQL Database Integration (app/lib/protocols/service.js)', () =>
 
     assert.ok(publicView);
     assert.equal(publicView.name, 'Daily Cellular Energy Protocol');
-    assert.equal(publicView.practiceName, 'Dr. Arsalan Functional Medicine');
+    assert.equal(publicView.practiceName, 'Apex Integrative Wellness');
     assert.equal(publicView.lines.length, 2);
   });
 
   it('enforces backend ownership: cross-practitioner access denied', async (t) => {
     if (!pgClient || !pgClient._connected) {
-      t.skip('Database not connected');
+      t.skip('Skipped loudly: PostgreSQL connection not available on localhost:5432');
       return;
     }
 
@@ -152,7 +160,7 @@ describe('PostgreSQL Database Integration (app/lib/protocols/service.js)', () =>
 
   it('allows duplicating a protocol into own library', async (t) => {
     if (!pgClient || !pgClient._connected) {
-      t.skip('Database not connected');
+      t.skip('Skipped loudly: PostgreSQL connection not available on localhost:5432');
       return;
     }
 
@@ -184,7 +192,7 @@ describe('PostgreSQL Database Integration (app/lib/protocols/service.js)', () =>
 
   it('records monthly aggregate order attribution without individual shopper PII', async (t) => {
     if (!pgClient || !pgClient._connected) {
-      t.skip('Database not connected');
+      t.skip('Skipped loudly: PostgreSQL connection not available on localhost:5432');
       return;
     }
 

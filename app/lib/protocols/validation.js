@@ -16,6 +16,8 @@ export class ProtocolValidationError extends Error {
 }
 
 const PII_FORBIDDEN_KEY_PATTERN = /(?:patient|client|ssn|health|medical|diagnosis|condition)/i;
+const SHOPIFY_VARIANT_GID_PATTERN = /^gid:\/\/shopify\/ProductVariant\/\d+$/;
+const MAX_VARIANT_GID_LENGTH = 100;
 const ALLOWED_STATUSES = new Set(['active', 'archived', 'disabled']);
 
 /**
@@ -56,6 +58,24 @@ export function validateProtocolInput(input, { isUpdate = false, isAdmin = false
         code: 'PII_NOT_ALLOWED',
         message: `Field '${key}' is not allowed. Protocols are generic and must never contain client or patient information.`
       });
+    }
+  }
+
+  // Also check nested keys in lines[] for PII
+  if (Array.isArray(input.lines)) {
+    for (let i = 0; i < input.lines.length; i++) {
+      const line = input.lines[i];
+      if (line && typeof line === 'object' && !Array.isArray(line)) {
+        for (const lineKey of Object.keys(line)) {
+          if (PII_FORBIDDEN_KEY_PATTERN.test(lineKey)) {
+            errors.push({
+              field: `lines[${i}].${lineKey}`,
+              code: 'PII_NOT_ALLOWED',
+              message: `Field 'lines[${i}].${lineKey}' is not allowed. Protocols are generic and must never contain client or patient information.`
+            });
+          }
+        }
+      }
     }
   }
 
@@ -158,7 +178,19 @@ export function validateProtocolInput(input, { isUpdate = false, isAdmin = false
           });
         } else {
           const trimmedGid = line.variantGid.trim();
-          if (seenVariants.has(trimmedGid)) {
+          if (trimmedGid.length > MAX_VARIANT_GID_LENGTH) {
+            errors.push({
+              field: `${lineFieldPrefix}.variantGid`,
+              code: 'INVALID_LENGTH',
+              message: `Variant GID cannot exceed ${MAX_VARIANT_GID_LENGTH} characters`
+            });
+          } else if (!SHOPIFY_VARIANT_GID_PATTERN.test(trimmedGid)) {
+            errors.push({
+              field: `${lineFieldPrefix}.variantGid`,
+              code: 'INVALID_GID_FORMAT',
+              message: `Variant GID '${trimmedGid}' is invalid. Must be in the format 'gid://shopify/ProductVariant/{id}' with a numeric ID.`
+            });
+          } else if (seenVariants.has(trimmedGid)) {
             errors.push({
               field: `${lineFieldPrefix}.variantGid`,
               code: 'DUPLICATE_VARIANT',

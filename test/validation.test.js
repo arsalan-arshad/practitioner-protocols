@@ -50,6 +50,26 @@ describe('Protocol Validation (app/lib/protocols/validation.js)', () => {
         assert.ok(piiError, `Expected PII_NOT_ALLOWED error for field ${field}`);
       });
     }
+
+    it('strictly rejects payloads with nested PII fields inside lines[]', () => {
+      const payload = {
+        ...validProtocol,
+        lines: [
+          {
+            variantGid: 'gid://shopify/ProductVariant/1001',
+            quantity: 1,
+            patientName: 'Jane Doe',
+            clientEmail: 'jane@example.com'
+          }
+        ]
+      };
+      const res = validateProtocolInput(payload);
+      assert.equal(res.isValid, false);
+      const piiError1 = res.errors.find(e => e.code === 'PII_NOT_ALLOWED' && e.field === 'lines[0].patientName');
+      assert.ok(piiError1, 'Expected PII_NOT_ALLOWED error for lines[0].patientName');
+      const piiError2 = res.errors.find(e => e.code === 'PII_NOT_ALLOWED' && e.field === 'lines[0].clientEmail');
+      assert.ok(piiError2, 'Expected PII_NOT_ALLOWED error for lines[0].clientEmail');
+    });
   });
 
   describe('Name Validation', () => {
@@ -136,6 +156,37 @@ describe('Protocol Validation (app/lib/protocols/validation.js)', () => {
       const res = validateProtocolInput({ ...validProtocol, lines });
       assert.equal(res.isValid, false);
       assert.ok(res.errors.some(e => e.code === 'INVALID_LENGTH'));
+    });
+
+    it('rejects variantGid exceeding maximum length of 100 characters', () => {
+      const longVariantGid = 'gid://shopify/ProductVariant/' + '9'.repeat(101);
+      const payload = {
+        ...validProtocol,
+        lines: [{ variantGid: longVariantGid, quantity: 1 }]
+      };
+      const res = validateProtocolInput(payload);
+      assert.equal(res.isValid, false);
+      assert.ok(res.errors.some(e => e.field === 'lines[0].variantGid' && e.code === 'INVALID_LENGTH'));
+    });
+
+    it('rejects invalid variantGid format', () => {
+      const invalidGids = [
+        'invalid-gid',
+        'gid://shopify/Product/12345',
+        'gid://shopify/Customer/12345',
+        '12345',
+        'gid://shopify/ProductVariant/',
+        'gid://shopify/ProductVariant/abc!@#'
+      ];
+      for (const badGid of invalidGids) {
+        const payload = {
+          ...validProtocol,
+          lines: [{ variantGid: badGid, quantity: 1 }]
+        };
+        const res = validateProtocolInput(payload);
+        assert.equal(res.isValid, false, `Expected ${badGid} to be rejected as invalid GID format`);
+        assert.ok(res.errors.some(e => e.field === 'lines[0].variantGid' && e.code === 'INVALID_GID_FORMAT'));
+      }
     });
   });
 

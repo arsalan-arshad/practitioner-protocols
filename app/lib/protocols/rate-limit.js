@@ -284,8 +284,21 @@ export function createRateLimiter(options = {}) {
     store.clear();
   }
 
+  /**
+   * Checks whether the request for the given key is allowed within rate limits.
+   * If allowed, records the request and returns true; otherwise returns false.
+   *
+   * @param {string} rawKey
+   * @param {number} [cost=1]
+   * @returns {boolean}
+   */
+  function isAllowed(rawKey, cost = 1) {
+    return !isRateLimited(rawKey, cost).limited;
+  }
+
   return {
     isRateLimited,
+    isAllowed,
     check,
     reset,
     prune,

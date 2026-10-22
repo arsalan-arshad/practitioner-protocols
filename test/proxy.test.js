@@ -168,5 +168,68 @@ describe('Shopify App Proxy & Storefront (app/lib/protocols/proxy.js)', () => {
       const notFound = renderProtocolLiquid({ protocol: null });
       assert.ok(notFound.includes('Protocol Not Found'));
     });
+
+    it('neutralizes Liquid syntax across all user outputs including data-* attributes and JSON payloads', () => {
+      const injectionProtocol = {
+        id: 'proto_inject',
+        token: 'tok_{{ customer.email }}',
+        name: 'Protocol {{ customer.email }} and {% assign x = 1 %}',
+        introNote: 'Intro {{   Customer.Email   }} and {%   assign y = 2   %}',
+        status: 'active',
+        lines: [
+          {
+            variantGid: 'gid://shopify/ProductVariant/5001',
+            quantity: 1,
+            title: 'Title {{ CUSTOMER.EMAIL }} and {% ASSIGN a = 10 %}',
+            variantTitle: 'Variant {{ customer.email }} {% Assign b = 20 %}',
+            priceFormatted: '$20.00',
+            usageNote: 'Take with water: {{- customer.email -}} and {%- assign x = 1 -%}',
+            available: true
+          }
+        ]
+      };
+
+      const liquid = renderProtocolLiquid({
+        protocol: injectionProtocol,
+        practiceName: 'Clinic {{ customer.email }} {% assign hacked = true %}'
+      });
+
+      // 1. Assert user-supplied Liquid syntax is neutralized everywhere in output
+      assert.ok(!liquid.includes('{{ customer.email }}'));
+      assert.ok(!liquid.includes('{{ Customer.Email }}'));
+      assert.ok(!liquid.includes('{{ CUSTOMER.EMAIL }}'));
+      assert.ok(!liquid.includes('{{   Customer.Email   }}'));
+      assert.ok(!liquid.includes('{{- customer.email -}}'));
+      assert.ok(!liquid.includes('{% assign'));
+      assert.ok(!liquid.includes('{%   assign'));
+      assert.ok(!liquid.includes('{%- assign'));
+      assert.ok(!liquid.includes('{% ASSIGN'));
+      assert.ok(!liquid.includes('{% Assign'));
+
+      // 2. Assert data-* attributes do not contain raw Liquid delimiters
+      const dataUsageMatch = liquid.match(/data-usage="([^"]+)"/);
+      assert.ok(dataUsageMatch, 'data-usage attribute must exist');
+      assert.ok(!dataUsageMatch[1].includes('{{'), 'data-usage must not contain raw {{');
+      assert.ok(!dataUsageMatch[1].includes('}}'), 'data-usage must not contain raw }}');
+      assert.ok(!dataUsageMatch[1].includes('{%'), 'data-usage must not contain raw {%');
+      assert.ok(!dataUsageMatch[1].includes('%'), 'data-usage must not contain raw %');
+      assert.ok(dataUsageMatch[1].includes('&#123;&#123;'), 'data-usage must have escaped {');
+
+      // 3. Assert JSON payload does not contain raw Liquid delimiters and parses safely
+      const jsonMatch = liquid.match(/<script type="application\/json" id="protocol-data-payload">\s*([\s\S]*?)\s*<\/script>/);
+      assert.ok(jsonMatch, 'JSON payload script tag must exist');
+      const rawJson = jsonMatch[1];
+      assert.ok(!rawJson.includes('{{'), 'JSON payload must not contain raw {{');
+      assert.ok(!rawJson.includes('}}'), 'JSON payload must not contain raw }}');
+      assert.ok(!rawJson.includes('{%'), 'JSON payload must not contain raw {%');
+      assert.ok(!rawJson.includes('%'), 'JSON payload must not contain raw %');
+
+      const parsed = JSON.parse(rawJson);
+      assert.equal(
+        parsed.items[0].usageNote,
+        'Take with water: {{- customer.email -}} and {%- assign x = 1 -%}',
+        'JSON.parse in client JS must recover the exact original text string'
+      );
+    });
   });
 });

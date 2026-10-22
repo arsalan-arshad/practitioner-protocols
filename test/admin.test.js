@@ -384,7 +384,7 @@ describe('Merchant Admin Layer (app/lib/protocols/admin.js)', () => {
         shop: testShop,
         ownerType: 'customer',
         ownerGid: 'gid://shopify/Customer/101',
-        practiceName: 'Dr. Arsalan Functional Medicine',
+        practiceName: 'Apex Integrative Wellness',
         logoUrl: 'https://cdn.shopify.com/logo1.png',
         isApproved: true
       },
@@ -422,7 +422,7 @@ describe('Merchant Admin Layer (app/lib/protocols/admin.js)', () => {
         ownerGid: 'gid://shopify/Customer/101'
       });
       assert.ok(profile);
-      assert.equal(profile.practiceName, 'Dr. Arsalan Functional Medicine');
+      assert.equal(profile.practiceName, 'Apex Integrative Wellness');
 
       const nonExistent = await getPractitionerProfile(db, {
         shop: testShop,

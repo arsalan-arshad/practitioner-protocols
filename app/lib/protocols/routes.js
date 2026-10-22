@@ -25,64 +25,15 @@ import {
   handleAppUninstalled,
   handleOrdersPaid
 } from './webhooks.js';
+import {
+  createRateLimiter,
+  createRateLimitKey,
+  getClientIp,
+  getRateLimitHeaders,
+  renderRateLimitLiquid
+} from './rate-limit.js';
 
-/**
- * Standard in-memory sliding window rate limiter.
- */
-export class InMemoryRateLimiter {
-  /**
-   * @param {{ windowMs?: number, maxRequests?: number }} [options]
-   */
-  constructor({ windowMs = 60000, maxRequests = 100 } = {}) {
-    this.windowMs = windowMs;
-    this.maxRequests = maxRequests;
-    this.requests = new Map();
-  }
-
-  /**
-   * Checks if an identifier is within the rate limit.
-   * @param {string} key
-   * @returns {boolean}
-   */
-  isAllowed(key) {
-    const now = Date.now();
-    const timestamps = (this.requests.get(key) || []).filter(
-      (t) => now - t < this.windowMs
-    );
-    if (timestamps.length >= this.maxRequests) {
-      this.requests.set(key, timestamps);
-      return false;
-    }
-    timestamps.push(now);
-    this.requests.set(key, timestamps);
-    return true;
-  }
-
-  /**
-   * Alias for isAllowed.
-   * @param {string} key
-   * @returns {boolean}
-   */
-  check(key) {
-    return this.isAllowed(key);
-  }
-
-  /**
-   * Clears all recorded rate limiting entries.
-   */
-  reset() {
-    this.requests.clear();
-  }
-}
-
-/**
- * Factory for creating an in-memory rate limiter.
- * @param {{ windowMs?: number, maxRequests?: number }} [options]
- * @returns {InMemoryRateLimiter}
- */
-export function createRateLimiter(options) {
-  return new InMemoryRateLimiter(options);
-}
+export { createRateLimiter };
 
 /**
  * Safely extracts a named header from a Request or header container.
@@ -106,6 +57,18 @@ export function getHeader(req, headerName) {
   return null;
 }
 
+const DENIAL_STATUS_MAP = {
+  [DENIAL_REASONS.UNAUTHENTICATED]: 401,
+  [DENIAL_REASONS.UNAUTHORIZED_ROLE]: 403,
+  [DENIAL_REASONS.INVALID_ACTION]: 400,
+  [DENIAL_REASONS.PROTOCOL_NOT_FOUND]: 404,
+  [DENIAL_REASONS.ADMIN_ONLY_DISABLED_PROTOCOL]: 403,
+  [DENIAL_REASONS.STARTER_CREATION_ADMIN_ONLY]: 403,
+  [DENIAL_REASONS.STARTER_MODIFICATION_FORBIDDEN]: 403,
+  [DENIAL_REASONS.ARCHIVED_PROTOCOL_READ_ONLY]: 403,
+  [DENIAL_REASONS.FORBIDDEN_OWNERSHIP_MISMATCH]: 403
+};
+
 /**
  * Converts domain/service errors into appropriate HTTP JSON responses.
  * @param {any} err
@@ -124,19 +87,7 @@ export function handleErrorResponse(err) {
   }
 
   if (err instanceof ProtocolServiceError || err?.name === 'ProtocolServiceError') {
-    let status = 400;
-    if (err.code === DENIAL_REASONS.UNAUTHENTICATED) {
-      status = 401;
-    } else if (
-      err.code === DENIAL_REASONS.FORBIDDEN_OWNERSHIP_MISMATCH ||
-      err.code === DENIAL_REASONS.STARTER_READ_ONLY ||
-      err.code === DENIAL_REASONS.STARTER_CANNOT_BE_MODIFIED ||
-      err.code === DENIAL_REASONS.DISABLED_PROTOCOL_INACCESSIBLE
-    ) {
-      status = 403;
-    } else if (err.code === 'NOT_FOUND') {
-      status = 404;
-    }
+    const status = DENIAL_STATUS_MAP[err.code] || (err.code === 'NOT_FOUND' ? 404 : 400);
 
     return Response.json(
       {
@@ -180,51 +131,23 @@ export async function handleAppProxyRequest(db, request, { apiSecret, rateLimite
 
   const queryParams = request?.query || urlObj.searchParams;
 
-  // 1. Verify HMAC signature if apiSecret provided
-  if (apiSecret) {
-    const isValidSignature = verifyAppProxyHmac(queryParams, apiSecret);
-    if (!isValidSignature) {
-      return new Response('Unauthorized: Invalid HMAC signature', {
-        status: 401,
-        headers: { 'Content-Type': 'text/plain' }
-      });
-    }
+  // 1. Fail closed if apiSecret is missing or signature invalid. Never fail open.
+  if (!apiSecret || typeof apiSecret !== 'string') {
+    return new Response('Server configuration error: missing API secret', {
+      status: 500,
+      headers: { 'Content-Type': 'text/plain' }
+    });
   }
 
-  // 2. Check Rate Limit if configured
-  if (rateLimiter) {
-    const clientKey =
-      getHeader(request, 'x-forwarded-for')?.split(',')[0]?.trim() ||
-      getHeader(request, 'x-real-ip') ||
-      urlObj.searchParams.get('shop') ||
-      'unknown_client';
-
-    let isAllowed = true;
-    if (typeof rateLimiter === 'function') {
-      isAllowed = await rateLimiter(clientKey, request);
-    } else if (typeof rateLimiter.isAllowed === 'function') {
-      isAllowed = await rateLimiter.isAllowed(clientKey);
-    } else if (typeof rateLimiter.check === 'function') {
-      isAllowed = await rateLimiter.check(clientKey);
-    } else if (typeof rateLimiter.consume === 'function') {
-      isAllowed = await rateLimiter.consume(clientKey);
-    }
-
-    if (
-      isAllowed === false ||
-      (typeof isAllowed === 'object' && isAllowed !== null && isAllowed.allowed === false)
-    ) {
-      return new Response('Too Many Requests', {
-        status: 429,
-        headers: {
-          'Content-Type': 'text/plain',
-          'Retry-After': '60'
-        }
-      });
-    }
+  const isValidSignature = verifyAppProxyHmac(queryParams, apiSecret);
+  if (!isValidSignature) {
+    return new Response('Unauthorized: Invalid HMAC signature', {
+      status: 401,
+      headers: { 'Content-Type': 'text/plain' }
+    });
   }
 
-  // 3. Extract shop and share token
+  // 2. Extract shop and share token
   const shop = urlObj.searchParams.get('shop') || request?.shop || '';
   let token = urlObj.searchParams.get('token') || request?.token || '';
 
@@ -233,6 +156,60 @@ export async function handleAppProxyRequest(db, request, { apiSecret, rateLimite
     const last = segments[segments.length - 1];
     if (last && !['protocols', 'apps', 'tools', 'proxy'].includes(last.toLowerCase())) {
       token = last;
+    }
+  }
+
+  // 3. Check Rate Limit if configured
+  if (rateLimiter) {
+    // TRUSTED PROXY ASSUMPTION:
+    // We assume this application is deployed behind a trusted reverse proxy (such as Shopify App Proxy
+    // or Cloudflare) which sanitizes incoming client headers and securely forwards the true remote IP in
+    // CF-Connecting-IP, X-Real-IP, or the leftmost entry of X-Forwarded-For. Downstream spoofing is prevented.
+    const clientIp = getClientIp(request?.headers);
+    const clientKey = createRateLimitKey('proxy', shop || 'storefront', clientIp);
+
+    let isLimited = false;
+    let retryAfterSeconds = 60;
+    let rateLimitResult = null;
+
+    if (typeof rateLimiter.isRateLimited === 'function') {
+      rateLimitResult = rateLimiter.isRateLimited(clientKey);
+      isLimited = rateLimitResult.limited;
+      retryAfterSeconds = rateLimitResult.retryAfterSeconds;
+    } else if (typeof rateLimiter.isAllowed === 'function') {
+      isLimited = !rateLimiter.isAllowed(clientKey);
+    } else if (typeof rateLimiter.check === 'function') {
+      const chk = rateLimiter.check(clientKey);
+      if (typeof chk === 'boolean') {
+        isLimited = !chk;
+      } else if (chk && typeof chk === 'object') {
+        isLimited = chk.limited === true;
+        if (chk.retryAfterSeconds) retryAfterSeconds = chk.retryAfterSeconds;
+      }
+    } else if (typeof rateLimiter === 'function') {
+      const res = await rateLimiter(clientKey, request);
+      if (typeof res === 'boolean') {
+        isLimited = !res;
+      } else if (res && typeof res === 'object') {
+        isLimited = res.limited === true || res.allowed === false;
+        if (res.retryAfterSeconds) retryAfterSeconds = res.retryAfterSeconds;
+      }
+    }
+
+    if (isLimited) {
+      const liquidBody = renderRateLimitLiquid({ retryAfterSeconds });
+      const headers = {
+        'Content-Type': 'application/liquid; charset=utf-8',
+        'Retry-After': String(retryAfterSeconds),
+        'X-Robots-Tag': 'noindex, nofollow'
+      };
+      if (rateLimitResult) {
+        Object.assign(headers, getRateLimitHeaders(rateLimitResult, rateLimiter.maxRequests || 60));
+      }
+      return new Response(liquidBody, {
+        status: 429,
+        headers
+      });
     }
   }
 

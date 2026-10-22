@@ -90,9 +90,22 @@ model ProtocolOrderStat {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  @@unique([shop, protocolId, month])
+  @@unique([shop, protocolId, month, currency])
   @@index([shop, month])
   @@index([shop, ownerId, month])
+}
+
+/// Webhook idempotency tracking table (least-privacy-invasive, zero PII).
+/// Retains only shop, webhookId (from X-Shopify-Webhook-Id or payload id), topic, and processed timestamp.
+model ProcessedWebhook {
+  id          String   @id @default(cuid())
+  shop        String
+  webhookId   String
+  topic       String
+  processedAt DateTime @default(now())
+
+  @@unique([shop, webhookId])
+  @@index([processedAt])
 }
 
 /// Shop-level app settings configured in merchant admin.

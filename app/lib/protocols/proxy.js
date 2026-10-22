@@ -160,7 +160,23 @@ export function getLoggedInCustomerGid(queryParams) {
 }
 
 /**
- * Escapes characters for safe HTML output.
+ * Neutralizes Liquid syntax to prevent template injection attacks.
+ * Replaces Liquid delimiters with HTML entities.
+ *
+ * @param {unknown} str
+ * @returns {string}
+ */
+export function neutralizeLiquid(str) {
+  if (str === null || str === undefined) return '';
+  return String(str)
+    .replace(/\{/g, '&#123;')
+    .replace(/\}/g, '&#125;')
+    .replace(/%/g, '&#37;');
+}
+
+/**
+ * Escapes characters for safe HTML and Liquid output.
+ * Neutralizes HTML tags/entities and Liquid interpolation/tag delimiters ({, }, %).
  *
  * @param {unknown} str
  * @returns {string}
@@ -172,7 +188,10 @@ export function escapeHtml(str) {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#039;');
+    .replace(/'/g, '&#039;')
+    .replace(/\{/g, '&#123;')
+    .replace(/\}/g, '&#125;')
+    .replace(/%/g, '&#37;');
 }
 
 /**
@@ -532,8 +551,10 @@ export function renderProtocolLiquid({ protocol, practiceName = '', isLoggedInPr
   const displayPractice = escapeHtml(practiceName || protocol.displayName || '');
   const displayTitle = escapeHtml(protocol.name || 'Product Protocol');
   const displayIntro = escapeHtml(protocol.introNote || '');
-  const protocolToken = escapeHtml(protocol.token || protocol.shareToken || '');
-  const protocolId = escapeHtml(String(protocol.id || ''));
+  const rawToken = protocol.token || protocol.shareToken || '';
+  const rawId = String(protocol.id || '');
+  const protocolToken = escapeHtml(rawToken);
+  const protocolId = escapeHtml(rawId);
 
   const lines = Array.isArray(protocol.lines) ? protocol.lines : [];
 
@@ -595,10 +616,16 @@ export function renderProtocolLiquid({ protocol, practiceName = '', isLoggedInPr
   const inStockCount = clientItems.filter((i) => i.available).length;
 
   const protocolDataJson = JSON.stringify({
-    protocolId,
-    protocolToken,
+    protocolId: rawId,
+    protocolToken: rawToken,
     items: clientItems
-  }).replace(/</g, '\\u003c');
+  })
+    .replace(/</g, '\\u003c')
+    .replace(/\{\{/g, '\\u007b\\u007b')
+    .replace(/\}\}/g, '\\u007d\\u007d')
+    .replace(/\{%/g, '\\u007b\\u0025')
+    .replace(/%\}/g, '\\u0025\\u007d')
+    .replace(/%/g, '\\u0025');
 
   return `${robotsMeta}${styles}
 <div class="protocol-container">

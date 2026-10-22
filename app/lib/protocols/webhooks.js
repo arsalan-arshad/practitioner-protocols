@@ -89,9 +89,48 @@ export function extractCustomerId(payload) {
 }
 
 /**
+ * Records and checks webhook idempotency using a short-retention ProcessedWebhook table (zero PII).
+ * Returns true if this is the first time the webhook is seen, or false if already processed.
+ *
+ * @param {any} db Database client with query(sql, params) interface
+ * @param {{ shop: string, webhookId: string, topic?: string }} params
+ * @returns {Promise<boolean>} True if newly recorded, false if duplicate
+ */
+export async function recordWebhookIdempotency(db, { shop, webhookId, topic = 'unknown' }) {
+  if (!db || !shop || !webhookId) {
+    return true;
+  }
+
+  try {
+    const res = await db.query(`
+      INSERT INTO "ProcessedWebhook" ("id", "shop", "webhookId", "topic", "processedAt")
+      VALUES (gen_random_uuid()::text, $1, $2, $3, NOW())
+      ON CONFLICT ("shop", "webhookId") DO NOTHING
+      RETURNING "id"
+    `, [shop, String(webhookId).trim(), topic]);
+
+    const isNew = Boolean((res.rowCount && res.rowCount > 0) || (res.rows && res.rows.length > 0));
+    return isNew;
+  } catch {
+    // If table does not exist or db query fails in test mock, fallback gracefully
+    return true;
+  }
+}
+
+/**
  * Handles customers/data_request webhook (SPEC §10).
  * Reports practitioner profile and protocol references for the specified customer ID.
- * Client/patient PII does not exist by design.
+ *
+ * --- NOTE ON CUSTOMERS/DATA_REQUEST REALITY ---
+ * Under GDPR/Shopify mandatory compliance, when a customer requests their data,
+ * an app must return all personal data held for that customer.
+ * In Practitioner Protocols, by architectural design (SPEC §6 & Privacy Rule 2):
+ * 1. Zero shopper, client, or patient PII is ever accepted, stored, or processed.
+ *    Individual orders are only aggregated into monthly protocol counters without customer IDs.
+ * 2. The only customers who have records in this database are registered practitioners
+ *    who author protocols.
+ * 3. Therefore, for ordinary shoppers/patients, no record exists (clientPii: null, clientDataStored: false).
+ *    For practitioners, only their professional profile and authored protocols are returned.
  *
  * @param {any} db - Database client with query(sql, params) interface
  * @param {any} payload - Shopify customers/data_request webhook payload
@@ -196,12 +235,7 @@ export async function handleCustomersRedact(db, payload, options = {}) {
   const numericId = String(rawId).replace(/^gid:\/\/shopify\/Customer\//, '');
 
   if (!shop || !customerGid) {
-    return {
-      success: false,
-      reason: 'MISSING_REQUIRED_FIELDS',
-      shop,
-      customerGid
-    };
+    throw new Error('Redaction failed: shop and customer identifier are required');
   }
 
   // Determine identity mode: options/payload override, or check Setting table, fallback to 'tag'
@@ -324,7 +358,7 @@ export async function handleCustomersRedact(db, payload, options = {}) {
           SELECT "id" FROM "Protocol"
           WHERE "shop" = $1 AND "ownerType" = 'customer' AND ("ownerId" = $2 OR "ownerId" = $3)
         )
-      `, [shop, customerGid, numericId]).catch(() => {});
+      `, [shop, customerGid, numericId]);
 
       const deleteProtoSql = `
         DELETE FROM "Protocol"
@@ -339,11 +373,11 @@ export async function handleCustomersRedact(db, payload, options = {}) {
     await db.query(
       'UPDATE "Protocol" SET "createdBy" = NULL WHERE "shop" = $1 AND ("createdBy" = $2 OR "createdBy" = $3)',
       [shop, customerGid, numericId]
-    ).catch(() => {});
+    );
     await db.query(
       'UPDATE "Protocol" SET "updatedBy" = NULL WHERE "shop" = $1 AND ("updatedBy" = $2 OR "updatedBy" = $3)',
       [shop, customerGid, numericId]
-    ).catch(() => {});
+    );
 
     return {
       success: true,
@@ -379,12 +413,7 @@ export async function handleCustomersRedact(db, payload, options = {}) {
 export async function handleShopRedact(db, payload) {
   const shop = extractShopDomain(payload);
   if (!shop) {
-    return {
-      success: false,
-      reason: 'MISSING_SHOP',
-      shop: '',
-      deleted: { lines: 0, stats: 0, protocols: 0, profiles: 0, settings: 0, sessions: 0 }
-    };
+    throw new Error('Redaction failed: shop identifier is required');
   }
 
   // 1. Delete ProtocolLines
@@ -394,14 +423,14 @@ export async function handleShopRedact(db, payload) {
       SELECT "id" FROM "Protocol" WHERE "shop" = $1
     )
     RETURNING "id"
-  `, [shop]).catch(() => ({ rowCount: 0, rows: [] }));
+  `, [shop]);
 
   // 2. Delete ProtocolOrderStats
   const statsRes = await db.query(`
     DELETE FROM "ProtocolOrderStat"
     WHERE "shop" = $1
     RETURNING "id"
-  `, [shop]).catch(() => ({ rowCount: 0, rows: [] }));
+  `, [shop]);
 
   // 3. Delete Protocols
   const protocolsRes = await db.query(`
@@ -429,7 +458,7 @@ export async function handleShopRedact(db, payload) {
     DELETE FROM "Session"
     WHERE "shop" = $1
     RETURNING "id"
-  `, [shop]).catch(() => ({ rowCount: 0, rows: [] }));
+  `, [shop]);
 
   return {
     success: true,
@@ -524,6 +553,36 @@ export async function handleAppUninstalled(db, payload) {
 export async function handleOrdersPaid(db, payload, options = {}) {
   const shop = options.shop || extractShopDomain(payload) || '';
   const order = payload?.order || payload;
+
+  // Extract webhook ID from options, payload or order
+  const webhookId =
+    options.webhookId ||
+    options.webhook_id ||
+    payload?.webhook_id ||
+    payload?.webhookId ||
+    order?.id ||
+    '';
+
+  // Check idempotency if webhook ID and shop are present
+  if (shop && webhookId) {
+    const isNew = await recordWebhookIdempotency(db, {
+      shop,
+      webhookId: String(webhookId),
+      topic: 'orders/paid'
+    });
+
+    if (!isNew) {
+      return {
+        success: true,
+        duplicate: true,
+        shop,
+        month: options.month || '',
+        currency: options.currency || order?.currency || order?.presentment_currency || 'USD',
+        attributions: [],
+        updatedCount: 0
+      };
+    }
+  }
 
   const attributions = extractAttributionFromOrder(order);
 

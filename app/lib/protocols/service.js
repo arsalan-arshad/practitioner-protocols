@@ -20,6 +20,45 @@ export class ProtocolServiceError extends Error {
 }
 
 /**
+ * Executes a function within a single-client database transaction.
+ * If `db` is a connection pool (has `.connect()` function), checks out a single client,
+ * begins a transaction, runs `fn(client)`, commits, and releases the client in a finally block.
+ * If `db` is already a single client, begins a transaction on `db`, runs `fn(db)`, and commits.
+ * In case of error, executes rollback and rethrows the error.
+ *
+ * @template T
+ * @param {any} db Database pool or client with query() interface
+ * @param {(tx: any) => Promise<T>} fn Transaction callback
+ * @returns {Promise<T>}
+ */
+export async function withTransaction(db, fn) {
+  if (!db || typeof db.query !== 'function') {
+    throw new TypeError('Database client or pool with query() method is required');
+  }
+
+  const isPool = typeof db.connect === 'function';
+  const client = isPool ? await db.connect() : db;
+
+  try {
+    await client.query('BEGIN');
+    const result = await fn(client);
+    await client.query('COMMIT');
+    return result;
+  } catch (error) {
+    try {
+      await client.query('ROLLBACK');
+    } catch {
+      // rollback error does not supersede the primary transaction error
+    }
+    throw error;
+  } finally {
+    if (isPool && typeof client.release === 'function') {
+      client.release();
+    }
+  }
+}
+
+/**
  * Lists protocols accessible to a given user context.
  *
  * @param {any} db Client with query(sql, params) interface
@@ -204,9 +243,8 @@ export async function createProtocol(db, { shop, user, input }) {
   const ownerId = input.ownerId || user.ownerId || (user.role === 'admin' ? 'brand' : user.id);
   const isStarter = Boolean(user.role === 'admin' && sanitized.isStarter);
 
-  // Execute in transaction
-  await db.query('BEGIN');
-  try {
+  // Execute in single-client transaction
+  return withTransaction(db, async (tx) => {
     const insertProtocolSql = `
       INSERT INTO "Protocol" (
         "id", "shop", "token", "name", "introNote", "displayName",
@@ -219,7 +257,7 @@ export async function createProtocol(db, { shop, user, input }) {
       ) RETURNING *
     `;
 
-    const protoRes = await db.query(insertProtocolSql, [
+    const protoRes = await tx.query(insertProtocolSql, [
       shop,
       token,
       sanitized.name,
@@ -247,7 +285,7 @@ export async function createProtocol(db, { shop, user, input }) {
             gen_random_uuid()::text, $1, $2, $3, $4, $5, NOW(), NOW()
           ) RETURNING *
         `;
-        const lineRes = await db.query(insertLineSql, [
+        const lineRes = await tx.query(insertLineSql, [
           createdProtocol.id,
           pos,
           line.variantGid,
@@ -258,12 +296,8 @@ export async function createProtocol(db, { shop, user, input }) {
       }
     }
 
-    await db.query('COMMIT');
     return { ...createdProtocol, lines };
-  } catch (err) {
-    await db.query('ROLLBACK');
-    throw err;
-  }
+  });
 }
 
 /**
@@ -309,11 +343,6 @@ export async function duplicateProtocol(db, { shop, user, protocolId }) {
  * }} options
  */
 export async function updateProtocol(db, { shop, user, protocolId, input }) {
-  const existing = await getProtocolById(db, { shop, user, protocolId, action: 'edit' });
-  if (!existing) {
-    throw new ProtocolServiceError('Protocol not found', 'NOT_FOUND');
-  }
-
   const validation = validateProtocolInput(input, {
     isUpdate: true,
     isAdmin: user.role === 'admin'
@@ -329,8 +358,12 @@ export async function updateProtocol(db, { shop, user, protocolId, input }) {
 
   const sanitized = validation.sanitized;
 
-  await db.query('BEGIN');
-  try {
+  return withTransaction(db, async (tx) => {
+    const existing = await getProtocolById(tx, { shop, user, protocolId, action: 'edit' });
+    if (!existing) {
+      throw new ProtocolServiceError('Protocol not found', 'NOT_FOUND');
+    }
+
     const updateSql = `
       UPDATE "Protocol"
       SET
@@ -344,7 +377,7 @@ export async function updateProtocol(db, { shop, user, protocolId, input }) {
       RETURNING *
     `;
 
-    const res = await db.query(updateSql, [
+    const res = await tx.query(updateSql, [
       sanitized.name ?? null,
       sanitized.introNote !== undefined ? (sanitized.introNote || null) : null,
       sanitized.displayName !== undefined ? (sanitized.displayName || null) : null,
@@ -359,7 +392,7 @@ export async function updateProtocol(db, { shop, user, protocolId, input }) {
     // If lines array was explicitly provided in update, replace lines
     let lines = existing.lines;
     if (sanitized.lines) {
-      await db.query('DELETE FROM "ProtocolLine" WHERE "protocolId" = $1', [protocolId]);
+      await tx.query('DELETE FROM "ProtocolLine" WHERE "protocolId" = $1', [protocolId]);
       lines = [];
       for (let pos = 0; pos < sanitized.lines.length; pos++) {
         const line = sanitized.lines[pos];
@@ -370,7 +403,7 @@ export async function updateProtocol(db, { shop, user, protocolId, input }) {
             gen_random_uuid()::text, $1, $2, $3, $4, $5, NOW(), NOW()
           ) RETURNING *
         `;
-        const lineRes = await db.query(insertLineSql, [
+        const lineRes = await tx.query(insertLineSql, [
           protocolId,
           pos,
           line.variantGid,
@@ -381,12 +414,8 @@ export async function updateProtocol(db, { shop, user, protocolId, input }) {
       }
     }
 
-    await db.query('COMMIT');
     return { ...updatedProtocol, lines };
-  } catch (err) {
-    await db.query('ROLLBACK');
-    throw err;
-  }
+  });
 }
 
 /**
@@ -473,46 +502,48 @@ export async function recordOrderAttribution(db, { shop, attributions, month, cu
     grouped.set(key, existing);
   }
 
-  let updatedCount = 0;
+  return withTransaction(db, async (tx) => {
+    let updatedCount = 0;
 
-  for (const [token, agg] of grouped.entries()) {
-    // Find protocol and its owner
-    const protoRes = await db.query(
-      'SELECT id, "ownerId" FROM "Protocol" WHERE shop = $1 AND token = $2',
-      [shop, token]
-    );
+    for (const [token, agg] of grouped.entries()) {
+      // Find protocol and its owner
+      const protoRes = await tx.query(
+        'SELECT id, "ownerId" FROM "Protocol" WHERE shop = $1 AND token = $2',
+        [shop, token]
+      );
 
-    if (protoRes.rows.length === 0) continue;
-    const proto = protoRes.rows[0];
+      if (protoRes.rows.length === 0) continue;
+      const proto = protoRes.rows[0];
 
-    const upsertSql = `
-      INSERT INTO "ProtocolOrderStat" (
-        "id", "shop", "protocolId", "ownerId", "month",
-        "orders", "units", "revenueMinor", "currency", "createdAt", "updatedAt"
-      ) VALUES (
-        gen_random_uuid()::text, $1, $2, $3, $4,
-        1, $5, $6, $7, NOW(), NOW()
-      )
-      ON CONFLICT ("shop", "protocolId", "month")
-      DO UPDATE SET
-        "orders" = "ProtocolOrderStat"."orders" + 1,
-        "units" = "ProtocolOrderStat"."units" + EXCLUDED.units,
-        "revenueMinor" = "ProtocolOrderStat"."revenueMinor" + EXCLUDED."revenueMinor",
-        "updatedAt" = NOW()
-    `;
+      const upsertSql = `
+        INSERT INTO "ProtocolOrderStat" (
+          "id", "shop", "protocolId", "ownerId", "month",
+          "orders", "units", "revenueMinor", "currency", "createdAt", "updatedAt"
+        ) VALUES (
+          gen_random_uuid()::text, $1, $2, $3, $4,
+          1, $5, $6, $7, NOW(), NOW()
+        )
+        ON CONFLICT ("shop", "protocolId", "month", "currency")
+        DO UPDATE SET
+          "orders" = "ProtocolOrderStat"."orders" + 1,
+          "units" = "ProtocolOrderStat"."units" + EXCLUDED.units,
+          "revenueMinor" = "ProtocolOrderStat"."revenueMinor" + EXCLUDED."revenueMinor",
+          "updatedAt" = NOW()
+      `;
 
-    await db.query(upsertSql, [
-      shop,
-      proto.id,
-      proto.ownerId,
-      month,
-      agg.units,
-      agg.revenueMinor,
-      currency
-    ]);
+      await tx.query(upsertSql, [
+        shop,
+        proto.id,
+        proto.ownerId,
+        month,
+        agg.units,
+        agg.revenueMinor,
+        currency
+      ]);
 
-    updatedCount++;
-  }
+      updatedCount++;
+    }
 
-  return { updatedCount };
+    return { updatedCount };
+  });
 }

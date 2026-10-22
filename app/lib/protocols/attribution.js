@@ -179,6 +179,21 @@ function normalizeProperties(properties) {
 /**
  * Parses an orders/paid webhook line items to extract protocol attribution.
  *
+ * --- REVENUE DEFINITION (SPEC §9 & Defect 6) ---
+ * Revenue is defined as the net discounted line total in minor currency units (cents),
+ * representing the exact amount paid by the customer for the attributed line items after all
+ * item-level discounts and allocated order-level discounts have been subtracted.
+ * Taxes and shipping are excluded.
+ *
+ * Revenue Calculation Precedence:
+ * 1. GraphQL `discountedTotalSet.shopMoney.amount`: Net discounted total for the line item.
+ * 2. REST `discounted_price`: Unit price after discounts multiplied by quantity.
+ * 3. REST `price` with line discounts: Gross line total (`price * quantity`) minus `total_discount`
+ *    or allocated discount amounts (`discount_allocations`).
+ * 4. Fallback: Gross line total (`price * quantity`).
+ *
+ * All amounts are rounded to integer minor units (e.g. cents).
+ *
  * @param {any} order
  * @returns {Array<{
  *   protocolToken: string,
@@ -234,20 +249,49 @@ export function extractAttributionFromOrder(order) {
       ? item.quantity
       : 1;
 
-    // Calculate priceMinor: price in cents/minor units
-    // Handles item.price ("24.50"), item.priceMinor (2450), or GraphQL discountedTotalSet
-    let unitPriceMinor = 0;
-    if (typeof item.priceMinor === 'number') {
-      unitPriceMinor = item.priceMinor;
-    } else if (item.price !== undefined && item.price !== null) {
-      const parsedFloat = parseFloat(String(item.price).replace(/[^0-9.-]/g, ''));
-      unitPriceMinor = isNaN(parsedFloat) ? 0 : Math.round(parsedFloat * 100);
-    } else if (item.discountedTotalSet?.shopMoney?.amount) {
-      const parsedFloat = parseFloat(item.discountedTotalSet.shopMoney.amount);
-      unitPriceMinor = isNaN(parsedFloat) ? 0 : Math.round((parsedFloat * 100) / quantity);
-    }
+    // Calculate priceMinor: net discounted line total in minor units (cents)
+    let priceMinor = 0;
 
-    const priceMinor = unitPriceMinor * quantity;
+    if (item.discountedTotalSet?.shopMoney?.amount) {
+      // 1. GraphQL discounted total for the whole line item
+      const parsedFloat = parseFloat(item.discountedTotalSet.shopMoney.amount);
+      priceMinor = isNaN(parsedFloat) ? 0 : Math.round(parsedFloat * 100);
+    } else if (item.discounted_price !== undefined && item.discounted_price !== null) {
+      // 2. REST discounted unit price
+      const parsedFloat = parseFloat(String(item.discounted_price).replace(/[^0-9.-]/g, ''));
+      const unitDiscountedMinor = isNaN(parsedFloat) ? 0 : Math.round(parsedFloat * 100);
+      priceMinor = unitDiscountedMinor * quantity;
+    } else {
+      // 3. REST price with total_discount or discount_allocations
+      let unitPriceMinor = 0;
+      if (typeof item.priceMinor === 'number') {
+        unitPriceMinor = item.priceMinor;
+      } else if (item.price !== undefined && item.price !== null) {
+        const parsedFloat = parseFloat(String(item.price).replace(/[^0-9.-]/g, ''));
+        unitPriceMinor = isNaN(parsedFloat) ? 0 : Math.round(parsedFloat * 100);
+      }
+
+      let grossLineMinor = unitPriceMinor * quantity;
+      let totalDiscountMinor = 0;
+
+      if (item.total_discount !== undefined && item.total_discount !== null) {
+        const parsedDiscount = parseFloat(String(item.total_discount).replace(/[^0-9.-]/g, ''));
+        if (!isNaN(parsedDiscount)) {
+          totalDiscountMinor = Math.round(parsedDiscount * 100);
+        }
+      } else if (Array.isArray(item.discount_allocations) && item.discount_allocations.length > 0) {
+        for (const alloc of item.discount_allocations) {
+          if (alloc && alloc.amount !== undefined) {
+            const parsedAlloc = parseFloat(String(alloc.amount).replace(/[^0-9.-]/g, ''));
+            if (!isNaN(parsedAlloc)) {
+              totalDiscountMinor += Math.round(parsedAlloc * 100);
+            }
+          }
+        }
+      }
+
+      priceMinor = Math.max(0, grossLineMinor - totalDiscountMinor);
+    }
 
     attributions.push({
       protocolToken,

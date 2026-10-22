@@ -1,6 +1,6 @@
 # Practitioner Protocols — Project Context (for Claude)
 
-_Snapshot: 2026-10-22 · Core pure engine library fully implemented (238 pure unit tests passing) · Re-verification audit & Fixes 1–7 complete · Awaiting dev store with B2B for Spikes S1–S5 and app UI scaffold._
+_Snapshot: 2026-10-22 · Core pure engine library fully implemented (245 pure unit tests passing) · Session 10 complete · Awaiting dev store with B2B for Spikes S1–S5 and app UI scaffold._
 _Contains NO secrets. Never paste `.env` values or tokens into chat or docs._
 
 ## 1. What this is
@@ -46,7 +46,6 @@ The idea grew out of a client request. The owner decided to build their **own, g
 - Answer Q1/Q3.
 - Owner decision on Catalog Resolver token & scope (`docs/PROPOSAL_CATALOG_RESOLVER.md`: Option b requires `unauthenticated_read_product_listings` vs Option a private token).
 - Scaffold Shopify app harness (`shopify.app.toml`, Remix/server entry) once dev store is ready.
-- Verify migrations and integration tests against real live PostgreSQL instance.
 
 **Resolved:**
 - Clean-room approach decided (owner, 2026-10-08).
@@ -54,6 +53,7 @@ The idea grew out of a client request. The owner decided to build their **own, g
 - First independent code audit completed and 10 technical defects remediated (Session 7).
 - Re-verification audit completed and Fixes 1–7 remediated test-first (Session 8).
 - Follow-up PostgreSQL locking and rate limit hop audit remediated and verified on real PostgreSQL (Session 9).
+- Verify migrations and integration tests against real live PostgreSQL instance (verified on real PostgreSQL 17 in Session 9).
 - Zero order IDs stored in `ProcessedWebhook` (verified by automated test parameter assertions).
 - Absolute paths removed.
 
@@ -200,7 +200,7 @@ Run the five spikes in a day or two on a dev store; write the answers into secti
      - Documented honestly in code comments and `README.md` that Shopify discards `customers/data_request` webhook response bodies; ordinary shoppers have zero PII stored; practitioner data out-of-band delivery is not yet implemented.
   3. **Fix 3 — Default Rate Limiting & Reverse Proxy Anti-Spoofing (routes.js, rate-limit.js):**
      - Added module-level `defaultProxyRateLimiter` instantiated by default with injection/disable helpers (`setDefaultProxyRateLimiter`, `getDefaultProxyRateLimiter`).
-     - Hardened `getClientIp`: prefers `CF-Connecting-IP`, otherwise the RIGHTMOST `X-Forwarded-For` entry (appended by trusted edge proxy), otherwise `X-Real-IP`, otherwise `'unknown'` bucket. Documented trusted-proxy reverse proxy assumptions in code and README.
+     - Hardened `getClientIp`: prefers `CF-Connecting-IP` _(SUPERSEDED in Session 10: CF-Connecting-IP is now opt-in via TRUST_CF_CONNECTING_IP to prevent header spoofing when not behind Cloudflare)_, otherwise the RIGHTMOST `X-Forwarded-For` entry (appended by trusted edge proxy, configurable via `TRUSTED_PROXY_HOPS` in Session 9), otherwise `X-Real-IP`, otherwise `'unknown'` bucket. Documented trusted-proxy reverse proxy assumptions in code and README.
   4. **Fix 4 — Discount Precedence & ISO 4217 Currency Exponents (attribution.js):**
      - Discount precedence: computes discount as sum of `discount_allocations[].amount`; falls back to `total_discount` only if allocations are absent. Removed unverified `discounted_price` branch.
      - Currency exponents: implemented ISO 4217 exponent table (`CURRENCY_EXPONENTS`, `getCurrencyExponent`, `getCurrencyFactor`) supporting 0-decimal currencies (JPY factor 1), 3-decimal currencies (KWD factor 1000), and 2-decimal currencies (USD/EUR factor 100).
@@ -253,3 +253,22 @@ Run the five spikes in a day or two on a dev store; write the answers into secti
   - `npm test`: **243/243 pure unit tests passing** (66 suites, 0 failures, ~80ms).
   - `npm run test:db`: **10/10 live database integration tests passing** against real PostgreSQL 17.11 with both migrations applied.
   - Zero `file:///Users` or `/Users/` links across repository documentation and code outside log records.
+
+## 20. Session Log — 2026-10-22 (Session 10: Rate Limiting Spoof Hardening, Bundler Resiliency & Doc Alignment)
+- **Context:** Hardening follow-up on commit `2bf92ab` addressing reverse proxy header spoofing, bundler/minifier compatibility for transactions, and documentation alignment.
+- **Remediated Items:**
+  1. **Opt-in `CF-Connecting-IP` Trust (`TRUST_CF_CONNECTING_IP`, rate-limit.js, test/rate-limit.test.js):**
+     - Security threat: When deployed behind proxies other than Cloudflare, untrusted clients could forge `CF-Connecting-IP` headers to manipulate or bypass IP-based rate limiting buckets.
+     - Fix: Made `CF-Connecting-IP` trust opt-in via environment variable `TRUST_CF_CONNECTING_IP` (default `false`) and options `trustCfConnectingIp` in `getClientIp`. When unset or false, `CF-Connecting-IP` is ignored and IP extraction falls through to `X-Forwarded-For` (using `TRUSTED_PROXY_HOPS`), `X-Real-IP`, direct socket address, or the shared `'unknown'` bucket. Tested test-first.
+  2. **Minifier-Resilient Database Client Detection (`withTransaction`, service.js, test/attribution.test.js):**
+     - Bundler bug: `withTransaction` previously checked `db.constructor?.name === 'Client'`. In production builds with bundlers or minifiers (esbuild, terser, rollup), class constructor names are mangled to single letters (e.g. `'c'`), causing `withTransaction` to mistake a standalone `pg.Client` for a connection pool and attempt to call `client.connect()`.
+     - Fix: Replaced `constructor.name` check with explicit property checks (`typeof db.release === 'function' || Boolean(db.connectionParameters || db._connected || db._queryable !== undefined)`). Tested test-first using a mock client with minified constructor name (`'c'`).
+  3. **Documentation & Comment Alignment:**
+     - Updated test counts across `README.md` and `PROJECT_CONTEXT.md` snapshot header to **245 pure unit tests**.
+     - Fixed stale comment at `app/lib/protocols/routes.js:188-192` to clarify that `CF-Connecting-IP` is opt-in via `TRUST_CF_CONNECTING_IP` and `X-Forwarded-For` uses configurable `TRUSTED_PROXY_HOPS`.
+     - Added `TRUSTED_PROXY_HOPS=1` and `TRUST_CF_CONNECTING_IP=false` configuration variables to `.env.example` and `README.md`.
+     - Marked Session 8 `getClientIp` note in `PROJECT_CONTEXT.md` as superseded by Session 10 opt-in behavior.
+     - Moved live PostgreSQL verification item from Open to Resolved in Section 8 Punch List.
+- **Verification Status:**
+  - `npm test`: **245/245 pure unit tests passing** (66 suites, 0 failures).
+  - `npm run test:db`: **Skipped (no DB reachable)** with loud warning notice; 10/10 integration tests passing result is from Session 9 against real PostgreSQL 17.11.

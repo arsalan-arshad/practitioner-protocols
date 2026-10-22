@@ -2,7 +2,7 @@
 
 > **Open-Source (MIT)** | Built for the Shopify Merchant & Developer Community | Open for PRs & Discussions
 >
-> ⚙️ **Status: Pure Engine Modules Verified (243/243 Unit Tests Passing with Mocks)** | **Live PostgreSQL Integration Verified (10/10 Tests Passing on Real PostgreSQL)** | **Awaiting Dev Store with B2B for Spikes S1–S5 & Full App Harness**
+> ⚙️ **Status: Pure Engine Modules Verified (245/245 Unit Tests Passing with Mocks)** | **Live PostgreSQL Integration (Last verified 10/10 against PostgreSQL 17.11 in Session 9; test:db skips with a notice when no DB is reachable)** | **Awaiting Dev Store with B2B for Spikes S1–S5 & Full App Harness**
 
 ---
 
@@ -14,7 +14,7 @@
 
 **Privacy by design:** Protocols never accept or store client/patient information. The validator strictly enforces a zero-PII barrier (`PII_NOT_ALLOWED`) both on top-level keys and within nested line items. Attribution is tracked solely via aggregate monthly counters.
 
-**Current build stage:** The pure engine logic, security controls, cryptographic primitives, Liquid renderers, rate limiters, validation barriers, and PostgreSQL database queries are fully built and covered by 243 automated unit tests using mock database interfaces. Real PostgreSQL query execution, transaction behavior, constraints, row-level locking (`FOR UPDATE`), and migrations are verified against a live PostgreSQL instance via `npm run test:db` (10 integration tests passing). Full UI/screens, app harness (`shopify.app.toml`, server entry), and live storefront testing are intentionally staged behind Spikes S1–S5 (see `docs/SPEC.md` §4), which require a Shopify development store with B2B features enabled.
+**Current build stage:** The pure engine logic, security controls, cryptographic primitives, Liquid renderers, rate limiters, validation barriers, and PostgreSQL database queries are fully built and covered by 245 automated unit tests using mock database interfaces. Real PostgreSQL query execution, transaction behavior, constraints, row-level locking (`FOR UPDATE`), and migrations are verified against a live PostgreSQL instance via `npm run test:db` (10 integration tests passing). Full UI/screens, app harness (`shopify.app.toml`, server entry), and live storefront testing are intentionally staged behind Spikes S1–S5 (see `docs/SPEC.md` §4), which require a Shopify development store with B2B features enabled.
 
 ---
 
@@ -82,7 +82,10 @@
 - Prevents token enumeration, scraping, and brute-force attacks on public App Proxy endpoints (returns Liquid 429 error template after threshold).
 - Auto-pruning with `maxKeys` eviction cap and unreferenced cleanup intervals to prevent memory leaks.
 - Employs RFC-compliant HTTP headers (`X-RateLimit-Limit`, `X-RateLimit-Remaining`, `Retry-After`).
-- Anti-spoofing client IP extraction: prefers `CF-Connecting-IP`, otherwise the rightmost `X-Forwarded-For` entry (appended by trusted edge proxy), otherwise `X-Real-IP`, otherwise a shared `'unknown'` bucket. Trusted proxy architecture assumes edge reverse proxy strips/appends incoming client headers.
+- Anti-spoofing client IP extraction:
+  - `TRUSTED_PROXY_HOPS` (env var, default `1`): Configures the number of trusted reverse proxy hops from the rightmost `X-Forwarded-For` entry (behind Shopify App Proxy and edge infrastructure, the exact hop count is unverified; see Spike S2).
+  - `TRUST_CF_CONNECTING_IP` (env var, default `false`): Opt-in trust for `CF-Connecting-IP` header; only enable when deployed directly behind Cloudflare.
+  - Falls back to `X-Real-IP`, direct socket address, or shared `'unknown'` bucket. Attacker-controlled leftmost headers cannot manipulate rate limit buckets.
 
 ### J. Mandatory Compliance Webhooks ([`app/lib/protocols/webhooks.js`](app/lib/protocols/webhooks.js))
 - **Atomic Webhook Idempotency & Rollback:** Tracks processed webhook IDs in `ProcessedWebhook` table inside the exact same database transaction as monthly stat upserts. If stat counting fails, the idempotency marker is rolled back so Shopify delivery retries can succeed. True duplicates return `{ updatedCount: 0, duplicate: true }`. Requires `X-Shopify-Webhook-Id` header (rejects missing header with 400 on `orders/paid`). Zero order IDs or customer IDs are ever stored in `ProcessedWebhook`. Includes parameterized retention pruning (`pruneProcessedWebhooks`).
@@ -160,14 +163,14 @@ npm install
 The project features a deterministic test suite using native Node.js test runner (`node:test`):
 
 ```bash
-# Run all 243 pure unit tests using mock database interfaces (zero external network dependencies, ~80ms):
+# Run all 245 pure unit tests using mock database interfaces (zero external network dependencies, ~80ms):
 npm test
 
 # Run PostgreSQL live database integration tests against a running Postgres instance:
 npm run test:db
 ```
 
-> **Database Tests & Migrations Note:** `npm test` runs 243 pure unit tests against deterministic mock database interfaces. Real PostgreSQL coverage exists when `npm run test:db` is run against PostgreSQL running on `localhost:5432` with database `practitioner_protocols` and migrations applied. The live integration test suite verifies 10/10 tests against real PostgreSQL, including row-level locking (`FOR UPDATE`), transaction rollbacks, multi-line replacement, webhook idempotency, and GDPR compliance.
+> **Database Tests & Migrations Note:** `npm test` runs 245 pure unit tests against deterministic mock database interfaces. Real PostgreSQL coverage exists when `npm run test:db` is run against PostgreSQL running on `localhost:5432` with database `practitioner_protocols` and migrations applied. The live integration test suite verifies 10/10 tests against real PostgreSQL, including row-level locking (`FOR UPDATE`), transaction rollbacks, multi-line replacement, webhook idempotency, and GDPR compliance.
 
 ### Applying Migrations (PostgreSQL)
 When running against a live PostgreSQL database, apply the versioned migrations in order:

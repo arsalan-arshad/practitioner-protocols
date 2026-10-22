@@ -603,7 +603,7 @@ describe('HTTP Routes & Request Handlers (app/lib/protocols/routes.js)', () => {
       let lastRes = null;
       for (let i = 0; i < 62; i++) {
         lastRes = await handleAppProxyRequest(db, new Request(url, {
-          headers: { 'cf-connecting-ip': '198.51.100.99' }
+          headers: { 'x-forwarded-for': '198.51.100.99' }
         }), { apiSecret });
         if (lastRes.status === 429) break;
       }

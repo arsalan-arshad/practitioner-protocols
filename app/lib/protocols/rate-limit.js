@@ -351,8 +351,8 @@ export function createRateLimitKey(...parts) {
  * or AWS ALB).
  *
  * Precedence Rule:
- * 1. `CF-Connecting-IP`: Single validated client IP provided by Cloudflare edge.
- * 2. `X-Forwarded-For`: Rightmost entry appended by the nearest trusted reverse proxy.
+ * 1. `CF-Connecting-IP`: Single validated client IP provided by Cloudflare edge (opt-in via TRUST_CF_CONNECTING_IP=true).
+ * 2. `X-Forwarded-For`: N-th from rightmost entry according to TRUSTED_PROXY_HOPS.
  * 3. `X-Real-IP`: Upstream proxy single IP header.
  * 4. `connection.remoteAddress`: Direct socket address if available.
  * 5. Fallback: Shared `'unknown'` bucket (preventing attacker key-space manipulation).
@@ -382,9 +382,16 @@ export function getClientIp(headers = {}, connection = {}, options = {}) {
   const rawHops = options?.trustedHops ?? process.env.TRUSTED_PROXY_HOPS ?? 1;
   const trustedHops = Math.max(1, parseInt(rawHops, 10) || 1);
 
+  // CF-Connecting-IP is opt-in via TRUST_CF_CONNECTING_IP (default false) or options.trustCfConnectingIp.
+  // When not behind Cloudflare, untrusted clients could otherwise spoof CF-Connecting-IP.
+  const trustCf = Boolean(
+    options?.trustCfConnectingIp ??
+    (process.env.TRUST_CF_CONNECTING_IP === 'true' || process.env.TRUST_CF_CONNECTING_IP === '1')
+  );
+
   let rawIp = '';
 
-  if (normalized['cf-connecting-ip']) {
+  if (trustCf && normalized['cf-connecting-ip']) {
     rawIp = String(normalized['cf-connecting-ip']).trim();
   } else if (normalized['x-forwarded-for']) {
     const xffParts = String(normalized['x-forwarded-for'])

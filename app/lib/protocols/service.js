@@ -36,7 +36,13 @@ export async function withTransaction(db, fn) {
     throw new TypeError('Database client or pool with query() method is required');
   }
 
-  const isClient = db.constructor?.name === 'Client' || Boolean(db._connected);
+  // Explicitly check for single client vs connection pool without relying on constructor.name
+  // (which is mangled by bundlers/minifiers like esbuild, terser, rollup).
+  // A checked-out pool client has `release()`. A direct pg.Client has `connectionParameters`,
+  // `_queryable`, or `_connected`. A pool manages connections and has `connect()` without client markers.
+  const isClient =
+    typeof db.release === 'function' ||
+    Boolean(db.connectionParameters || db._connected || db._queryable !== undefined);
   const isPool = typeof db.connect === 'function' && !isClient;
   const client = isPool ? await db.connect() : db;
 

@@ -5,7 +5,7 @@
 - [ ] Record each answer in `PROJECT_CONTEXT.md` §5 and update D1–D4. Re-rank scope if a spike fails.
 
 ## M1 — Foundation
-- [x] Pure engine core: share-token generator, schema validation, permission checks, cart payload construction, QR generator, attribution extraction (`npm test` 238/238 pure unit tests passing).
+- [x] Pure engine core: share-token generator, schema validation, permission checks, cart payload construction, QR generator, attribution extraction (`npm test` 245/245 pure unit tests passing).
 - [x] Prisma schema (SPEC §6) & versioned PostgreSQL DDL migrations (`prisma/schema.prisma`, `prisma/migrations/**`; Note: DB integration tests and migrations NOT yet verified against a real Postgres).
 - [ ] App scaffold (Remix/server entry, `shopify.app.toml`, Polaris UI harness) — pending dev store setup.
 - [x] Protocol API route handlers with ownership checks (`app/lib/protocols/routes.js`, `test/routes.test.js`: cross-owner read/write denied, starters read-only, authentication enforced, fail-closed HMAC).

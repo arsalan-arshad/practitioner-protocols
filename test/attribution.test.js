@@ -410,6 +410,35 @@ describe('Attribution & Cart Payload (app/lib/protocols/attribution.js)', () => 
       assert.equal(clientQueries[2].sql, 'ROLLBACK');
     });
 
+    it('withTransaction recognizes pg.Client without relying on constructor.name (Item 4)', async () => {
+      // Simulates a pg.Client with minified constructor name ('c' or 'MinifiedClient')
+      // and pg.Client properties (connectionParameters, _queryable)
+      const queries = [];
+      const minifiedClient = {
+        _queryable: true,
+        connectionParameters: { host: 'localhost', database: 'test' },
+        async query(sql, params) {
+          queries.push(sql);
+          return { rows: [] };
+        },
+        async connect() {
+          // In real pg, client.connect() connects the socket and returns Promise<void>,
+          // NOT a checked-out client. If withTransaction mistakes this for a pool,
+          // it will try to use the returned void/undefined as the client or throw here.
+          throw new Error('pool checkout connect() called on a pg.Client');
+        }
+      };
+      Object.defineProperty(minifiedClient, 'constructor', { value: { name: 'c' } });
+
+      const res = await withTransaction(minifiedClient, async (tx) => {
+        await tx.query('SELECT 1');
+        return 'success';
+      });
+
+      assert.equal(res, 'success');
+      assert.deepEqual(queries, ['BEGIN', 'SELECT 1', 'COMMIT']);
+    });
+
     it('recordOrderAttribution uses withTransaction and checked-out client from pool', async () => {
       const { fakePool, clientQueries, poolQueries, getConnectCalls, getReleaseCalls } = createFakePool();
 

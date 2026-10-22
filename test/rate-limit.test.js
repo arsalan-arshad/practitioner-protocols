@@ -383,8 +383,8 @@ describe('Sliding Window Rate Limiter (app/lib/protocols/rate-limit.js)', () => 
     });
 
     it('getClientIp extracts IP safely across proxy headers with zero client PII', () => {
-      // Cloudflare header
-      assert.equal(getClientIp({ 'cf-connecting-ip': '203.0.113.195' }), '203.0.113.195');
+      // Cloudflare header (when opted in)
+      assert.equal(getClientIp({ 'cf-connecting-ip': '203.0.113.195' }, {}, { trustCfConnectingIp: true }), '203.0.113.195');
 
       // Nginx Real-IP
       assert.equal(getClientIp({ 'x-real-ip': '198.51.100.17' }), '198.51.100.17');
@@ -434,6 +434,44 @@ describe('Sliding Window Rate Limiter (app/lib/protocols/rate-limit.js)', () => 
       assert.equal(getClientIp(headers), 'proxy1.ip');
 
       delete process.env.TRUSTED_PROXY_HOPS;
+    });
+
+    it('getClientIp ignores cf-connecting-ip unless TRUST_CF_CONNECTING_IP is enabled (opt-in)', () => {
+      const headers = {
+        'cf-connecting-ip': 'spoofed.cloudflare.ip',
+        'x-forwarded-for': 'real.proxy.ip'
+      };
+
+      // By default (TRUST_CF_CONNECTING_IP not set / false), cf-connecting-ip is ignored
+      delete process.env.TRUST_CF_CONNECTING_IP;
+      assert.equal(
+        getClientIp(headers),
+        'real.proxy.ip',
+        'Should ignore CF-Connecting-IP by default and fall through to X-Forwarded-For'
+      );
+
+      // When only cf-connecting-ip is provided and not opted-in, falls through to 'unknown'
+      assert.equal(
+        getClientIp({ 'cf-connecting-ip': '203.0.113.195' }),
+        'unknown',
+        'Should not trust CF-Connecting-IP without opt-in'
+      );
+
+      // Explicitly enabled via TRUST_CF_CONNECTING_IP='true'
+      process.env.TRUST_CF_CONNECTING_IP = 'true';
+      assert.equal(
+        getClientIp(headers),
+        'spoofed.cloudflare.ip',
+        'Should trust CF-Connecting-IP when TRUST_CF_CONNECTING_IP=true'
+      );
+
+      // Explicitly enabled via options.trustCfConnectingIp
+      delete process.env.TRUST_CF_CONNECTING_IP;
+      assert.equal(
+        getClientIp(headers, {}, { trustCfConnectingIp: true }),
+        'spoofed.cloudflare.ip',
+        'Should trust CF-Connecting-IP when options.trustCfConnectingIp is true'
+      );
     });
   });
 

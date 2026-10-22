@@ -187,8 +187,9 @@ export async function handleAppProxyRequest(db, request, { apiSecret, rateLimite
   if (activeRateLimiter) {
     // TRUSTED PROXY ASSUMPTION:
     // We assume this application is deployed behind a trusted reverse proxy (such as Shopify App Proxy
-    // or Cloudflare) which sanitizes incoming client headers. getClientIp uses CF-Connecting-IP or
-    // the RIGHTMOST entry of X-Forwarded-For appended by the nearest trusted reverse proxy.
+    // or Cloudflare) which sanitizes incoming client headers. getClientIp uses CF-Connecting-IP (opt-in
+    // via TRUST_CF_CONNECTING_IP) or the N-th from rightmost entry of X-Forwarded-For (configured
+    // via TRUSTED_PROXY_HOPS, default 1).
     const clientIp = getClientIp(request?.headers);
     const clientKey = createRateLimitKey('proxy', shop || 'storefront', clientIp);
 

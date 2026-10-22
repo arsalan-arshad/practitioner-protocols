@@ -389,11 +389,23 @@ describe('Sliding Window Rate Limiter (app/lib/protocols/rate-limit.js)', () => 
       // Nginx Real-IP
       assert.equal(getClientIp({ 'x-real-ip': '198.51.100.17' }), '198.51.100.17');
 
-      // Multi-hop X-Forwarded-For (takes original leftmost client IP)
+      // Multi-hop X-Forwarded-For: uses RIGHTMOST entry appended by trusted reverse proxy, preventing client spoofing
       assert.equal(
         getClientIp({ 'x-forwarded-for': '192.0.2.1, 10.0.0.1, 172.16.0.1' }),
-        '192.0.2.1'
+        '172.16.0.1',
+        'Must use rightmost X-Forwarded-For entry from trusted proxy'
       );
+
+      // Forging leftmost XFF does not change bucket (both resolve to rightmost 172.16.0.1)
+      const forged1 = getClientIp({ 'x-forwarded-for': 'attacker1.ip, 172.16.0.1' });
+      const forged2 = getClientIp({ 'x-forwarded-for': 'attacker2.ip, 172.16.0.1' });
+      assert.equal(forged1, '172.16.0.1');
+      assert.equal(forged2, '172.16.0.1');
+      assert.equal(forged1, forged2, 'Forging leftmost XFF must not change rate limit bucket');
+
+      // Requests with no headers or connection share 'unknown' bucket
+      assert.equal(getClientIp({}), 'unknown', 'Requests with no headers must share unknown bucket');
+      assert.equal(getClientIp(), 'unknown');
 
       // Connection socket fallback
       assert.equal(getClientIp({}, { remoteAddress: '127.0.0.1' }), '127.0.0.1');

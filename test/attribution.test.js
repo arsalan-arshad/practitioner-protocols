@@ -220,16 +220,18 @@ describe('Attribution & Cart Payload (app/lib/protocols/attribution.js)', () => 
       assert.equal(attributions[0].priceMinor, 3750, 'Revenue must be 3750 cents (after allocated discounts)');
     });
 
-    it('computes revenue from discounted_price if present', () => {
-      const discountedPriceOrder = {
-        id: 991124,
+    it('prefers discount_allocations over legacy total_discount when both exist', () => {
+      const orderWithBoth = {
+        id: 991125,
+        currency: 'USD',
         line_items: [
           {
-            id: 303,
+            id: 304,
             variant_id: 445566,
-            quantity: 2,
+            quantity: 1,
             price: '50.00',
-            discounted_price: '42.00',
+            discount_allocations: [{ amount: '12.50' }], // should be used: net 37.50 = 3750
+            total_discount: '5.00', // legacy deprecated field: should be IGNORED
             properties: [
               { name: '_protocol_token', value: 'tok_XYZ9876543210' }
             ]
@@ -237,9 +239,45 @@ describe('Attribution & Cart Payload (app/lib/protocols/attribution.js)', () => 
         ]
       };
 
-      const attributions = extractAttributionFromOrder(discountedPriceOrder);
+      const attributions = extractAttributionFromOrder(orderWithBoth);
       assert.equal(attributions.length, 1);
-      assert.equal(attributions[0].priceMinor, 8400, 'Revenue must be 8400 cents (42.00 * 2)');
+      assert.equal(attributions[0].priceMinor, 3750, 'Must compute discount from discount_allocations, ignoring legacy total_discount');
+    });
+
+    it('correctly scales minor currency units according to currency exponent (JPY=0, KWD=3, USD=2)', () => {
+      const jpyOrder = {
+        id: 991126,
+        currency: 'JPY',
+        line_items: [
+          {
+            id: 305,
+            variant_id: 445566,
+            quantity: 1,
+            price: '5000',
+            discount_allocations: [{ amount: '500' }],
+            properties: [{ name: '_protocol_token', value: 'tok_XYZ9876543210' }]
+          }
+        ]
+      };
+      const jpyAttrs = extractAttributionFromOrder(jpyOrder);
+      assert.equal(jpyAttrs[0].priceMinor, 4500, 'JPY has 0 decimal places: factor is 1');
+
+      const kwdOrder = {
+        id: 991127,
+        currency: 'KWD',
+        line_items: [
+          {
+            id: 306,
+            variant_id: 445566,
+            quantity: 1,
+            price: '15.000',
+            discount_allocations: [{ amount: '2.500' }],
+            properties: [{ name: '_protocol_token', value: 'tok_XYZ9876543210' }]
+          }
+        ]
+      };
+      const kwdAttrs = extractAttributionFromOrder(kwdOrder);
+      assert.equal(kwdAttrs[0].priceMinor, 12500, 'KWD has 3 decimal places: factor is 1000');
     });
   });
 

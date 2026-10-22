@@ -299,7 +299,7 @@ describe('HTTP Routes & Request Handlers (app/lib/protocols/routes.js)', () => {
 
       const forbiddenErr = new ProtocolServiceError('Forbidden', 'FORBIDDEN_OWNERSHIP_MISMATCH');
       const forbiddenRes = handleErrorResponse(forbiddenErr);
-      assert.equal(forbiddenRes.status, 403);
+      assert.equal(forbiddenRes.status, 404);
 
       const notFoundErr = new ProtocolServiceError('Not found', 'NOT_FOUND');
       const notFoundRes = handleErrorResponse(notFoundErr);
@@ -323,7 +323,7 @@ describe('HTTP Routes & Request Handlers (app/lib/protocols/routes.js)', () => {
         [DENIAL_REASONS.STARTER_CREATION_ADMIN_ONLY]: 403,
         [DENIAL_REASONS.STARTER_MODIFICATION_FORBIDDEN]: 403,
         [DENIAL_REASONS.ARCHIVED_PROTOCOL_READ_ONLY]: 403,
-        [DENIAL_REASONS.FORBIDDEN_OWNERSHIP_MISMATCH]: 403
+        [DENIAL_REASONS.FORBIDDEN_OWNERSHIP_MISMATCH]: 404 // 404 prevents ID enumeration for cross-owner access
       };
 
       for (const key of Object.keys(DENIAL_REASONS)) {
@@ -338,7 +338,8 @@ describe('HTTP Routes & Request Handlers (app/lib/protocols/routes.js)', () => {
           `DENIAL_REASON ${code} must map to HTTP ${expectedStatus}, but got ${res.status}`
         );
         const body = await res.json();
-        assert.equal(body.code, code);
+        const expectedCode = code === DENIAL_REASONS.FORBIDDEN_OWNERSHIP_MISMATCH ? 'NOT_FOUND' : code;
+        assert.equal(body.code, expectedCode);
       }
     });
   });
@@ -501,7 +502,10 @@ describe('HTTP Routes & Request Handlers (app/lib/protocols/routes.js)', () => {
       assert.ok(liquid.includes('<meta name="robots" content="noindex, nofollow">'));
     });
 
-    it('displays practitioner banner when logged_in_customer_id matches practitioner', async () => {
+    it('displays practitioner banner when logged_in_customer_id matches practitioner with approved profile (Fix 6a)', async () => {
+      // Profile has isApproved = true
+      db.state.profiles[0].isApproved = true;
+
       const params = {
         shop: testShop,
         token: testProtocol.token,
@@ -516,6 +520,51 @@ describe('HTTP Routes & Request Handlers (app/lib/protocols/routes.js)', () => {
       assert.equal(res.status, 200);
       const liquid = await res.text();
       assert.ok(liquid.includes("You're signed in as a professional. Clients will see retail prices."));
+    });
+
+    it('does NOT display practitioner banner when practitioner profile is NOT approved (Fix 6a)', async () => {
+      // Profile has isApproved = false
+      db.state.profiles[0].isApproved = false;
+
+      const params = {
+        shop: testShop,
+        token: testProtocol.token,
+        logged_in_customer_id: '112233',
+        timestamp: '1729500000'
+      };
+      const signature = calculateAppProxySignature(params, apiSecret);
+      const url = `https://${testShop}/apps/protocols?shop=${testShop}&token=${testProtocol.token}&logged_in_customer_id=112233&timestamp=1729500000&signature=${signature}`;
+
+      const res = await handleAppProxyRequest(db, new Request(url), { apiSecret });
+
+      assert.equal(res.status, 200);
+      const liquid = await res.text();
+      assert.equal(liquid.includes("You're signed in as a professional. Clients will see retail prices."), false, 'Unapproved practitioner must NOT see professional banner');
+    });
+
+    it('enforces rate limiting by default when no rateLimiter option is provided (Fix 3)', async () => {
+      // Uses module-level default limiter: 60 requests/min
+      // Send 60 requests that succeed, then 61st must yield 429
+      const params = {
+        shop: testShop,
+        token: testProtocol.token,
+        timestamp: '1729500000'
+      };
+      const signature = calculateAppProxySignature(params, apiSecret);
+      const url = `https://${testShop}/apps/protocols?shop=${testShop}&token=${testProtocol.token}&timestamp=1729500000&signature=${signature}`;
+
+      let lastRes = null;
+      for (let i = 0; i < 62; i++) {
+        lastRes = await handleAppProxyRequest(db, new Request(url, {
+          headers: { 'cf-connecting-ip': '198.51.100.99' }
+        }), { apiSecret });
+        if (lastRes.status === 429) break;
+      }
+
+      assert.equal(lastRes.status, 429, 'Default rate limiter must trigger 429 after threshold');
+      const body = await lastRes.text();
+      assert.ok(body.includes('Too Many Requests'));
+      assert.ok(lastRes.headers.get('Retry-After'));
     });
 
     it('renders friendly archived state when protocol status is archived', async () => {
@@ -660,7 +709,7 @@ describe('HTTP Routes & Request Handlers (app/lib/protocols/routes.js)', () => {
       assert.equal(data.code, 'PII_NOT_ALLOWED');
     });
 
-    it('rejects cross-owner creation attempt with 403 Forbidden', async () => {
+    it('rejects cross-owner creation attempt with 404 Not Found to prevent enumeration', async () => {
       const invalidOwnerPayload = {
         name: 'Sneaky Protocol',
         ownerType: 'customer',
@@ -671,9 +720,9 @@ describe('HTTP Routes & Request Handlers (app/lib/protocols/routes.js)', () => {
       };
 
       const res = await handleCreateProtocolRequest(db, practitionerUser, invalidOwnerPayload);
-      assert.equal(res.status, 403);
+      assert.equal(res.status, 404);
       const data = await res.json();
-      assert.equal(data.code, 'FORBIDDEN_OWNERSHIP_MISMATCH');
+      assert.equal(data.code, 'NOT_FOUND');
     });
   });
 
@@ -705,11 +754,11 @@ describe('HTTP Routes & Request Handlers (app/lib/protocols/routes.js)', () => {
       assert.equal(data.lines.length, 1);
     });
 
-    it('denies access with 403 Forbidden to another practitioner', async () => {
+    it('denies access with 404 Not Found to another practitioner to prevent ID enumeration', async () => {
       const res = await handleGetProtocolRequest(db, otherPractitionerUser, sampleProtocol.id);
-      assert.equal(res.status, 403);
+      assert.equal(res.status, 404);
       const data = await res.json();
-      assert.equal(data.code, 'FORBIDDEN_OWNERSHIP_MISMATCH');
+      assert.equal(data.code, 'NOT_FOUND');
     });
 
     it('returns 404 Not Found for non-existent protocol ID', async () => {
@@ -760,11 +809,37 @@ describe('HTTP Routes & Request Handlers (app/lib/protocols/routes.js)', () => {
       assert.equal(data.lines[0].variantGid, 'gid://shopify/ProductVariant/2');
     });
 
-    it('prevents non-owner from updating someone else protocol (403)', async () => {
+    it('prevents non-owner from updating someone else protocol (404 Not Found to prevent enumeration)', async () => {
       const res = await handleUpdateProtocolRequest(db, otherPractitionerUser, existingProto.id, {
         name: 'Hacked Protocol'
       });
-      assert.equal(res.status, 403);
+      assert.equal(res.status, 404);
+      const data = await res.json();
+      assert.equal(data.code, 'NOT_FOUND');
+    });
+
+    it('authorizes before validating so unauthorized callers receive 404 instead of validation errors (Fix 6d)', async () => {
+      const res = await handleUpdateProtocolRequest(db, otherPractitionerUser, existingProto.id, {
+        name: '' // invalid empty name
+      });
+      assert.equal(res.status, 404, 'Must return 404 Not Found before validating input');
+      const data = await res.json();
+      assert.equal(data.code, 'NOT_FOUND');
+    });
+
+    it('ignores or strips sourceProtocolId on direct create/update by non-admin (Fix 6b)', async () => {
+      const payloadWithSource = {
+        name: 'My New Routine',
+        sourceProtocolId: 'proto_someone_elses_starter',
+        lines: [
+          { variantGid: 'gid://shopify/ProductVariant/55', quantity: 1 }
+        ]
+      };
+
+      const res = await handleCreateProtocolRequest(db, practitionerUser, payloadWithSource);
+      assert.equal(res.status, 201);
+      const data = await res.json();
+      assert.equal(data.sourceProtocolId, null, 'Non-admin cannot supply sourceProtocolId on direct create');
     });
   });
 
@@ -838,9 +913,11 @@ describe('HTTP Routes & Request Handlers (app/lib/protocols/routes.js)', () => {
       assert.equal(data.status, 'active');
     });
 
-    it('prevents non-owner from archiving another protocol (403)', async () => {
+    it('prevents non-owner from archiving another protocol (404 Not Found to prevent enumeration)', async () => {
       const res = await handleArchiveProtocolRequest(db, otherPractitionerUser, activeProto.id);
-      assert.equal(res.status, 403);
+      assert.equal(res.status, 404);
+      const data = await res.json();
+      assert.equal(data.code, 'NOT_FOUND');
     });
   });
 
@@ -850,7 +927,7 @@ describe('HTTP Routes & Request Handlers (app/lib/protocols/routes.js)', () => {
       db = createMockDb();
     });
 
-    function createSignedWebhookRequest(topic, payload) {
+    function createSignedWebhookRequest(topic, payload, extraHeaders = {}) {
       const rawBody = JSON.stringify(payload);
       const hmac = crypto
         .createHmac('sha256', apiSecret)
@@ -863,7 +940,9 @@ describe('HTTP Routes & Request Handlers (app/lib/protocols/routes.js)', () => {
           'Content-Type': 'application/json',
           'X-Shopify-Topic': topic,
           'X-Shopify-Hmac-Sha256': hmac,
-          'X-Shopify-Shop-Domain': testShop
+          'X-Shopify-Shop-Domain': testShop,
+          'X-Shopify-Webhook-Id': 'wh_test_header_id_123',
+          ...extraHeaders
         },
         body: rawBody
       });
@@ -981,6 +1060,55 @@ describe('HTTP Routes & Request Handlers (app/lib/protocols/routes.js)', () => {
 
       const res = await handleWebhookRequest(db, req, { apiSecret });
       assert.equal(res.status, 400);
+    });
+
+    it('rejects orders/paid webhook missing X-Shopify-Webhook-Id header with 400 Bad Request (Fix 1b)', async () => {
+      const payload = { shop_domain: testShop, id: 991122 };
+      const rawBody = JSON.stringify(payload);
+      const hmac = crypto.createHmac('sha256', apiSecret).update(Buffer.from(rawBody, 'utf8')).digest('base64');
+
+      const req = new Request('https://app.test/api/webhooks', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Shopify-Topic': 'orders/paid',
+          'X-Shopify-Hmac-Sha256': hmac
+        },
+        body: rawBody
+      });
+
+      const res = await handleWebhookRequest(db, req, { apiSecret });
+      assert.equal(res.status, 400);
+      const data = await res.json();
+      assert.equal(data.code, 'MISSING_WEBHOOK_ID');
+    });
+
+    it('returns 500 JSON when a webhook handler throws an error (Fix 2)', async () => {
+      const failingDb = {
+        query: async () => {
+          throw new Error('Database connection dropped during webhook execution');
+        }
+      };
+
+      const payload = { shop_domain: testShop };
+      const rawBody = JSON.stringify(payload);
+      const hmac = crypto.createHmac('sha256', apiSecret).update(Buffer.from(rawBody, 'utf8')).digest('base64');
+
+      const req = new Request('https://app.test/api/webhooks', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Shopify-Topic': 'shop/redact',
+          'X-Shopify-Hmac-Sha256': hmac
+        },
+        body: rawBody
+      });
+
+      const res = await handleWebhookRequest(failingDb, req, { apiSecret });
+      assert.equal(res.status, 500);
+      const data = await res.json();
+      assert.equal(data.error, 'Webhook processing failed');
+      assert.equal(data.retryable, true);
     });
   });
 });

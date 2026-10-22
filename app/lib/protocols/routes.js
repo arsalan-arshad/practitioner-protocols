@@ -57,7 +57,7 @@ export function getHeader(req, headerName) {
   return null;
 }
 
-const DENIAL_STATUS_MAP = {
+export const DENIAL_STATUS_MAP = Object.freeze({
   [DENIAL_REASONS.UNAUTHENTICATED]: 401,
   [DENIAL_REASONS.UNAUTHORIZED_ROLE]: 403,
   [DENIAL_REASONS.INVALID_ACTION]: 400,
@@ -66,8 +66,19 @@ const DENIAL_STATUS_MAP = {
   [DENIAL_REASONS.STARTER_CREATION_ADMIN_ONLY]: 403,
   [DENIAL_REASONS.STARTER_MODIFICATION_FORBIDDEN]: 403,
   [DENIAL_REASONS.ARCHIVED_PROTOCOL_READ_ONLY]: 403,
-  [DENIAL_REASONS.FORBIDDEN_OWNERSHIP_MISMATCH]: 403
-};
+  [DENIAL_REASONS.FORBIDDEN_OWNERSHIP_MISMATCH]: 404 // 404 prevents ID enumeration for cross-owner access
+});
+
+// Module-level default rate limiter (Fix 3)
+let defaultProxyRateLimiter = createRateLimiter({ windowMs: 60000, maxRequests: 60 });
+
+export function setDefaultProxyRateLimiter(limiter) {
+  defaultProxyRateLimiter = limiter;
+}
+
+export function getDefaultProxyRateLimiter() {
+  return defaultProxyRateLimiter;
+}
 
 /**
  * Converts domain/service errors into appropriate HTTP JSON responses.
@@ -88,6 +99,18 @@ export function handleErrorResponse(err) {
 
   if (err instanceof ProtocolServiceError || err?.name === 'ProtocolServiceError') {
     const status = DENIAL_STATUS_MAP[err.code] || (err.code === 'NOT_FOUND' ? 404 : 400);
+
+    // Cross-owner access maps to 404 NOT_FOUND to prevent protocol ID enumeration (Fix 6c)
+    if (err.code === DENIAL_REASONS.FORBIDDEN_OWNERSHIP_MISMATCH) {
+      return Response.json(
+        {
+          error: 'Protocol not found',
+          code: 'NOT_FOUND',
+          details: null
+        },
+        { status: 404 }
+      );
+    }
 
     return Response.json(
       {
@@ -118,6 +141,7 @@ export function handleErrorResponse(err) {
  * @returns {Promise<Response>}
  */
 export async function handleAppProxyRequest(db, request, { apiSecret, rateLimiter } = {}) {
+  const activeRateLimiter = rateLimiter !== undefined ? rateLimiter : defaultProxyRateLimiter;
   let urlObj;
   if (typeof request === 'string') {
     urlObj = new URL(request, 'https://proxy.test');
@@ -159,12 +183,12 @@ export async function handleAppProxyRequest(db, request, { apiSecret, rateLimite
     }
   }
 
-  // 3. Check Rate Limit if configured
-  if (rateLimiter) {
+  // 3. Check Rate Limit (defaults to module-level default limiter unless explicitly disabled with null/false)
+  if (activeRateLimiter) {
     // TRUSTED PROXY ASSUMPTION:
     // We assume this application is deployed behind a trusted reverse proxy (such as Shopify App Proxy
-    // or Cloudflare) which sanitizes incoming client headers and securely forwards the true remote IP in
-    // CF-Connecting-IP, X-Real-IP, or the leftmost entry of X-Forwarded-For. Downstream spoofing is prevented.
+    // or Cloudflare) which sanitizes incoming client headers. getClientIp uses CF-Connecting-IP or
+    // the RIGHTMOST entry of X-Forwarded-For appended by the nearest trusted reverse proxy.
     const clientIp = getClientIp(request?.headers);
     const clientKey = createRateLimitKey('proxy', shop || 'storefront', clientIp);
 
@@ -172,22 +196,22 @@ export async function handleAppProxyRequest(db, request, { apiSecret, rateLimite
     let retryAfterSeconds = 60;
     let rateLimitResult = null;
 
-    if (typeof rateLimiter.isRateLimited === 'function') {
-      rateLimitResult = rateLimiter.isRateLimited(clientKey);
+    if (typeof activeRateLimiter.isRateLimited === 'function') {
+      rateLimitResult = activeRateLimiter.isRateLimited(clientKey);
       isLimited = rateLimitResult.limited;
       retryAfterSeconds = rateLimitResult.retryAfterSeconds;
-    } else if (typeof rateLimiter.isAllowed === 'function') {
-      isLimited = !rateLimiter.isAllowed(clientKey);
-    } else if (typeof rateLimiter.check === 'function') {
-      const chk = rateLimiter.check(clientKey);
+    } else if (typeof activeRateLimiter.isAllowed === 'function') {
+      isLimited = !activeRateLimiter.isAllowed(clientKey);
+    } else if (typeof activeRateLimiter.check === 'function') {
+      const chk = activeRateLimiter.check(clientKey);
       if (typeof chk === 'boolean') {
         isLimited = !chk;
       } else if (chk && typeof chk === 'object') {
         isLimited = chk.limited === true;
         if (chk.retryAfterSeconds) retryAfterSeconds = chk.retryAfterSeconds;
       }
-    } else if (typeof rateLimiter === 'function') {
-      const res = await rateLimiter(clientKey, request);
+    } else if (typeof activeRateLimiter === 'function') {
+      const res = await activeRateLimiter(clientKey, request);
       if (typeof res === 'boolean') {
         isLimited = !res;
       } else if (res && typeof res === 'object') {
@@ -204,7 +228,7 @@ export async function handleAppProxyRequest(db, request, { apiSecret, rateLimite
         'X-Robots-Tag': 'noindex, nofollow'
       };
       if (rateLimitResult) {
-        Object.assign(headers, getRateLimitHeaders(rateLimitResult, rateLimiter.maxRequests || 60));
+        Object.assign(headers, getRateLimitHeaders(rateLimitResult, activeRateLimiter.maxRequests || 60));
       }
       return new Response(liquidBody, {
         status: 429,
@@ -219,26 +243,27 @@ export async function handleAppProxyRequest(db, request, { apiSecret, rateLimite
     protocol = await getProtocolByToken(db, { shop, token: token.trim() });
   }
 
-  // 5. Check if logged-in practitioner previewing protocol
+  // 5. Check if logged-in practitioner previewing protocol (Fix 6a: requires isApproved = true)
   const customerGid = getLoggedInCustomerGid(queryParams);
   let isLoggedInPractitioner = false;
 
-  if (customerGid) {
-    if (protocol && (protocol.createdBy === customerGid || protocol.ownerId === customerGid)) {
-      isLoggedInPractitioner = true;
-    } else if (db && typeof db.query === 'function') {
-      try {
-        const numericId = String(customerGid).replace(/^gid:\/\/shopify\/Customer\//, '');
-        const profileRes = await db.query(
-          'SELECT "id" FROM "PractitionerProfile" WHERE "shop" = $1 AND ("ownerGid" = $2 OR "ownerGid" = $3)',
-          [shop, customerGid, numericId]
-        );
-        if (profileRes?.rows?.length > 0) {
+  if (customerGid && db && typeof db.query === 'function') {
+    try {
+      const numericId = String(customerGid).replace(/^gid:\/\/shopify\/Customer\//, '');
+      const profileRes = await db.query(
+        'SELECT "id", "isApproved" FROM "PractitionerProfile" WHERE "shop" = $1 AND ("ownerGid" = $2 OR "ownerGid" = $3)',
+        [shop, customerGid, numericId]
+      );
+      const isApproved = Boolean(profileRes?.rows?.[0]?.isApproved);
+      if (isApproved) {
+        if (protocol && (protocol.createdBy === customerGid || protocol.ownerId === customerGid)) {
+          isLoggedInPractitioner = true;
+        } else if (profileRes?.rows?.length > 0) {
           isLoggedInPractitioner = true;
         }
-      } catch {
-        // Non-fatal fallback
       }
+    } catch {
+      // Non-fatal fallback
     }
   }
 
@@ -653,32 +678,59 @@ export async function handleWebhookRequest(db, request, { apiSecret } = {}) {
   }
 
   const normalizedTopic = topic.toLowerCase().trim();
-  let result;
 
-  switch (normalizedTopic) {
-    case 'customers/data_request':
-      result = await handleCustomersDataRequest(db, payload);
-      break;
-    case 'customers/redact':
-      result = await handleCustomersRedact(db, payload);
-      break;
-    case 'shop/redact':
-      result = await handleShopRedact(db, payload);
-      break;
-    case 'app/uninstalled':
-      result = await handleAppUninstalled(db, payload);
-      break;
-    case 'orders/paid':
-      result = await handleOrdersPaid(db, payload, { shop: shopHeader || undefined });
-      break;
-    default:
-      result = {
-        handled: false,
-        topic,
-        message: `Unhandled topic: ${topic}`
-      };
-      break;
+  // Fix 1b: orders/paid requires X-Shopify-Webhook-Id header for idempotency
+  const webhookIdHeader = getHeader(request, 'x-shopify-webhook-id');
+  if (normalizedTopic === 'orders/paid' && !webhookIdHeader) {
+    return Response.json(
+      { error: 'Missing X-Shopify-Webhook-Id header', code: 'MISSING_WEBHOOK_ID' },
+      { status: 400 }
+    );
   }
 
-  return Response.json({ success: true, topic, result }, { status: 200 });
+  // Fix 2: Wrap handler dispatch in try/catch to ensure errors propagate as retryable 500 JSON
+  try {
+    let result;
+
+    switch (normalizedTopic) {
+      case 'customers/data_request':
+        result = await handleCustomersDataRequest(db, payload);
+        break;
+      case 'customers/redact':
+        result = await handleCustomersRedact(db, payload);
+        break;
+      case 'shop/redact':
+        result = await handleShopRedact(db, payload);
+        break;
+      case 'app/uninstalled':
+        result = await handleAppUninstalled(db, payload);
+        break;
+      case 'orders/paid':
+        result = await handleOrdersPaid(db, payload, {
+          shop: shopHeader || undefined,
+          webhookId: webhookIdHeader
+        });
+        break;
+      default:
+        result = {
+          handled: false,
+          topic,
+          message: `Unhandled topic: ${topic}`
+        };
+        break;
+    }
+
+    return Response.json({ success: true, topic, result }, { status: 200 });
+  } catch (err) {
+    // Non-sensitive error logging (no payloads, no secrets)
+    console.error(`[Webhook] Error processing ${topic}: ${err?.message || 'Unknown error'}`);
+    return Response.json(
+      {
+        error: 'Webhook processing failed',
+        topic,
+        retryable: true
+      },
+      { status: 500 }
+    );
+  }
 }

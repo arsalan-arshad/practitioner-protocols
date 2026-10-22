@@ -2,7 +2,7 @@
 
 > **Open-Source (MIT)** | Built for the Shopify Merchant & Developer Community | Open for PRs & Discussions
 >
-> ⚙️ **Status: Pure Engine Modules Verified (227/227 Unit Tests Passing)** | **PostgreSQL Integration Tests Configured** | **Awaiting Dev Store with B2B for Spikes S1–S5 & Full App Harness**
+> ⚙️ **Status: Pure Engine Modules Verified (238/238 Unit Tests Passing)** | **PostgreSQL Integration Tests Configured (Awaiting Live DB Verification)** | **Awaiting Dev Store with B2B for Spikes S1–S5 & Full App Harness**
 
 ---
 
@@ -14,7 +14,7 @@
 
 **Privacy by design:** Protocols never accept or store client/patient information. The validator strictly enforces a zero-PII barrier (`PII_NOT_ALLOWED`) both on top-level keys and within nested line items. Attribution is tracked solely via aggregate monthly counters.
 
-**Current build stage:** The pure engine logic, security controls, cryptographic primitives, Liquid renderers, rate limiters, validation barriers, and PostgreSQL database queries are fully built and covered by 227 automated tests. Full UI/screens, app harness (`shopify.app.toml`, server entry), and live storefront testing are intentionally staged behind Spikes S1–S5 (see `docs/SPEC.md` §4), which require a Shopify development store with B2B features enabled.
+**Current build stage:** The pure engine logic, security controls, cryptographic primitives, Liquid renderers, rate limiters, validation barriers, and PostgreSQL database queries are fully built and covered by 238 automated tests. Full UI/screens, app harness (`shopify.app.toml`, server entry), and live storefront testing are intentionally staged behind Spikes S1–S5 (see `docs/SPEC.md` §4), which require a Shopify development store with B2B features enabled.
 
 ---
 
@@ -78,17 +78,17 @@
 - **App Settings:** Configures storefront identity mode (`tag` vs `company`), custom legal disclaimers, and print instructions.
 
 ### I. Security Hardening & Rate Limiter ([`app/lib/protocols/rate-limit.js`](app/lib/protocols/rate-limit.js))
-- In-memory sliding-window log rate limiter with zero external dependencies, integrated directly into the App Proxy controller.
-- Prevents token enumeration, scraping, and brute-force attacks on public App Proxy endpoints.
+- In-memory sliding-window log rate limiter with zero external dependencies, instantiated by default in `routes.js`.
+- Prevents token enumeration, scraping, and brute-force attacks on public App Proxy endpoints (returns Liquid 429 error template after threshold).
 - Auto-pruning with `maxKeys` eviction cap and unreferenced cleanup intervals to prevent memory leaks.
-- Employs RFC-compliant HTTP headers (`X-RateLimit-Limit`, `X-RateLimit-Remaining`, `Retry-After`) and returns Liquid 429 error template.
-- Documented reverse-proxy trust assumptions for `x-forwarded-for` extraction.
+- Employs RFC-compliant HTTP headers (`X-RateLimit-Limit`, `X-RateLimit-Remaining`, `Retry-After`).
+- Anti-spoofing client IP extraction: prefers `CF-Connecting-IP`, otherwise the rightmost `X-Forwarded-For` entry (appended by trusted edge proxy), otherwise `X-Real-IP`, otherwise a shared `'unknown'` bucket. Trusted proxy architecture assumes edge reverse proxy strips/appends incoming client headers.
 
 ### J. Mandatory Compliance Webhooks ([`app/lib/protocols/webhooks.js`](app/lib/protocols/webhooks.js))
-- **Webhook Idempotency:** Tracks processed webhook IDs in `ProcessedWebhook` table to prevent duplicate order attribution on Shopify webhook retries.
-- `customers/data_request`: Reports practitioner profile and protocol references. For ordinary shoppers, honestly returns `clientPii: null` and `clientDataStored: false`, reflecting the app's zero-PII architecture.
+- **Atomic Webhook Idempotency & Rollback:** Tracks processed webhook IDs in `ProcessedWebhook` table inside the exact same database transaction as monthly stat upserts. If stat counting fails, the idempotency marker is rolled back so Shopify delivery retries can succeed. True duplicates return `{ updatedCount: 0, duplicate: true }`. Requires `X-Shopify-Webhook-Id` header (rejects missing header with 400 on `orders/paid`). Zero order IDs or customer IDs are ever stored in `ProcessedWebhook`. Includes parameterized retention pruning (`pruneProcessedWebhooks`).
+- `customers/data_request`: Shopify discards compliance webhook response bodies. By architectural design, the app accepts zero shopper or patient PII (`clientPii: null`, `clientDataStored: false`). Practitioner data (practice profiles and authored protocols) can be inspected, but an automated out-of-band delivery channel to merchants is not yet implemented.
 - `customers/redact`: Tag mode removes practitioner profile and archives/deletes protocols; Company mode preserves company protocols and scrubs personal creator references. Propagates database errors to trigger Shopify retries.
-- `shop/redact`: Deletes all shop protocols, lines, stats, profiles, settings, and sessions. Propagates failures.
+- `shop/redact`: Deletes all shop protocols, lines, stats, profiles, settings, sessions, and `ProcessedWebhook` records. Propagates failures.
 - `app/uninstalled`: Revokes all active shop sessions immediately.
 
 ---
@@ -160,14 +160,14 @@ npm install
 The project features a deterministic test suite using native Node.js test runner (`node:test`):
 
 ```bash
-# Run all 227 pure unit tests (zero external network dependencies, ~80ms):
+# Run all 238 pure unit tests (zero external network dependencies, ~75ms):
 npm test
 
 # Run PostgreSQL live database integration tests:
 npm run test:db
 ```
 
-> **Database Tests Note:** `npm run test:db` requires PostgreSQL running on `localhost:5432` with a `DATABASE_URL` configured, and `pg` installed (`npm install --save-dev pg`). If the database or driver is unavailable, the test runner cleanly skips with a clear diagnostic notice instead of failing silently.
+> **Database Tests & Migrations Note:** `npm run test:db` requires PostgreSQL running on `localhost:5432` with a `DATABASE_URL` configured, and `pg` installed (`npm install --save-dev pg`). If the database or driver is unavailable, the test runner cleanly skips with a clear diagnostic notice instead of failing silently. Note: DB integration tests and migrations are NOT yet verified against a real Postgres instance.
 
 ### Applying Migrations (PostgreSQL)
 When running against a live PostgreSQL database, apply the versioned migrations in order:
@@ -234,10 +234,10 @@ psql $DATABASE_URL -f prisma/migrations/20261022_add_currency_to_stat_unique_and
 1. **Zero Client/Patient PII:** Validated across all layers. The app rejects client-identifying or clinical keys (`patientName`, `clientEmail`, `medicalDiagnosis`, etc.) both at top level and inside line items (`PII_NOT_ALLOWED`).
 2. **Fail-Closed Cryptography:** All HMAC signatures (App Proxy and Webhooks) are verified using `crypto.timingSafeEqual`. App Proxy routes fail closed with HTTP 500 when `apiSecret` is missing and HTTP 401 when signatures are invalid.
 3. **Liquid Injection Defense:** Delimiters (`{{`, `}}`, `{%`, `%}`) in user-supplied strings are neutralized via HTML entities and Unicode escapes, preventing server-side template injection when Shopify parses App Proxy Liquid.
-4. **100% Parameterized SQL:** Database interactions use parameterized queries (`$1, $2, ...`) inside a connection pool safe `withTransaction` wrapper ensuring single-client checkout.
+4. **Fully Parameterized SQL:** Database interactions use parameterized queries (`$1, $2, ...`) inside a connection pool safe `withTransaction` wrapper ensuring single-client checkout and atomic rollbacks.
 5. **No Search Indexing:** App Proxy responses unconditionally include `<meta name="robots" content="noindex, nofollow">` to prevent indexing of recommendation links.
-6. **Rate Limiting:** Public proxy routes are guarded by sliding-window rate limiting keyed by client IP with proxy-aware fallbacks.
-7. **Webhook Idempotency & Error Handling:** Webhooks track IDs in `ProcessedWebhook` to prevent double-counting. Redaction errors propagate non-2xx codes so Shopify retries.
+6. **Anti-Spoofing Rate Limiting:** Public proxy routes are guarded by sliding-window rate limiting enabled by default, using rightmost proxy IP extraction to prevent header spoofing.
+7. **Transactional Webhook Idempotency & Error Propagation:** Webhooks track `X-Shopify-Webhook-Id` atomically within the order attribution transaction. All webhook dispatch and database errors propagate retryable 5xx responses.
 
 ---
 

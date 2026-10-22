@@ -175,7 +175,8 @@ export async function getProtocolByToken(db, { shop, token }) {
  *   action?: string
  * }} options
  */
-export async function getProtocolById(db, { shop, user, protocolId, action = 'read' }) {
+export async function getProtocolById(db, { shop, user, protocolId, action = 'read', forUpdate = false }) {
+  const lockClause = forUpdate ? 'FOR UPDATE OF p' : '';
   const sql = `
     SELECT p.*,
       COALESCE(
@@ -193,6 +194,7 @@ export async function getProtocolById(db, { shop, user, protocolId, action = 're
     LEFT JOIN "ProtocolLine" pl ON p.id = pl."protocolId"
     WHERE p.shop = $1 AND p.id = $2
     GROUP BY p.id
+    ${lockClause}
   `;
 
   const result = await db.query(sql, [shop, protocolId]);
@@ -219,7 +221,7 @@ export async function getProtocolById(db, { shop, user, protocolId, action = 're
  *   input: any
  * }} options
  */
-export async function createProtocol(db, { shop, user, input }) {
+export async function createProtocol(db, { shop, user, input, isDuplicate = false }) {
   const access = canAccessProtocol(user, input, 'create');
   if (!access.allowed) {
     throw new ProtocolServiceError(`Cannot create protocol: ${access.reason}`, access.reason);
@@ -238,6 +240,11 @@ export async function createProtocol(db, { shop, user, input }) {
   }
 
   const sanitized = validation.sanitized;
+  // Non-admins cannot supply sourceProtocolId on direct create (only allowed via duplicateProtocol or by admin)
+  if (user.role !== 'admin' && !isDuplicate) {
+    sanitized.sourceProtocolId = null;
+  }
+
   const token = generateShareToken();
   const ownerType = input.ownerType || user.ownerType || (user.role === 'admin' ? 'company' : 'customer');
   const ownerId = input.ownerId || user.ownerId || (user.role === 'admin' ? 'brand' : user.id);
@@ -328,11 +335,12 @@ export async function duplicateProtocol(db, { shop, user, protocolId }) {
     }))
   };
 
-  return createProtocol(db, { shop, user, input: copyInput });
+  return createProtocol(db, { shop, user, input: copyInput, isDuplicate: true });
 }
 
 /**
  * Updates an existing protocol.
+ * Authorizes first using SELECT ... FOR UPDATE before input validation (Fix 6d).
  *
  * @param {any} db
  * @param {{
@@ -343,25 +351,31 @@ export async function duplicateProtocol(db, { shop, user, protocolId }) {
  * }} options
  */
 export async function updateProtocol(db, { shop, user, protocolId, input }) {
-  const validation = validateProtocolInput(input, {
-    isUpdate: true,
-    isAdmin: user.role === 'admin'
-  });
-
-  if (!validation.isValid) {
-    throw new ProtocolValidationError(
-      validation.errors.map(e => e.message).join('; '),
-      validation.errors[0]?.code || 'VALIDATION_FAILED',
-      validation.errors[0]?.field
-    );
-  }
-
-  const sanitized = validation.sanitized;
-
   return withTransaction(db, async (tx) => {
-    const existing = await getProtocolById(tx, { shop, user, protocolId, action: 'edit' });
+    // 1. Authorize FIRST using row lock (SELECT ... FOR UPDATE) to prevent race conditions
+    const existing = await getProtocolById(tx, { shop, user, protocolId, action: 'edit', forUpdate: true });
     if (!existing) {
       throw new ProtocolServiceError('Protocol not found', 'NOT_FOUND');
+    }
+
+    // 2. Validate input only AFTER authorizing caller
+    const validation = validateProtocolInput(input, {
+      isUpdate: true,
+      isAdmin: user.role === 'admin'
+    });
+
+    if (!validation.isValid) {
+      throw new ProtocolValidationError(
+        validation.errors.map(e => e.message).join('; '),
+        validation.errors[0]?.code || 'VALIDATION_FAILED',
+        validation.errors[0]?.field
+      );
+    }
+
+    const sanitized = validation.sanitized;
+    // Non-admins cannot mutate sourceProtocolId (Fix 6b)
+    if (user.role !== 'admin') {
+      sanitized.sourceProtocolId = null;
     }
 
     const updateSql = `
@@ -483,26 +497,46 @@ export async function restoreProtocol(db, { shop, user, protocolId }) {
  *     priceMinor: number
  *   }>,
  *   month: string,
- *   currency?: string
+ *   currency?: string,
+ *   webhookId?: string
  * }} options
  */
-export async function recordOrderAttribution(db, { shop, attributions, month, currency = 'USD' }) {
-  if (!Array.isArray(attributions) || attributions.length === 0) {
-    return { updatedCount: 0 };
-  }
-
+export async function recordOrderAttribution(db, { shop, attributions, month, currency = 'USD', webhookId }) {
   // Group attributions by protocol token / id
   const grouped = new Map();
-  for (const attr of attributions) {
-    const key = attr.protocolToken;
-    if (!key) continue;
-    const existing = grouped.get(key) || { units: 0, revenueMinor: 0 };
-    existing.units += attr.quantity || 1;
-    existing.revenueMinor += attr.priceMinor || 0;
-    grouped.set(key, existing);
+  if (Array.isArray(attributions)) {
+    for (const attr of attributions) {
+      const key = attr.protocolToken;
+      if (!key) continue;
+      const existing = grouped.get(key) || { units: 0, revenueMinor: 0 };
+      existing.units += attr.quantity || 1;
+      existing.revenueMinor += attr.priceMinor || 0;
+      grouped.set(key, existing);
+    }
   }
 
   return withTransaction(db, async (tx) => {
+    // 1. Record webhook idempotency INSIDE the counting transaction (Fix 1a)
+    // Only header-provided webhookId is used (never order.id or customer.id)
+    if (webhookId) {
+      const res = await tx.query(`
+        INSERT INTO "ProcessedWebhook" ("id", "shop", "webhookId", "topic", "processedAt")
+        VALUES (gen_random_uuid()::text, $1, $2, 'orders/paid', NOW())
+        ON CONFLICT ("shop", "webhookId") DO NOTHING
+        RETURNING "id"
+      `, [shop, String(webhookId).trim()]);
+
+      const isNew = Boolean((res.rowCount && res.rowCount > 0) || (res.rows && res.rows.length > 0));
+      if (!isNew) {
+        // True duplicate: already processed and committed in a previous transaction
+        return { updatedCount: 0, duplicate: true };
+      }
+    }
+
+    if (grouped.size === 0) {
+      return { updatedCount: 0 };
+    }
+
     let updatedCount = 0;
 
     for (const [token, agg] of grouped.entries()) {

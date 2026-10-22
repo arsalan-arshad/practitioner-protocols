@@ -1,3 +1,35 @@
+export const CURRENCY_EXPONENTS = Object.freeze({
+  // ISO 4217 zero-decimal currencies
+  BIF: 0, CLP: 0, DJF: 0, GNF: 0, ISK: 0, JPY: 0, KMF: 0, KRW: 0,
+  PYG: 0, RWF: 0, UGX: 0, VND: 0, VUV: 0, XAF: 0, XOF: 0, XPF: 0,
+  // ISO 4217 three-decimal currencies
+  BHD: 3, IQD: 3, JOD: 3, KWD: 3, OMR: 3, TND: 3
+});
+
+/**
+ * Returns the minor currency decimal exponent (e.g. 0 for JPY, 3 for KWD, 2 for USD).
+ *
+ * @param {string} [currency='USD']
+ * @returns {number}
+ */
+export function getCurrencyExponent(currency = 'USD') {
+  const code = String(currency || '').trim().toUpperCase();
+  if (CURRENCY_EXPONENTS[code] !== undefined) {
+    return CURRENCY_EXPONENTS[code];
+  }
+  return 2;
+}
+
+/**
+ * Returns the multiplier factor to convert decimal units to integer minor units.
+ *
+ * @param {string} [currency='USD']
+ * @returns {number}
+ */
+export function getCurrencyFactor(currency = 'USD') {
+  return Math.pow(10, getCurrencyExponent(currency));
+}
+
 /**
  * Normalizes a variant GID to its numeric ID string if possible.
  * e.g. "gid://shopify/ProductVariant/12345" -> "12345"
@@ -204,10 +236,13 @@ function normalizeProperties(properties) {
  *   priceMinor: number
  * }>}
  */
-export function extractAttributionFromOrder(order) {
+export function extractAttributionFromOrder(order, options = {}) {
   if (!order || typeof order !== 'object') {
     return [];
   }
+
+  const currency = order.currency || order.presentment_currency || options.currency || 'USD';
+  const factor = getCurrencyFactor(currency);
 
   // Handle both REST webhook (line_items) and GraphQL (lineItems.nodes / lineItems)
   let rawLineItems = [];
@@ -249,44 +284,40 @@ export function extractAttributionFromOrder(order) {
       ? item.quantity
       : 1;
 
-    // Calculate priceMinor: net discounted line total in minor units (cents)
+    // Calculate priceMinor: net discounted line total in minor units (cents/sen/fils)
     let priceMinor = 0;
 
     if (item.discountedTotalSet?.shopMoney?.amount) {
       // 1. GraphQL discounted total for the whole line item
       const parsedFloat = parseFloat(item.discountedTotalSet.shopMoney.amount);
-      priceMinor = isNaN(parsedFloat) ? 0 : Math.round(parsedFloat * 100);
-    } else if (item.discounted_price !== undefined && item.discounted_price !== null) {
-      // 2. REST discounted unit price
-      const parsedFloat = parseFloat(String(item.discounted_price).replace(/[^0-9.-]/g, ''));
-      const unitDiscountedMinor = isNaN(parsedFloat) ? 0 : Math.round(parsedFloat * 100);
-      priceMinor = unitDiscountedMinor * quantity;
+      priceMinor = isNaN(parsedFloat) ? 0 : Math.round(parsedFloat * factor);
     } else {
-      // 3. REST price with total_discount or discount_allocations
+      // 2. REST price with discount_allocations (precedence) or legacy total_discount fallback
       let unitPriceMinor = 0;
       if (typeof item.priceMinor === 'number') {
         unitPriceMinor = item.priceMinor;
       } else if (item.price !== undefined && item.price !== null) {
         const parsedFloat = parseFloat(String(item.price).replace(/[^0-9.-]/g, ''));
-        unitPriceMinor = isNaN(parsedFloat) ? 0 : Math.round(parsedFloat * 100);
+        unitPriceMinor = isNaN(parsedFloat) ? 0 : Math.round(parsedFloat * factor);
       }
 
       let grossLineMinor = unitPriceMinor * quantity;
       let totalDiscountMinor = 0;
 
-      if (item.total_discount !== undefined && item.total_discount !== null) {
-        const parsedDiscount = parseFloat(String(item.total_discount).replace(/[^0-9.-]/g, ''));
-        if (!isNaN(parsedDiscount)) {
-          totalDiscountMinor = Math.round(parsedDiscount * 100);
-        }
-      } else if (Array.isArray(item.discount_allocations) && item.discount_allocations.length > 0) {
+      // Shopify docs: total_discount is deprecated. discount_allocations takes strict precedence.
+      if (Array.isArray(item.discount_allocations) && item.discount_allocations.length > 0) {
         for (const alloc of item.discount_allocations) {
           if (alloc && alloc.amount !== undefined) {
             const parsedAlloc = parseFloat(String(alloc.amount).replace(/[^0-9.-]/g, ''));
             if (!isNaN(parsedAlloc)) {
-              totalDiscountMinor += Math.round(parsedAlloc * 100);
+              totalDiscountMinor += Math.round(parsedAlloc * factor);
             }
           }
+        }
+      } else if (item.total_discount !== undefined && item.total_discount !== null) {
+        const parsedDiscount = parseFloat(String(item.total_discount).replace(/[^0-9.-]/g, ''));
+        if (!isNaN(parsedDiscount)) {
+          totalDiscountMinor = Math.round(parsedDiscount * factor);
         }
       }
 

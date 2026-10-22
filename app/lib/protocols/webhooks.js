@@ -91,6 +91,7 @@ export function extractCustomerId(payload) {
 /**
  * Records and checks webhook idempotency using a short-retention ProcessedWebhook table (zero PII).
  * Returns true if this is the first time the webhook is seen, or false if already processed.
+ * Errors propagate so transactions can roll back and Shopify can retry.
  *
  * @param {any} db Database client with query(sql, params) interface
  * @param {{ shop: string, webhookId: string, topic?: string }} params
@@ -101,36 +102,56 @@ export async function recordWebhookIdempotency(db, { shop, webhookId, topic = 'u
     return true;
   }
 
-  try {
-    const res = await db.query(`
-      INSERT INTO "ProcessedWebhook" ("id", "shop", "webhookId", "topic", "processedAt")
-      VALUES (gen_random_uuid()::text, $1, $2, $3, NOW())
-      ON CONFLICT ("shop", "webhookId") DO NOTHING
-      RETURNING "id"
-    `, [shop, String(webhookId).trim(), topic]);
+  const res = await db.query(`
+    INSERT INTO "ProcessedWebhook" ("id", "shop", "webhookId", "topic", "processedAt")
+    VALUES (gen_random_uuid()::text, $1, $2, $3, NOW())
+    ON CONFLICT ("shop", "webhookId") DO NOTHING
+    RETURNING "id"
+  `, [shop, String(webhookId).trim(), topic]);
 
-    const isNew = Boolean((res.rowCount && res.rowCount > 0) || (res.rows && res.rows.length > 0));
-    return isNew;
-  } catch {
-    // If table does not exist or db query fails in test mock, fallback gracefully
-    return true;
-  }
+  const isNew = Boolean((res.rowCount && res.rowCount > 0) || (res.rows && res.rows.length > 0));
+  return isNew;
+}
+
+/**
+ * Prunes ProcessedWebhook entries older than the retention threshold.
+ *
+ * @param {any} db Database client
+ * @param {number} [olderThanDays=7] Retention window in days (default: 7)
+ * @returns {Promise<{ rowCount: number }>}
+ */
+export async function pruneProcessedWebhooks(db, olderThanDays = 7) {
+  if (!db) return { rowCount: 0 };
+  const days = Math.max(1, parseInt(olderThanDays, 10) || 7);
+  const sql = `
+    DELETE FROM "ProcessedWebhook"
+    WHERE "processedAt" < NOW() - ($1 * INTERVAL '1 day')
+  `;
+  const res = await db.query(sql, [days]);
+  return { rowCount: res?.rowCount ?? res?.rows?.length ?? 0 };
 }
 
 /**
  * Handles customers/data_request webhook (SPEC §10).
- * Reports practitioner profile and protocol references for the specified customer ID.
  *
- * --- NOTE ON CUSTOMERS/DATA_REQUEST REALITY ---
- * Under GDPR/Shopify mandatory compliance, when a customer requests their data,
- * an app must return all personal data held for that customer.
- * In Practitioner Protocols, by architectural design (SPEC §6 & Privacy Rule 2):
- * 1. Zero shopper, client, or patient PII is ever accepted, stored, or processed.
- *    Individual orders are only aggregated into monthly protocol counters without customer IDs.
- * 2. The only customers who have records in this database are registered practitioners
- *    who author protocols.
- * 3. Therefore, for ordinary shoppers/patients, no record exists (clientPii: null, clientDataStored: false).
- *    For practitioners, only their professional profile and authored protocols are returned.
+ * --- HONEST GDPR COMPLIANCE & DATA REQUEST ARCHITECTURE ---
+ * 1. Shopify Discards Webhook Response Bodies:
+ *    Under Shopify's mandatory GDPR webhook specification, Shopify delivers `customers/data_request`
+ *    as a notification to the app server. Shopify completely discards any HTTP response body returned
+ *    by the app and does NOT relay it to the merchant or shopper.
+ *
+ * 2. Shopper/Patient Privacy:
+ *    Practitioner Protocols enforces an architectural zero-PII barrier. No shopper/patient names,
+ *    emails, addresses, health conditions, or order IDs are ever accepted or stored. Therefore,
+ *    for ordinary customer requests, the app returns clientPii: null and clientDataStored: false.
+ *
+ * 3. Practitioner Data Delivery Reality:
+ *    For registered practitioners (who author protocols), this function collates their practice
+ *    profile and authored protocols into a JSON structure. However, because Shopify discards
+ *    webhook responses, actual delivery of this export to the merchant or practitioner
+ *    (e.g. via direct transactional email to the store owner or an asynchronous downloadable
+ *    export in the merchant admin) is NOT YET IMPLEMENTED and would be required for full
+ *    out-of-band fulfillment.
  *
  * @param {any} db - Database client with query(sql, params) interface
  * @param {any} payload - Shopify customers/data_request webhook payload
@@ -453,7 +474,14 @@ export async function handleShopRedact(db, payload) {
     RETURNING "shop"
   `, [shop]);
 
-  // 6. Delete Sessions
+  // 6. Delete ProcessedWebhook records (Fix 1d)
+  const webhooksRes = await db.query(`
+    DELETE FROM "ProcessedWebhook"
+    WHERE "shop" = $1
+    RETURNING "id"
+  `, [shop]);
+
+  // 7. Delete Sessions
   const sessionsRes = await db.query(`
     DELETE FROM "Session"
     WHERE "shop" = $1
@@ -469,7 +497,8 @@ export async function handleShopRedact(db, payload) {
       protocols: protocolsRes.rowCount ?? protocolsRes.rows?.length ?? 0,
       profiles: profilesRes.rowCount ?? profilesRes.rows?.length ?? 0,
       settings: settingsRes.rowCount ?? settingsRes.rows?.length ?? 0,
-      sessions: sessionsRes.rowCount ?? sessionsRes.rows?.length ?? 0
+      sessions: sessionsRes.rowCount ?? sessionsRes.rows?.length ?? 0,
+      webhooks: webhooksRes.rowCount ?? webhooksRes.rows?.length ?? 0
     }
   };
 }
@@ -501,11 +530,11 @@ export async function handleAppUninstalled(db, payload) {
     };
   }
 
-  // Revoke/clean up active shop sessions
+  // Revoke/clean up active shop sessions (propagates errors so Shopify retries)
   const sessionsRes = await db.query(
     'DELETE FROM "Session" WHERE "shop" = $1 RETURNING "id"',
     [shop]
-  ).catch(() => ({ rowCount: 0, rows: [] }));
+  );
   const sessionsRevoked = sessionsRes.rowCount ?? sessionsRes.rows?.length ?? 0;
 
   // Record uninstallation timestamp
@@ -554,35 +583,12 @@ export async function handleOrdersPaid(db, payload, options = {}) {
   const shop = options.shop || extractShopDomain(payload) || '';
   const order = payload?.order || payload;
 
-  // Extract webhook ID from options, payload or order
+  // Extract webhook ID strictly from options (X-Shopify-Webhook-Id header)
+  // Fallbacks to order.id or customer.id are strictly forbidden to ensure zero PII persistence.
   const webhookId =
     options.webhookId ||
     options.webhook_id ||
-    payload?.webhook_id ||
-    payload?.webhookId ||
-    order?.id ||
     '';
-
-  // Check idempotency if webhook ID and shop are present
-  if (shop && webhookId) {
-    const isNew = await recordWebhookIdempotency(db, {
-      shop,
-      webhookId: String(webhookId),
-      topic: 'orders/paid'
-    });
-
-    if (!isNew) {
-      return {
-        success: true,
-        duplicate: true,
-        shop,
-        month: options.month || '',
-        currency: options.currency || order?.currency || order?.presentment_currency || 'USD',
-        attributions: [],
-        updatedCount: 0
-      };
-    }
-  }
 
   const attributions = extractAttributionFromOrder(order);
 
@@ -611,9 +617,19 @@ export async function handleOrdersPaid(db, payload, options = {}) {
     };
   }
 
-  if (attributions.length === 0) {
+  // Idempotency marker is recorded INSIDE the same database transaction as the stat counters
+  const result = await recordOrderAttribution(db, {
+    shop,
+    attributions,
+    month,
+    currency,
+    webhookId
+  });
+
+  if (result.duplicate) {
     return {
       success: true,
+      duplicate: true,
       shop,
       month,
       currency,
@@ -621,13 +637,6 @@ export async function handleOrdersPaid(db, payload, options = {}) {
       updatedCount: 0
     };
   }
-
-  const result = await recordOrderAttribution(db, {
-    shop,
-    attributions,
-    month,
-    currency
-  });
 
   return {
     success: true,

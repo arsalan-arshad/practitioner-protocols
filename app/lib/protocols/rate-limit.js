@@ -344,9 +344,22 @@ export function createRateLimitKey(...parts) {
  * Safely extracts client IP address from standard reverse proxy headers.
  * Extracts only technical network address with zero client PII.
  *
+ * --- TRUSTED PROXY SECURITY ASSUMPTION (Fix 3) ---
+ * Attackers can forge arbitrary leftmost entries in the `X-Forwarded-For` header
+ * (e.g. `X-Forwarded-For: fake_ip`). Only the RIGHTMOST entry is appended and guaranteed
+ * by the immediate trusted reverse proxy (e.g. Cloudflare, Shopify App Proxy infrastructure,
+ * or AWS ALB).
+ *
+ * Precedence Rule:
+ * 1. `CF-Connecting-IP`: Single validated client IP provided by Cloudflare edge.
+ * 2. `X-Forwarded-For`: Rightmost entry appended by the nearest trusted reverse proxy.
+ * 3. `X-Real-IP`: Upstream proxy single IP header.
+ * 4. `connection.remoteAddress`: Direct socket address if available.
+ * 5. Fallback: Shared `'unknown'` bucket (preventing attacker key-space manipulation).
+ *
  * @param {Record<string, string | string[]> | Headers} [headers={}]
  * @param {{ remoteAddress?: string, socket?: { remoteAddress?: string } }} [connection={}]
- * @returns {string} Sanitized client IP address
+ * @returns {string} Sanitized client IP address or 'unknown'
  */
 export function getClientIp(headers = {}, connection = {}) {
   const normalized = {};
@@ -363,16 +376,27 @@ export function getClientIp(headers = {}, connection = {}) {
     }
   }
 
-  const candidate =
-    normalized['cf-connecting-ip'] ||
-    normalized['x-real-ip'] ||
-    normalized['x-forwarded-for'] ||
-    connection.remoteAddress ||
-    connection.socket?.remoteAddress ||
-    '127.0.0.1';
+  let rawIp = '';
 
-  const rawIp = String(candidate).split(',')[0].trim();
-  return rawIp.replace(/^::ffff:/, '') || '127.0.0.1';
+  if (normalized['cf-connecting-ip']) {
+    rawIp = String(normalized['cf-connecting-ip']).trim();
+  } else if (normalized['x-forwarded-for']) {
+    const xffParts = String(normalized['x-forwarded-for']).split(',');
+    // Use the rightmost entry appended by the nearest trusted reverse proxy
+    rawIp = xffParts[xffParts.length - 1].trim();
+  } else if (normalized['x-real-ip']) {
+    rawIp = String(normalized['x-real-ip']).trim();
+  } else if (connection?.remoteAddress) {
+    rawIp = String(connection.remoteAddress).trim();
+  } else if (connection?.socket?.remoteAddress) {
+    rawIp = String(connection.socket.remoteAddress).trim();
+  }
+
+  if (!rawIp) {
+    return 'unknown';
+  }
+
+  return rawIp.replace(/^::ffff:/, '') || 'unknown';
 }
 
 /**

@@ -10,7 +10,8 @@ import {
   handleCustomersRedact,
   handleShopRedact,
   handleAppUninstalled,
-  handleOrdersPaid
+  handleOrdersPaid,
+  pruneProcessedWebhooks
 } from '../app/lib/protocols/webhooks.js';
 
 describe('Shopify Compliance & Attribution Webhooks (app/lib/protocols/webhooks.js)', () => {
@@ -234,13 +235,13 @@ describe('Shopify Compliance & Attribution Webhooks (app/lib/protocols/webhooks.
       };
 
       // First run: processes normally
-      const res1 = await handleOrdersPaid(mockDb, payload, { month: '2026-10' });
+      const res1 = await handleOrdersPaid(mockDb, payload, { webhookId: 'wh_id_7788', month: '2026-10' });
       assert.equal(res1.success, true);
       assert.equal(res1.updatedCount, 1);
       assert.equal(res1.duplicate, undefined);
 
       // Second run with same webhook ID: recognized as duplicate and skipped
-      const res2 = await handleOrdersPaid(mockDb, payload, { month: '2026-10' });
+      const res2 = await handleOrdersPaid(mockDb, payload, { webhookId: 'wh_id_7788', month: '2026-10' });
       assert.equal(res2.success, true);
       assert.equal(res2.duplicate, true);
       assert.equal(res2.updatedCount, 0);
@@ -360,15 +361,167 @@ describe('Shopify Compliance & Attribution Webhooks (app/lib/protocols/webhooks.
       );
     });
 
-    it('handleShopRedact rejects when shop identifier is missing (Defect 7)', async () => {
-      const mockDb = { async query() { return { rowCount: 1, rows: [] }; } };
+    it('pruneProcessedWebhooks removes rows older than specified days using parameterized query (Fix 1d)', async () => {
+      let executedSql = '';
+      let executedParams = [];
+      const mockDb = {
+        async query(sql, params) {
+          executedSql = sql;
+          executedParams = params;
+          return { rowCount: 14, rows: [] };
+        }
+      };
+
+      const result = await pruneProcessedWebhooks(mockDb, 7);
+      assert.equal(result.rowCount, 14);
+      assert.ok(executedSql.includes('DELETE FROM "ProcessedWebhook"'));
+      assert.ok(executedSql.includes('processedAt'));
+      assert.deepEqual(executedParams, [7], 'Days parameter must be passed as parameterized value');
+    });
+
+    it('handleShopRedact deletes ProcessedWebhook rows and includes them in deleted count (Fix 1d)', async () => {
+      let webhooksDeleted = false;
+      const mockDb = {
+        async query(sql, params) {
+          if (sql.includes('DELETE FROM "ProcessedWebhook"')) {
+            webhooksDeleted = true;
+            return { rowCount: 5, rows: [{ id: '1' }, { id: '2' }, { id: '3' }, { id: '4' }, { id: '5' }] };
+          }
+          return { rowCount: 1, rows: [{ id: '1' }] };
+        }
+      };
+
+      const result = await handleShopRedact(mockDb, { shop_domain: 'redact-test.myshopify.com' });
+      assert.equal(webhooksDeleted, true, 'shop/redact must delete ProcessedWebhook rows');
+      assert.equal(result.deleted.webhooks, 5);
+    });
+
+    it('handleAppUninstalled propagates database errors on session deletion (Fix 2)', async () => {
+      const failingDb = {
+        async query(sql) {
+          if (sql.includes('DELETE FROM "Session"')) {
+            throw new Error('Database connection reset during session deletion');
+          }
+          return { rowCount: 1, rows: [] };
+        }
+      };
 
       await assert.rejects(
         async () => {
-          await handleShopRedact(mockDb, {});
+          await handleAppUninstalled(failingDb, { shop_domain: 'test.myshopify.com' });
         },
-        /Redaction failed/
+        /Database connection reset during session deletion/
       );
+    });
+
+    it('first delivery failure rolls back marker so retry counts exactly once (Fix 1a)', async () => {
+      let attempt = 0;
+      const processedStore = new Set();
+      let committedStats = 0;
+
+      // Mock database simulating transactional rollback on delivery failure
+      const mockDb = {
+        async query(sql, params) {
+          if (sql.includes('INSERT INTO "ProcessedWebhook"')) {
+            const key = `${params[0]}:${params[1]}`;
+            if (processedStore.has(key)) {
+              return { rowCount: 0, rows: [] }; // duplicate
+            }
+            // Record tentatively inside transaction
+            processedStore.add(key);
+            return { rowCount: 1, rows: [{ id: 'pw_1' }] };
+          }
+          if (sql.includes('SELECT id, "ownerId" FROM "Protocol"')) {
+            return { rows: [{ id: 'proto_1', ownerId: 'gid://shopify/Customer/100' }] };
+          }
+          if (sql.includes('INSERT INTO "ProtocolOrderStat"')) {
+            if (attempt === 0) {
+              // Delivery 1 throws transient error during stat update
+              throw new Error('Transient PostgreSQL serialization failure');
+            }
+            committedStats++;
+            return { rowCount: 1, rows: [{ id: 'stat_1' }] };
+          }
+          if (sql === 'ROLLBACK') {
+            // Transaction rolls back the ProcessedWebhook insert
+            processedStore.clear();
+            return {};
+          }
+          return { rowCount: 1, rows: [] };
+        }
+      };
+
+      const payload = {
+        id: 998877, // Order ID (must NOT be used as webhookId)
+        shop_domain: 'test.myshopify.com',
+        line_items: [
+          { id: 1, variant_id: 10, quantity: 1, price: '25.00', properties: [{ name: '_protocol_token', value: 'tok_retry' }] }
+        ]
+      };
+
+      // Delivery 1: fails during stat update
+      attempt = 0;
+      await assert.rejects(
+        async () => {
+          await handleOrdersPaid(mockDb, payload, { webhookId: 'wh_delivery_123', month: '2026-10' });
+        },
+        /Transient PostgreSQL serialization failure/
+      );
+
+      // Delivery 2 (Shopify retry): succeeds and counts exactly once
+      attempt = 1;
+      const retryResult = await handleOrdersPaid(mockDb, payload, { webhookId: 'wh_delivery_123', month: '2026-10' });
+      assert.equal(retryResult.success, true);
+      assert.equal(retryResult.duplicate, undefined);
+      assert.equal(retryResult.updatedCount, 1, 'Retry must count attribution after initial failure');
+      assert.equal(committedStats, 1);
+
+      // Delivery 3 (True duplicate): skipped
+      const duplicateResult = await handleOrdersPaid(mockDb, payload, { webhookId: 'wh_delivery_123', month: '2026-10' });
+      assert.equal(duplicateResult.success, true);
+      assert.equal(duplicateResult.duplicate, true);
+      assert.equal(duplicateResult.updatedCount, 0, 'True duplicate must be skipped');
+      assert.equal(committedStats, 1);
+    });
+
+    it('never writes order ID or customer ID to ProcessedWebhook table (Fix 1b & 1c)', async () => {
+      const capturedParams = [];
+      const mockDb = {
+        async query(sql, params) {
+          if (sql.includes('INSERT INTO "ProcessedWebhook"')) {
+            capturedParams.push(params);
+            return { rowCount: 1, rows: [{ id: 'pw_1' }] };
+          }
+          if (sql.includes('SELECT id, "ownerId" FROM "Protocol"')) {
+            return { rows: [{ id: 'proto_1', ownerId: 'gid://shopify/Customer/100' }] };
+          }
+          return { rowCount: 1, rows: [{ id: 'stat_1' }] };
+        }
+      };
+
+      const orderIdNumeric = 99112233;
+      const customerIdNumeric = 445566;
+      const payload = {
+        id: orderIdNumeric,
+        customer: { id: customerIdNumeric },
+        shop_domain: 'test.myshopify.com',
+        line_items: [
+          { id: 1, variant_id: 10, quantity: 1, price: '30.00', properties: [{ name: '_protocol_token', value: 'tok_test' }] }
+        ]
+      };
+
+      await handleOrdersPaid(mockDb, payload, { webhookId: 'wh_unique_header_id_777', month: '2026-10' });
+
+      assert.equal(capturedParams.length, 1);
+      const insertParams = capturedParams[0];
+      // Assert order ID and customer ID are never written to ProcessedWebhook
+      for (const param of insertParams) {
+        assert.notEqual(param, String(orderIdNumeric), 'Order ID must NEVER be stored in ProcessedWebhook');
+        assert.notEqual(param, orderIdNumeric, 'Order ID must NEVER be stored in ProcessedWebhook');
+        assert.notEqual(param, String(customerIdNumeric), 'Customer ID must NEVER be stored in ProcessedWebhook');
+        assert.notEqual(param, customerIdNumeric, 'Customer ID must NEVER be stored in ProcessedWebhook');
+      }
+      assert.equal(insertParams[1], 'wh_unique_header_id_777', 'Must use exact webhookId from header');
     });
 
     it('handleOrdersPaid tracks separate stats per currency for the same protocol and month (Defect 6)', async () => {

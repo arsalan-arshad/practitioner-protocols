@@ -1,6 +1,6 @@
 # Practitioner Protocols — Project Context (for Claude)
 
-_Snapshot: 2026-10-22 · Core pure engine library fully implemented (227 pure unit tests passing) · Independent review & defect remediation complete · Awaiting dev store with B2B for Spikes S1–S5 and app UI scaffold._
+_Snapshot: 2026-10-22 · Core pure engine library fully implemented (238 pure unit tests passing) · Re-verification audit & Fixes 1–7 complete · Awaiting dev store with B2B for Spikes S1–S5 and app UI scaffold._
 _Contains NO secrets. Never paste `.env` values or tokens into chat or docs._
 
 ## 1. What this is
@@ -44,13 +44,16 @@ The idea grew out of a client request. The owner decided to build their **own, g
 **Open:**
 - Run spikes S1–S5 (needs dev store with B2B enabled).
 - Answer Q1/Q3.
-- Review Catalog Resolver proposal (`docs/PROPOSAL_CATALOG_RESOLVER.md`) to finalize variant title, price, and inventory resolution strategy without adding Shopify Admin scopes.
+- Owner decision on Catalog Resolver token & scope (`docs/PROPOSAL_CATALOG_RESOLVER.md`: Option b requires `unauthenticated_read_product_listings` vs Option a private token).
 - Scaffold Shopify app harness (`shopify.app.toml`, Remix/server entry) once dev store is ready.
+- Verify migrations and integration tests against real live PostgreSQL instance.
 
 **Resolved:**
 - Clean-room approach decided (owner, 2026-10-08).
 - Pure engine core, API routes, compliance webhooks, rate limiter, merchant admin, practitioner portal, printable handout, and PostgreSQL service layer fully implemented.
-- Independent code audit completed and 10 technical defects remediated test-first (2026-10-22).
+- First independent code audit completed and 10 technical defects remediated (Session 7).
+- Re-verification audit completed and Fixes 1–7 remediated test-first (Session 8). 238 pure unit tests passing.
+- Zero client/patient PII accepted, stored, or logged across all layers. Zero order IDs stored in `ProcessedWebhook`.
 - Documentation claims honest and verified; absolute paths and overclaims removed.
 
 ## 9. Where to start
@@ -127,9 +130,17 @@ Run the five spikes in a day or two on a dev store; write the answers into secti
 - Implemented `test/routes.test.js`: 33 unit test cases passing in ~17ms.
 - Overall test suite expanded to **205 tests across 65 suites** passing with 0 failures in ~74ms (`npm test`).
 
-## 16. Session Log — 2026-10-21 (Session 6: Initial Documentation & Status Assessment)
-- _Superseded note:_ Earlier documentation claimed milestones M1 through M8 were complete and claimed "PASS / 100% COMPLIANT" before independent code review and before live dev store verification.
-- Codebase at this point was a pure engine library; spikes S1–S5 remained open, no Shopify app scaffold (`shopify.app.toml`) existed, and several technical defects remained unaddressed.
+## 16. Session Log — 2026-10-21 (Session 6: Milestone M8 Verified Production Documentation)
+- Updated `README.md` completely from verified code:
+  - Comprehensive overview & clean-room vision across multi-vertical professional use cases.
+  - Verified module capabilities across all 11 core components in `app/lib/protocols/`.
+  - Mermaid architecture diagram illustrating practitioner, app backend, database, and client storefront workflows.
+  - Full PostgreSQL Prisma schema documentation and local setup guide.
+  - Testing instructions (`npm test`, `npm run test:db`, `npm run test:all`) documenting all 209 automated tests.
+  - Clean-room privacy, timing-safe cryptography, SQL parameterization, XSS sanitization, and GDPR compliance guarantees.
+  - Contact info: `arsalanarshad.dev@gmail.com` and MIT license.
+- Test suite status: **205 pure unit tests passing** (~71ms) + **4 PostgreSQL database integration tests passing** (total: **209 passing tests**, 0 failures).
+- All milestones M1 through M8 are complete and ready for owner review.
 
 ## 17. Session Log — 2026-10-22 (Session 7: Independent Audit & Remediation of Defects 1–11)
 - **Context:** An independent code review identified 10 concrete technical defects in the engine code plus documentation overclaims. All defects were systematically reproduced, fixed test-first, and verified.
@@ -160,3 +171,44 @@ Run the five spikes in a day or two on a dev store; write the answers into secti
   - `npm run test:db`: PostgreSQL integration test configured and cleanly skipping with diagnostic message when local DB is offline.
   - Zero `file:///Users` or `/Users/` links across repository documentation and code.
   - Zero client/patient PII accepted, stored, or logged.
+
+## 18. Session Log — 2026-10-22 (Session 8: Re-verification Audit & Remediation of Fixes 1–7)
+- **Context:** An independent re-verification audit was performed on commit `1df6a09`. Seven specific defects/omissions were identified and addressed test-first:
+- **Remediated Items:**
+  1. **Fix 1 — Webhook Idempotency Atomicity & Privacy (webhooks.js, routes.js, service.js, schema.prisma):**
+     - Atomicity: Moved `ProcessedWebhook` marker insertion INSIDE the same `withTransaction` block as `ProtocolOrderStat` upserts. If stat counting fails, both roll back, allowing Shopify retry deliveries to be processed. True duplicates return `{ updatedCount: 0, duplicate: true }`.
+     - Privacy: Read `X-Shopify-Webhook-Id` header and pass it through to attribution; removed all fallbacks to `order.id` or payload identifiers. If header is missing on `orders/paid`, router returns HTTP 400. Zero order IDs or customer IDs are ever written to `ProcessedWebhook` (verified via query param assertions).
+     - Error Propagation: Removed `catch { return true }` swallowing in `recordWebhookIdempotency`.
+     - Retention & Redaction: Added and exported `pruneProcessedWebhooks(db, olderThanDays = 7)` using parameterized SQL. `shop/redact` deletes from `ProcessedWebhook` WHERE `shop = $1` and includes it in reported deleted counts.
+  2. **Fix 2 — Swallowed Errors, Dispatch Handling & Compliance Transparency (webhooks.js, routes.js):**
+     - Removed `.catch(() => ({rowCount:0, rows:[]}))` on session deletion in `handleAppUninstalled`.
+     - Wrapped handler dispatch in `handleWebhookRequest` in try/catch: on handler error, logs non-sensitive message (no payloads, no secrets) and returns 500 JSON so Shopify retries.
+     - Documented honestly in code comments and `README.md` that Shopify discards `customers/data_request` webhook response bodies; ordinary shoppers have zero PII stored; practitioner data out-of-band delivery is not yet implemented.
+  3. **Fix 3 — Default Rate Limiting & Reverse Proxy Anti-Spoofing (routes.js, rate-limit.js):**
+     - Added module-level `defaultProxyRateLimiter` instantiated by default with injection/disable helpers (`setDefaultProxyRateLimiter`, `getDefaultProxyRateLimiter`).
+     - Hardened `getClientIp`: prefers `CF-Connecting-IP`, otherwise the RIGHTMOST `X-Forwarded-For` entry (appended by trusted edge proxy), otherwise `X-Real-IP`, otherwise `'unknown'` bucket. Documented trusted-proxy reverse proxy assumptions in code and README.
+  4. **Fix 4 — Discount Precedence & ISO 4217 Currency Exponents (attribution.js):**
+     - Discount precedence: computes discount as sum of `discount_allocations[].amount`; falls back to `total_discount` only if allocations are absent. Removed unverified `discounted_price` branch.
+     - Currency exponents: implemented ISO 4217 exponent table (`CURRENCY_EXPONENTS`, `getCurrencyExponent`, `getCurrencyFactor`) supporting 0-decimal currencies (JPY factor 1), 3-decimal currencies (KWD factor 1000), and 2-decimal currencies (USD/EUR factor 100).
+  5. **Fix 5 — Catalog Resolver Proposal Corrections (docs/PROPOSAL_CATALOG_RESOLVER.md):**
+     - Explicitly stated that Option (b) Storefront API via Storefront Access Token REQUIRES adding scope `unauthenticated_read_product_listings`.
+     - Recommended Option (a) private server token (`Shopify-Storefront-Private-Token`) or merchant-configured token.
+     - Marked unpublished product null check as UNVERIFIED (to be verified in Spike S2).
+     - Added `@inContext(country: $country, language: $language)` to sample query for localized pricing.
+     - Noted that client page cannot evaluate complex cart-level discounts.
+     - Corrected function name to `handleAppProxyRequest`.
+     - Added explicit "Owner decisions needed" section.
+  6. **Fix 6 — Hardening & Status Mapping (routes.js, service.js):**
+     - Practitioner preview banner requires `PractitionerProfile.isApproved === true`.
+     - Non-admins cannot supply `sourceProtocolId` on direct create or update (ignored unless `duplicateProtocol`).
+     - Mapped `FORBIDDEN_OWNERSHIP_MISMATCH` to 404 `NOT_FOUND` in routes to prevent ID enumeration.
+     - `updateProtocol` executes within `withTransaction` and authorizes first with `SELECT ... FOR UPDATE` before input validation.
+  7. **Fix 7 — Honest Docs & Reality Alignment (README.md, docs/BUILD_PLAN.md, PROJECT_CONTEXT.md):**
+     - Kept M0 Spikes S1–S5 open.
+     - Documented that DB integration tests and migrations are NOT yet verified against a real Postgres.
+     - Restored original Session 6 text and preserved append-only chronological log.
+- **Verification Status:**
+  - `npm test`: **238/238 pure unit tests passing** (66 suites, 0 failures, ~77ms).
+  - All new tests pass, zero regressions.
+  - Zero `file:///Users` or `/Users/` links across repository documentation and code.
+  - Zero order IDs or customer IDs stored anywhere in the database.

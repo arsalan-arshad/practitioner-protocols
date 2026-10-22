@@ -418,6 +418,23 @@ describe('Sliding Window Rate Limiter (app/lib/protocols/rate-limit.js)', () => 
       fetchHeaders.set('X-Forwarded-For', '203.0.113.88');
       assert.equal(getClientIp(fetchHeaders), '203.0.113.88');
     });
+
+    it('getClientIp supports configurable trusted proxy hops via TRUSTED_PROXY_HOPS (Item 2)', () => {
+      const headers = { 'x-forwarded-for': 'client.ip, proxy1.ip, proxy2.ip' };
+
+      // Default (hop count 1): rightmost entry (proxy2.ip)
+      assert.equal(getClientIp(headers), 'proxy2.ip');
+
+      // Hop count 1 explicitly via env var:
+      process.env.TRUSTED_PROXY_HOPS = '1';
+      assert.equal(getClientIp(headers), 'proxy2.ip');
+
+      // Hop count 2 via env var: second from right (proxy1.ip)
+      process.env.TRUSTED_PROXY_HOPS = '2';
+      assert.equal(getClientIp(headers), 'proxy1.ip');
+
+      delete process.env.TRUSTED_PROXY_HOPS;
+    });
   });
 
   describe('HTTP Headers and App Proxy Liquid Markup', () => {

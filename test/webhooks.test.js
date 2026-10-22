@@ -396,6 +396,33 @@ describe('Shopify Compliance & Attribution Webhooks (app/lib/protocols/webhooks.
       assert.equal(result.deleted.webhooks, 5);
     });
 
+    it('does not open transaction or insert ProcessedWebhook row for order with zero attributed lines (Item 5)', async () => {
+      const executedSql = [];
+      const mockDb = {
+        async query(sql) {
+          executedSql.push(sql);
+          return { rowCount: 1, rows: [] };
+        }
+      };
+
+      const plainOrder = {
+        id: 123456,
+        shop_domain: 'test.myshopify.com',
+        line_items: [
+          { id: 1, title: 'Organic T-Shirt', quantity: 1, price: '30.00' } // no protocol properties
+        ]
+      };
+
+      const res = await handleOrdersPaid(mockDb, plainOrder, { webhookId: 'wh_plain_1' });
+      assert.equal(res.success, true);
+      assert.equal(res.updatedCount, 0);
+      assert.equal(res.attributions.length, 0);
+
+      // Verify no transaction began and no ProcessedWebhook row was inserted
+      assert.equal(executedSql.some(sql => sql === 'BEGIN'), false, 'Must not open transaction for zero attributed lines');
+      assert.equal(executedSql.some(sql => sql.includes('INSERT INTO "ProcessedWebhook"')), false, 'Must not insert ProcessedWebhook for zero attributed lines');
+    });
+
     it('handleAppUninstalled propagates database errors on session deletion (Fix 2)', async () => {
       const failingDb = {
         async query(sql) {

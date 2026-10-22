@@ -361,7 +361,7 @@ export function createRateLimitKey(...parts) {
  * @param {{ remoteAddress?: string, socket?: { remoteAddress?: string } }} [connection={}]
  * @returns {string} Sanitized client IP address or 'unknown'
  */
-export function getClientIp(headers = {}, connection = {}) {
+export function getClientIp(headers = {}, connection = {}, options = {}) {
   const normalized = {};
   if (headers && typeof headers === 'object') {
     if (typeof headers.get === 'function') {
@@ -376,14 +376,25 @@ export function getClientIp(headers = {}, connection = {}) {
     }
   }
 
+  // Configurable number of trusted proxy hops (env var name only: TRUSTED_PROXY_HOPS, default 1).
+  // Behind Shopify's App Proxy, the exact hop count is unverified (Spike S2) and depends
+  // on whether an edge CDN (e.g. Cloudflare) is in front of the application server.
+  const rawHops = options?.trustedHops ?? process.env.TRUSTED_PROXY_HOPS ?? 1;
+  const trustedHops = Math.max(1, parseInt(rawHops, 10) || 1);
+
   let rawIp = '';
 
   if (normalized['cf-connecting-ip']) {
     rawIp = String(normalized['cf-connecting-ip']).trim();
   } else if (normalized['x-forwarded-for']) {
-    const xffParts = String(normalized['x-forwarded-for']).split(',');
-    // Use the rightmost entry appended by the nearest trusted reverse proxy
-    rawIp = xffParts[xffParts.length - 1].trim();
+    const xffParts = String(normalized['x-forwarded-for'])
+      .split(',')
+      .map(p => p.trim())
+      .filter(Boolean);
+    if (xffParts.length > 0) {
+      const targetIndex = Math.max(0, xffParts.length - trustedHops);
+      rawIp = xffParts[targetIndex];
+    }
   } else if (normalized['x-real-ip']) {
     rawIp = String(normalized['x-real-ip']).trim();
   } else if (connection?.remoteAddress) {

@@ -475,5 +475,37 @@ describe('Attribution & Cart Payload (app/lib/protocols/attribution.js)', () => 
       assert.ok(clientQueries.some(q => q.sql === 'BEGIN'));
       assert.ok(clientQueries.some(q => q.sql === 'COMMIT'));
     });
+
+    it('updateProtocol does not combine GROUP BY with FOR UPDATE (PostgreSQL 0A000 compatibility)', async () => {
+      const { fakePool, fakeClient, clientQueries } = createFakePool();
+      const origClientQuery = fakeClient.query;
+      fakeClient.query = async (sql, params) => {
+        if (sql.includes('GROUP BY') && sql.includes('FOR UPDATE')) {
+          throw new Error('PostgreSQL 0A000: FOR UPDATE is not allowed with GROUP BY clause');
+        }
+        return origClientQuery(sql, params);
+      };
+
+      const user = { id: 'gid://shopify/Customer/1', role: 'practitioner', ownerType: 'customer', ownerId: 'gid://shopify/Customer/1' };
+      const input = {
+        name: 'Updated Cardio Protocol',
+        lines: [{ variantGid: 'gid://shopify/ProductVariant/1001', quantity: 2 }]
+      };
+
+      const result = await updateProtocol(fakePool, {
+        shop: 'test.myshopify.com',
+        user,
+        protocolId: 'proto_1',
+        input
+      });
+
+      assert.ok(result.id);
+      // Ensure the initial lock query is executed
+      assert.ok(clientQueries.some(q => q.sql.includes('SELECT id FROM "Protocol"') && q.sql.includes('FOR UPDATE')));
+      // Ensure the aggregate query does not have FOR UPDATE
+      const aggregateQuery = clientQueries.find(q => q.sql.includes('GROUP BY'));
+      assert.ok(aggregateQuery);
+      assert.ok(!aggregateQuery.sql.includes('FOR UPDATE'));
+    });
   });
 });

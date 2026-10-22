@@ -89,32 +89,10 @@ export function extractCustomerId(payload) {
 }
 
 /**
- * Records and checks webhook idempotency using a short-retention ProcessedWebhook table (zero PII).
- * Returns true if this is the first time the webhook is seen, or false if already processed.
- * Errors propagate so transactions can roll back and Shopify can retry.
- *
- * @param {any} db Database client with query(sql, params) interface
- * @param {{ shop: string, webhookId: string, topic?: string }} params
- * @returns {Promise<boolean>} True if newly recorded, false if duplicate
- */
-export async function recordWebhookIdempotency(db, { shop, webhookId, topic = 'unknown' }) {
-  if (!db || !shop || !webhookId) {
-    return true;
-  }
-
-  const res = await db.query(`
-    INSERT INTO "ProcessedWebhook" ("id", "shop", "webhookId", "topic", "processedAt")
-    VALUES (gen_random_uuid()::text, $1, $2, $3, NOW())
-    ON CONFLICT ("shop", "webhookId") DO NOTHING
-    RETURNING "id"
-  `, [shop, String(webhookId).trim(), topic]);
-
-  const isNew = Boolean((res.rowCount && res.rowCount > 0) || (res.rows && res.rows.length > 0));
-  return isNew;
-}
-
-/**
  * Prunes ProcessedWebhook entries older than the retention threshold.
+ *
+ * NOTE: This function is exported for manual maintenance and worker execution.
+ * It is NOT automatically scheduled until the full app harness (server entry / scheduler) exists.
  *
  * @param {any} db Database client
  * @param {number} [olderThanDays=7] Retention window in days (default: 7)
@@ -591,6 +569,19 @@ export async function handleOrdersPaid(db, payload, options = {}) {
     '';
 
   const attributions = extractAttributionFromOrder(order);
+
+  // Return early if order has no protocol attributions: avoids opening a database transaction
+  // or recording an unused ProcessedWebhook row for normal non-protocol orders (Item 5).
+  if (!attributions || attributions.length === 0) {
+    return {
+      success: true,
+      shop,
+      month: options.month || '',
+      currency: options.currency || order?.currency || order?.presentment_currency || 'USD',
+      attributions: [],
+      updatedCount: 0
+    };
+  }
 
   // Month format: YYYY-MM
   let month = options.month;

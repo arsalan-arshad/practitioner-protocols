@@ -87,26 +87,31 @@ export function canAccessProtocol(user, protocol, action) {
     return { allowed: false, reason: DENIAL_REASONS.PROTOCOL_NOT_FOUND };
   }
 
-  // 7. Disabled protocols cannot be read or modified by non-admins
-  if (protocol.status === 'disabled') {
-    return { allowed: false, reason: DENIAL_REASONS.ADMIN_ONLY_DISABLED_PROTOCOL };
-  }
-
-  // 8. Starter templates (brand-owned templates)
+  // 7. Starter templates (brand-owned templates)
   if (protocol.isStarter === true) {
+    if (protocol.status === 'disabled') {
+      return { allowed: false, reason: DENIAL_REASONS.ADMIN_ONLY_DISABLED_PROTOCOL };
+    }
     if (action === 'read' || action === 'duplicate') {
       return { allowed: true, reason: null };
     }
     return { allowed: false, reason: DENIAL_REASONS.STARTER_MODIFICATION_FORBIDDEN };
   }
 
-  // 9. Ownership enforcement (Tag Mode: customer, B2B Mode: company)
+  // 8. Ownership enforcement (Tag Mode: customer, B2B Mode: company)
+  // Check ownership BEFORE disabled-status check for non-admins so another owner's
+  // disabled protocol returns the same 404/FORBIDDEN_OWNERSHIP_MISMATCH as a missing one (preventing existence leak).
   if (!user.ownerId || !user.ownerType) {
     return { allowed: false, reason: DENIAL_REASONS.FORBIDDEN_OWNERSHIP_MISMATCH };
   }
 
   if (protocol.ownerType !== user.ownerType || protocol.ownerId !== user.ownerId) {
     return { allowed: false, reason: DENIAL_REASONS.FORBIDDEN_OWNERSHIP_MISMATCH };
+  }
+
+  // 9. Disabled protocols cannot be read or modified by non-admins (for own protocols)
+  if (protocol.status === 'disabled') {
+    return { allowed: false, reason: DENIAL_REASONS.ADMIN_ONLY_DISABLED_PROTOCOL };
   }
 
   // 10. Archived protocols cannot be edited directly (must restore first)

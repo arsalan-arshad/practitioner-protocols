@@ -36,7 +36,8 @@ export async function withTransaction(db, fn) {
     throw new TypeError('Database client or pool with query() method is required');
   }
 
-  const isPool = typeof db.connect === 'function';
+  const isClient = db.constructor?.name === 'Client' || Boolean(db._connected);
+  const isPool = typeof db.connect === 'function' && !isClient;
   const client = isPool ? await db.connect() : db;
 
   try {
@@ -176,7 +177,18 @@ export async function getProtocolByToken(db, { shop, token }) {
  * }} options
  */
 export async function getProtocolById(db, { shop, user, protocolId, action = 'read', forUpdate = false }) {
-  const lockClause = forUpdate ? 'FOR UPDATE OF p' : '';
+  // If locking is requested, lock the row first via SELECT ... FOR UPDATE on the base table.
+  // PostgreSQL rejects FOR UPDATE on queries containing GROUP BY or aggregate functions (SQLSTATE 0A000).
+  if (forUpdate) {
+    const lockRes = await db.query(
+      `SELECT id FROM "Protocol" WHERE shop = $1 AND id = $2 FOR UPDATE`,
+      [shop, protocolId]
+    );
+    if (!lockRes?.rows || lockRes.rows.length === 0) {
+      return null;
+    }
+  }
+
   const sql = `
     SELECT p.*,
       COALESCE(
@@ -194,7 +206,6 @@ export async function getProtocolById(db, { shop, user, protocolId, action = 're
     LEFT JOIN "ProtocolLine" pl ON p.id = pl."protocolId"
     WHERE p.shop = $1 AND p.id = $2
     GROUP BY p.id
-    ${lockClause}
   `;
 
   const result = await db.query(sql, [shop, protocolId]);
@@ -205,6 +216,9 @@ export async function getProtocolById(db, { shop, user, protocolId, action = 're
   const protocol = result.rows[0];
   const access = canAccessProtocol(user, protocol, action);
   if (!access.allowed) {
+    if (access.reason === DENIAL_REASONS.FORBIDDEN_OWNERSHIP_MISMATCH) {
+      throw new ProtocolServiceError('Protocol not found', 'NOT_FOUND');
+    }
     throw new ProtocolServiceError(`Access denied: ${access.reason}`, access.reason);
   }
 
@@ -502,6 +516,10 @@ export async function restoreProtocol(db, { shop, user, protocolId }) {
  * }} options
  */
 export async function recordOrderAttribution(db, { shop, attributions, month, currency = 'USD', webhookId }) {
+  if (!Array.isArray(attributions) || attributions.length === 0) {
+    return { updatedCount: 0 };
+  }
+
   // Group attributions by protocol token / id
   const grouped = new Map();
   if (Array.isArray(attributions)) {

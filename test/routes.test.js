@@ -92,7 +92,7 @@ describe('HTTP Routes & Request Handlers (app/lib/protocols/routes.js)', () => {
         }
 
         // 2. SELECT p.* ... FROM "Protocol" p WHERE p.shop = $1 AND p.id = $2 (getProtocolById)
-        if (sql.includes('FROM "Protocol" p') && sql.includes('p.id = $2')) {
+        if (sql.includes('FROM "Protocol"') && (sql.includes('p.id = $2') || sql.includes('id = $2'))) {
           const shop = params[0];
           const id = params[1];
           const proto = state.protocols.find(p => p.shop === shop && p.id === id);
@@ -540,6 +540,53 @@ describe('HTTP Routes & Request Handlers (app/lib/protocols/routes.js)', () => {
       assert.equal(res.status, 200);
       const liquid = await res.text();
       assert.equal(liquid.includes("You're signed in as a professional. Clients will see retail prices."), false, 'Unapproved practitioner must NOT see professional banner');
+    });
+
+    it('displays practitioner banner in company mode when logged-in customer created protocol and company profile is approved (Item 3)', async () => {
+      const companyProtocol = {
+        id: 'proto_company_1',
+        shop: testShop,
+        token: 'tok_company_123456789',
+        name: 'Company Wellness Routine',
+        introNote: 'Shared clinic protocol',
+        displayName: 'Clinic Team',
+        ownerType: 'company',
+        ownerId: 'gid://shopify/Company/888',
+        createdBy: 'gid://shopify/Customer/999',
+        updatedBy: 'gid://shopify/Customer/999',
+        status: 'active',
+        isStarter: false,
+        sourceProtocolId: null,
+        createdAt: new Date(),
+        updatedAt: new Date()
+      };
+      db.state.protocols.push(companyProtocol);
+
+      // Company profile has isApproved = true
+      db.state.profiles.push({
+        id: 'prof_comp_1',
+        shop: testShop,
+        ownerType: 'company',
+        ownerGid: 'gid://shopify/Company/888',
+        practiceName: 'Elite Medical Group',
+        logoUrl: '',
+        isApproved: true
+      });
+
+      const params = {
+        shop: testShop,
+        token: companyProtocol.token,
+        logged_in_customer_id: '999',
+        timestamp: '1729500000'
+      };
+      const signature = calculateAppProxySignature(params, apiSecret);
+      const url = `https://${testShop}/apps/protocols?shop=${testShop}&token=${companyProtocol.token}&logged_in_customer_id=999&timestamp=1729500000&signature=${signature}`;
+
+      const res = await handleAppProxyRequest(db, new Request(url), { apiSecret });
+
+      assert.equal(res.status, 200);
+      const liquid = await res.text();
+      assert.ok(liquid.includes("You're signed in as a professional. Clients will see retail prices."));
     });
 
     it('enforces rate limiting by default when no rateLimiter option is provided (Fix 3)', async () => {

@@ -243,23 +243,41 @@ export async function handleAppProxyRequest(db, request, { apiSecret, rateLimite
     protocol = await getProtocolByToken(db, { shop, token: token.trim() });
   }
 
-  // 5. Check if logged-in practitioner previewing protocol (Fix 6a: requires isApproved = true)
+  // 5. Check if logged-in practitioner previewing protocol (requires isApproved = true)
   const customerGid = getLoggedInCustomerGid(queryParams);
   let isLoggedInPractitioner = false;
 
   if (customerGid && db && typeof db.query === 'function') {
     try {
       const numericId = String(customerGid).replace(/^gid:\/\/shopify\/Customer\//, '');
-      const profileRes = await db.query(
-        'SELECT "id", "isApproved" FROM "PractitionerProfile" WHERE "shop" = $1 AND ("ownerGid" = $2 OR "ownerGid" = $3)',
-        [shop, customerGid, numericId]
-      );
-      const isApproved = Boolean(profileRes?.rows?.[0]?.isApproved);
-      if (isApproved) {
-        if (protocol && (protocol.createdBy === customerGid || protocol.ownerId === customerGid)) {
+
+      // In Company mode: if logged-in customer created or updated the protocol, check the company profile (protocol.ownerId)
+      if (
+        protocol?.ownerType === 'company' &&
+        (protocol.createdBy === customerGid || protocol.updatedBy === customerGid || protocol.ownerId === customerGid)
+      ) {
+        const companyGid = protocol.ownerId;
+        const companyNumeric = String(companyGid).replace(/^gid:\/\/shopify\/Company\//, '');
+        const profileRes = await db.query(
+          'SELECT "id", "isApproved" FROM "PractitionerProfile" WHERE "shop" = $1 AND ("ownerGid" = $2 OR "ownerGid" = $3)',
+          [shop, companyGid, companyNumeric]
+        );
+        if (Boolean(profileRes?.rows?.[0]?.isApproved)) {
           isLoggedInPractitioner = true;
-        } else if (profileRes?.rows?.length > 0) {
-          isLoggedInPractitioner = true;
+        }
+      } else {
+        // Tag mode (or direct customer profile check)
+        const profileRes = await db.query(
+          'SELECT "id", "isApproved" FROM "PractitionerProfile" WHERE "shop" = $1 AND ("ownerGid" = $2 OR "ownerGid" = $3)',
+          [shop, customerGid, numericId]
+        );
+        const isApproved = Boolean(profileRes?.rows?.[0]?.isApproved);
+        if (isApproved) {
+          if (protocol && (protocol.createdBy === customerGid || protocol.ownerId === customerGid)) {
+            isLoggedInPractitioner = true;
+          } else if (!protocol) {
+            isLoggedInPractitioner = true;
+          }
         }
       }
     } catch {

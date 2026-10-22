@@ -148,7 +148,7 @@ describe('Merchant Admin Layer (app/lib/protocols/admin.js)', () => {
         }
 
         // Protocol by ID for service.updateProtocol / getProtocolById
-        if (sql.includes('FROM "Protocol" p') && sql.includes('p.id = $2')) {
+        if (sql.includes('FROM "Protocol"') && (sql.includes('p.id = $2') || sql.includes('id = $2'))) {
           const proto = state.protocols.find(p => p.shop === params[0] && p.id === params[1]);
           if (!proto) return { rows: [] };
           const lines = state.lines.filter(l => l.protocolId === proto.id);

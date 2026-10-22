@@ -172,6 +172,17 @@ describe('Permissions & Authorization Guard (app/lib/protocols/permissions.js)',
         reason: DENIAL_REASONS.ADMIN_ONLY_DISABLED_PROTOCOL
       });
     });
+
+    it('blocks non-admin from accessing other owner\'s disabled protocol with FORBIDDEN_OWNERSHIP_MISMATCH (no existence leak)', () => {
+      assert.deepEqual(canAccessProtocol(practitionerCustomerB, disabledProtocol, 'read'), {
+        allowed: false,
+        reason: DENIAL_REASONS.FORBIDDEN_OWNERSHIP_MISMATCH
+      });
+      assert.deepEqual(canAccessProtocol(practitionerCustomerB, disabledProtocol, 'edit'), {
+        allowed: false,
+        reason: DENIAL_REASONS.FORBIDDEN_OWNERSHIP_MISMATCH
+      });
+    });
   });
 
   describe('Starter Templates (Brand Templates)', () => {

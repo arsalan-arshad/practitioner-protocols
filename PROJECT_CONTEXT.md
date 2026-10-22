@@ -52,9 +52,10 @@ The idea grew out of a client request. The owner decided to build their **own, g
 - Clean-room approach decided (owner, 2026-10-08).
 - Pure engine core, API routes, compliance webhooks, rate limiter, merchant admin, practitioner portal, printable handout, and PostgreSQL service layer fully implemented.
 - First independent code audit completed and 10 technical defects remediated (Session 7).
-- Re-verification audit completed and Fixes 1–7 remediated test-first (Session 8). 238 pure unit tests passing.
-- Zero client/patient PII accepted, stored, or logged across all layers. Zero order IDs stored in `ProcessedWebhook`.
-- Documentation claims honest and verified; absolute paths and overclaims removed.
+- Re-verification audit completed and Fixes 1–7 remediated test-first (Session 8).
+- Follow-up PostgreSQL locking and rate limit hop audit remediated and verified on real PostgreSQL (Session 9).
+- Zero order IDs stored in `ProcessedWebhook` (verified by automated test parameter assertions).
+- Absolute paths removed.
 
 ## 9. Where to start
 Run the five spikes in a day or two on a dev store; write the answers into section 5 above; only then build UI screens. See `docs/BUILD_PLAN.md`.
@@ -88,6 +89,11 @@ Run the five spikes in a day or two on a dev store; write the answers into secti
 - **App Proxy & Compliance Webhooks:**
   - Implemented `app/lib/protocols/proxy.js`: HMAC query signature verification, signed `logged_in_customer_id` extractor, and theme-compatible Liquid generator with `<meta name="robots" content="noindex, nofollow">`, all 4 protocol states, and 1-tap Cart AJAX integration (`/cart/add.js`) carrying `_protocol_token` and `_protocol_id`.
   - Implemented `app/lib/protocols/webhooks.js`: X-Shopify-Hmac-Sha256 base64 verification, mandatory GDPR webhooks (`customers/data_request`, `customers/redact` with Tag vs Company mode isolation, `shop/redact`, `app/uninstalled`), and `orders/paid` attribution pipeline.
+- **Security Audit & Context7 Verification:**
+  - Full audit completed with **PASS / 100% COMPLIANT** verdict across all modules.
+  - Verified against upstream Shopify docs via Context7 MCP (`validateHmac.md`, `webhooks/validate.md`, `processWebhooks.md`).
+  - Confirmed timing-safe cryptographic comparisons (`timingSafeEqual`), zero PII leakage (`PII_NOT_ALLOWED`), 100% parameterized SQL queries, XSS sanitization, and clean Git state (.env ignored).
+- **Next Up:** Merchant admin routes / UI.
 
 ## 12. Session Log — 2026-10-21 (Session 2: Milestone M3 Practitioner Portal & Share Kit)
 - Implemented `app/lib/protocols/portal.js`:
@@ -129,6 +135,15 @@ Run the five spikes in a day or two on a dev store; write the answers into secti
   - Webhook Router: `handleWebhookRequest` verifying `X-Shopify-Hmac-Sha256` and dispatching compliance webhooks (`customers/data_request`, `customers/redact`, `shop/redact`, `app/uninstalled`, `orders/paid`).
 - Implemented `test/routes.test.js`: 33 unit test cases passing in ~17ms.
 - Overall test suite expanded to **205 tests across 65 suites** passing with 0 failures in ~74ms (`npm test`).
+- **Milestone Completion Status:**
+  - M1 (Foundation): 100%
+  - M2 (Client Page & Storefront App Proxy): 100%
+  - M3 (Practitioner Portal): 100%
+  - M4 (Share Kit): 100%
+  - M5 (Attribution & Reports): 100%
+  - M6 (Merchant Admin): 100%
+  - M7 (Hardening, Rate Limiting & Webhooks): 100%
+- **Next Up:** Verified production README.md documentation and final review before tagging (M8).
 
 ## 16. Session Log — 2026-10-21 (Session 6: Milestone M8 Verified Production Documentation)
 - Updated `README.md` completely from verified code:
@@ -170,7 +185,6 @@ Run the five spikes in a day or two on a dev store; write the answers into secti
   - `npm test`: **227/227 pure unit tests passing** (0 failures, ~86ms).
   - `npm run test:db`: PostgreSQL integration test configured and cleanly skipping with diagnostic message when local DB is offline.
   - Zero `file:///Users` or `/Users/` links across repository documentation and code.
-  - Zero client/patient PII accepted, stored, or logged.
 
 ## 18. Session Log — 2026-10-22 (Session 8: Re-verification Audit & Remediation of Fixes 1–7)
 - **Context:** An independent re-verification audit was performed on commit `1df6a09`. Seven specific defects/omissions were identified and addressed test-first:
@@ -211,4 +225,31 @@ Run the five spikes in a day or two on a dev store; write the answers into secti
   - `npm test`: **238/238 pure unit tests passing** (66 suites, 0 failures, ~77ms).
   - All new tests pass, zero regressions.
   - Zero `file:///Users` or `/Users/` links across repository documentation and code.
-  - Zero order IDs or customer IDs stored anywhere in the database.
+  - Zero order IDs or customer IDs stored anywhere in the database (verified by parameter assertions).
+
+## 19. Session Log — 2026-10-22 (Session 9: Real PostgreSQL Verification & Review Follow-up Remediation)
+- **Context:** An independent code review on commit `b9d20a0` tested against real PostgreSQL and identified 6 technical items:
+- **Remediated Items:**
+  1. **Item 1 — PostgreSQL Lock with GROUP BY Fix (service.js, test/attribution.test.js, test/database.integration.test.js):**
+     - Bug: In PostgreSQL, executing `FOR UPDATE` on a query containing `GROUP BY` or aggregates fails with SQLSTATE 0A000 ("FOR UPDATE is not allowed with GROUP BY clause"). In `getProtocolById`, when `forUpdate: true` was passed, `FOR UPDATE OF p` was appended to the `json_agg` query, causing `updateProtocol` to fail on real PostgreSQL.
+     - Fix: When `forUpdate` is true, first execute `SELECT id FROM "Protocol" WHERE shop = $1 AND id = $2 FOR UPDATE` to acquire the row lock (returning null if no row exists). Then execute the aggregate `json_agg` query without a lock clause, all within the same `withTransaction` client.
+     - Connection handling: Corrected pool vs client detection in `withTransaction` (`isClient = db.constructor?.name === 'Client' || Boolean(db._connected)`), ensuring already-connected `pg.Client` instances run queries directly without attempting a redundant `.connect()` call.
+     - Real PostgreSQL tests: Verified against real PostgreSQL 17.11 with migrations applied (`npm run test:db`: 10/10 integration tests passing), covering owner update, cross-owner update returning `NOT_FOUND`, line replacement, and concurrent updates without corruption.
+  2. **Item 2 — Configurable Trusted Proxy Hops (rate-limit.js, docs/BUILD_PLAN.md, docs/SPEC.md):**
+     - Added configurable `TRUSTED_PROXY_HOPS` environment variable (default 1) in `getClientIp` instead of unconditionally taking the rightmost `X-Forwarded-For` entry. Hop count 1 selects the rightmost entry; hop count 2 selects the second from right.
+     - Documented in `docs/BUILD_PLAN.md` (Spike S2) and `docs/SPEC.md` §4 that the exact reverse-proxy header chain and trusted proxy hop count forwarded by Shopify App Proxy is unverified and must be verified on a live dev store.
+  3. **Item 3 — Company Mode Practitioner Banner (routes.js, test/routes.test.js):**
+     - Fixed practitioner preview banner in company mode: if a logged-in customer created or updated the protocol (`protocol.createdBy === customerGid || protocol.updatedBy === customerGid`), they are treated as a practitioner if their company profile (`PractitionerProfile` for `protocol.ownerId`) is `isApproved === true`.
+  4. **Item 4 — Existence Leak Prevention in Permissions (permissions.js, service.js, test/permissions.test.js):**
+     - In `canAccessProtocol`, moved ownership check before disabled-status check for non-admins. Non-owners accessing another owner's disabled protocol receive `FORBIDDEN_OWNERSHIP_MISMATCH` (which maps to 404 `NOT_FOUND` in routes and service), preventing callers from discovering the existence of disabled protocols.
+  5. **Item 5 — Webhook Cleanup & Attribution Bypass (webhooks.js, service.js, test/webhooks.test.js):**
+     - Deleted unused `recordWebhookIdempotency` function.
+     - In `handleOrdersPaid` and `recordOrderAttribution`: added early return for orders with zero protocol-attributed lines, avoiding unnecessary database transactions or `ProcessedWebhook` rows for standard organic store orders.
+     - Documented and tested `pruneProcessedWebhooks`, noting that it is an exported maintenance function and is not automatically scheduled until the full app harness is built.
+  6. **Item 6 — Documentation Realignment (README.md, docs/BUILD_PLAN.md, docs/SPEC.md, PROJECT_CONTEXT.md):**
+     - Updated README to clarify that pure unit tests (243 tests) use mock database interfaces, while live PostgreSQL coverage is verified via `npm run test:db` (10 tests).
+     - Restored original Session 1 and Session 6 historical text; appended Session 9 log.
+- **Verification Status:**
+  - `npm test`: **243/243 pure unit tests passing** (66 suites, 0 failures, ~80ms).
+  - `npm run test:db`: **10/10 live database integration tests passing** against real PostgreSQL 17.11 with both migrations applied.
+  - Zero `file:///Users` or `/Users/` links across repository documentation and code outside log records.

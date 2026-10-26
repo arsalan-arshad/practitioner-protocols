@@ -36,6 +36,7 @@ import {
   resolveVariants,
   enrichProtocolLines
 } from './catalog.js';
+import { renderPortalLiquid } from './portal.js';
 
 export { createRateLimiter };
 
@@ -243,7 +244,104 @@ export async function handleAppProxyRequest(db, request, options = {}) {
     }
   }
 
-  // 4. Resolve protocol
+  const customerGid = getLoggedInCustomerGid(queryParams);
+
+  // 4. If no token provided on App Proxy root (/apps/protocols), render Practitioner Portal (M3)
+  if (!token) {
+    if (!customerGid) {
+      const portalLiquid = renderPortalLiquid({ shop, isLoggedIn: false });
+      return new Response(portalLiquid, {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/liquid; charset=utf-8',
+          'X-Robots-Tag': 'noindex, nofollow'
+        }
+      });
+    }
+
+    let isApproved = false;
+    let practiceName = '';
+    const numericId = String(customerGid).replace(/^gid:\/\/shopify\/Customer\//, '');
+
+    if (db && typeof db.query === 'function') {
+      try {
+        const profRes = await db.query(
+          'SELECT "id", "isApproved", "practiceName" FROM "PractitionerProfile" WHERE "shop" = $1 AND ("ownerGid" = $2 OR "ownerGid" = $3)',
+          [shop, customerGid, numericId]
+        );
+        if (profRes?.rows?.[0]) {
+          isApproved = Boolean(profRes.rows[0].isApproved);
+          practiceName = profRes.rows[0].practiceName || '';
+        }
+      } catch {
+        // Non-fatal fallback
+      }
+    }
+
+    if (!isApproved) {
+      const portalLiquid = renderPortalLiquid({
+        shop,
+        isLoggedIn: true,
+        isApproved: false,
+        practiceName
+      });
+      return new Response(portalLiquid, {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/liquid; charset=utf-8',
+          'X-Robots-Tag': 'noindex, nofollow'
+        }
+      });
+    }
+
+    let activeProtocols = [];
+    let starterProtocols = [];
+    let archivedProtocols = [];
+
+    if (db && typeof db.query === 'function') {
+      try {
+        const activeRes = await db.query(
+          'SELECT * FROM "Protocol" WHERE "shop" = $1 AND ("ownerId" = $2 OR "createdBy" = $2) AND "status" = $3 ORDER BY "updatedAt" DESC',
+          [shop, customerGid, 'active']
+        );
+        activeProtocols = activeRes?.rows || [];
+
+        const startersRes = await db.query(
+          'SELECT * FROM "Protocol" WHERE "shop" = $1 AND "isStarter" = true AND "status" = $2 ORDER BY "updatedAt" DESC',
+          [shop, 'active']
+        );
+        starterProtocols = startersRes?.rows || [];
+
+        const archivedRes = await db.query(
+          'SELECT * FROM "Protocol" WHERE "shop" = $1 AND ("ownerId" = $2 OR "createdBy" = $2) AND "status" = $3 ORDER BY "updatedAt" DESC',
+          [shop, customerGid, 'archived']
+        );
+        archivedProtocols = archivedRes?.rows || [];
+      } catch {
+        // Non-fatal fallback
+      }
+    }
+
+    const portalLiquid = renderPortalLiquid({
+      shop,
+      isLoggedIn: true,
+      isApproved: true,
+      practiceName,
+      activeProtocols,
+      starterProtocols,
+      archivedProtocols
+    });
+
+    return new Response(portalLiquid, {
+      status: 200,
+      headers: {
+        'Content-Type': 'application/liquid; charset=utf-8',
+        'X-Robots-Tag': 'noindex, nofollow'
+      }
+    });
+  }
+
+  // 5. Resolve protocol by token (Client Protocol Page)
   let protocol = null;
   if (token && shop) {
     protocol = await getProtocolByToken(db, { shop, token: token.trim() });
@@ -260,8 +358,7 @@ export async function handleAppProxyRequest(db, request, options = {}) {
     }
   }
 
-  // 5. Check if logged-in practitioner previewing protocol (requires isApproved = true)
-  const customerGid = getLoggedInCustomerGid(queryParams);
+  // 6. Check if logged-in practitioner previewing protocol (requires isApproved = true)
   let isLoggedInPractitioner = false;
 
   if (customerGid && db && typeof db.query === 'function') {

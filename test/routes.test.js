@@ -664,6 +664,62 @@ describe('HTTP Routes & Request Handlers (app/lib/protocols/routes.js)', () => {
       assert.ok(liquid.includes('Protocol No Longer Active'));
       assert.ok(liquid.includes('no longer active'));
     });
+
+    it('renders Practitioner Portal sign-in prompt when visiting /apps/protocols without token and signed out', async () => {
+      const params = {
+        shop: testShop,
+        path_prefix: '/apps/protocols',
+        timestamp: '1729500000'
+      };
+      const signature = calculateAppProxySignature(params, apiSecret);
+      const url = `https://${testShop}/apps/protocols?shop=${testShop}&path_prefix=%2Fapps%2Fprotocols&timestamp=1729500000&signature=${signature}`;
+
+      const res = await handleAppProxyRequest(db, new Request(url), { apiSecret });
+
+      assert.equal(res.status, 200);
+      const liquid = await res.text();
+      assert.ok(liquid.includes('Practitioner Sign In Required'));
+      assert.ok(liquid.includes('/account/login'));
+      assert.ok(liquid.includes('<meta name="robots" content="noindex, nofollow">'));
+    });
+
+    it('renders Practitioner Portal pending approval prompt when signed in but not approved', async () => {
+      const params = {
+        shop: testShop,
+        path_prefix: '/apps/protocols',
+        logged_in_customer_id: '999888',
+        timestamp: '1729500000'
+      };
+      const signature = calculateAppProxySignature(params, apiSecret);
+      const url = `https://${testShop}/apps/protocols?shop=${testShop}&path_prefix=%2Fapps%2Fprotocols&logged_in_customer_id=999888&timestamp=1729500000&signature=${signature}`;
+
+      const res = await handleAppProxyRequest(db, new Request(url), { apiSecret });
+
+      assert.equal(res.status, 200);
+      const liquid = await res.text();
+      assert.ok(liquid.includes('Account Pending Approval'));
+    });
+
+    it('renders full Practitioner Portal library with active protocols when signed in and approved', async () => {
+      db.state.profiles[0].isApproved = true;
+
+      const params = {
+        shop: testShop,
+        path_prefix: '/apps/protocols',
+        logged_in_customer_id: '112233',
+        timestamp: '1729500000'
+      };
+      const signature = calculateAppProxySignature(params, apiSecret);
+      const url = `https://${testShop}/apps/protocols?shop=${testShop}&path_prefix=%2Fapps%2Fprotocols&logged_in_customer_id=112233&timestamp=1729500000&signature=${signature}`;
+
+      const res = await handleAppProxyRequest(db, new Request(url), { apiSecret });
+
+      assert.equal(res.status, 200);
+      const liquid = await res.text();
+      assert.ok(liquid.includes('Practitioner Protocols'));
+      assert.ok(liquid.includes('Elite Naturopathic Clinic'));
+      assert.ok(liquid.includes('My Active Protocols'));
+    });
   });
 
   describe('handleListProtocolsRequest', () => {

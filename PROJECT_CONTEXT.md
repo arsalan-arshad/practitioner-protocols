@@ -1,6 +1,6 @@
 # Practitioner Protocols — Project Context (for Claude)
 
-_Snapshot: 2026-10-27 · Core pure engine library fully implemented (260 pure unit tests passing) · Session 14 complete · App scaffold & toml configured · Catalog Resolver integrated into route handlers._
+_Snapshot: 2026-10-27 · Core pure engine library fully implemented (267 pure unit tests passing) · Session 15 complete · Milestone M3 Practitioner Portal UI renderer complete._
 _Contains NO secrets. Never paste `.env` values or tokens into chat or docs._
 
 ## 1. What this is
@@ -342,3 +342,22 @@ Run the five spikes in a day or two on a dev store; write the answers into secti
      - Added comprehensive unit test in `test/routes.test.js`.
 - **Verification Status:**
   - `npm test`: **260/260 pure unit tests passing** (73 suites, 0 failures, ~92ms).
+
+## 25. Session Log — 2026-10-27 (Session 15: Milestone M3 Practitioner Portal UI Renderer)
+- **Context:** Implemented and integrated the interactive Practitioner Portal UI surface (`renderPortalLiquid` in `portal.js`, `routes.js`, `test/portal.test.js`, `test/routes.test.js`).
+- **Implementation Details:**
+  1. **Practitioner Portal Liquid Renderer (`renderPortalLiquid` in `app/lib/protocols/portal.js`):**
+     - Renders zero-extension, theme-embedded portal at `/apps/protocols` when no protocol share token is provided in the URL.
+     - **Unauthenticated State:** Prompts visitor to sign into their store customer account (`/account/login`).
+     - **Unapproved Practitioner State:** Displays pending approval notice and practice name badge while merchant reviews their profile.
+     - **Approved Practitioner Library:** Displays practice name badge, action bar, active protocol cards, brand starter templates, and archived protocols with line counts and retail totals.
+     - **Share Kit Actions:** Quick links to copy share URLs (`/apps/protocols/:token`) and print handouts (`/apps/protocols/:token?handout=1`).
+     - **Liquid Delimiter Neutralization:** Strictly neutralizes user-supplied protocol and practice names (`&#123;&#123;`, `&#125;&#125;`, `&#123;%`, `%&#125;`).
+     - Injects `<meta name="robots" content="noindex, nofollow">` ensuring portal stays unindexed.
+  2. **App Proxy Route Dispatching (`app/lib/protocols/routes.js`):**
+     - When `!token`: dispatches to Practitioner Portal, querying `PractitionerProfile` for `isApproved` and querying protocols for the authenticated practitioner.
+     - When `token`: dispatches to Client Protocol Page (`renderProtocolLiquid`) with live catalog resolution.
+  3. **Automated Test Coverage:**
+     - Added 4 tests in `test/portal.test.js` and 3 tests in `test/routes.test.js`.
+- **Verification Status:**
+  - `npm test`: **267/267 pure unit tests passing** (74 suites, 0 failures, ~92ms).

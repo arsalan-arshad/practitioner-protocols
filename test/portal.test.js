@@ -12,6 +12,7 @@ import {
   prepareProtocolEditorPayload,
   detectConcurrentEdit,
   generateProtocolShareKit,
+  renderPortalLiquid,
   ProtocolValidationError
 } from '../app/lib/protocols/portal.js';
 
@@ -665,6 +666,76 @@ describe('Practitioner Portal (app/lib/protocols/portal.js)', () => {
         () => generateProtocolShareKit({ protocol: mockProtocol, shopDomain: '' }),
         TypeError
       );
+    });
+  });
+
+  describe('renderPortalLiquid (M3 Practitioner Portal UI)', () => {
+    it('renders unauthenticated sign-in state with /account/login link when isLoggedIn is false', () => {
+      const liquid = renderPortalLiquid({ isLoggedIn: false });
+      assert.ok(liquid.includes('Practitioner Sign In Required'));
+      assert.ok(liquid.includes('/account/login'));
+      assert.ok(liquid.includes('<meta name="robots" content="noindex, nofollow">'));
+    });
+
+    it('renders pending approval message when signed in but not yet approved', () => {
+      const liquid = renderPortalLiquid({
+        isLoggedIn: true,
+        isApproved: false,
+        practiceName: 'Pending Health Center'
+      });
+      assert.ok(liquid.includes('Account Pending Approval'));
+      assert.ok(liquid.includes('Pending Health Center'));
+      assert.ok(liquid.includes('reviewed by the store administrator'));
+    });
+
+    it('renders full protocol library when signed in and approved', () => {
+      const activeProtocols = [
+        {
+          id: 'p_1',
+          token: 'tok_active_12345678',
+          name: 'Gut Healing Routine',
+          introNote: 'Take with lunch',
+          linesCount: 3,
+          retailTotal: '$75.00',
+          updatedAt: '2026-10-27T00:00:00Z'
+        }
+      ];
+
+      const liquid = renderPortalLiquid({
+        isLoggedIn: true,
+        isApproved: true,
+        practiceName: 'Elite Naturopathic Clinic',
+        activeProtocols
+      });
+
+      assert.ok(liquid.includes('Elite Naturopathic Clinic'));
+      assert.ok(liquid.includes('Gut Healing Routine'));
+      assert.ok(liquid.includes('tok_active_12345678'));
+      assert.ok(liquid.includes('$75.00'));
+      assert.ok(liquid.includes('Copy Link'));
+      assert.ok(liquid.includes('Print Handout'));
+    });
+
+    it('neutralizes Liquid delimiters in protocol names and practice names', () => {
+      const liquid = renderPortalLiquid({
+        isLoggedIn: true,
+        isApproved: true,
+        practiceName: 'Clinic {{ shop.name }}',
+        activeProtocols: [
+          {
+            id: 'p_2',
+            token: 'tok_escape_12345678',
+            name: 'Hack {% assign x = 1 %}',
+            linesCount: 1,
+            retailTotal: '$10.00'
+          }
+        ]
+      });
+
+      assert.ok(!liquid.includes('{{ shop.name }}'));
+      assert.ok(!liquid.includes('{% assign x = 1 %}'));
+      assert.ok(liquid.includes('&#123;&#123; shop.name &#125;&#125;'));
+      assert.ok(liquid.includes('&#123;% assign x = 1 %&#125;'));
     });
   });
 });

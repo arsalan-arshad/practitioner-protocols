@@ -18,7 +18,7 @@
 
 ## M3 — Practitioner portal
 - [x] Portal logic: Library data models, editor validation (limits, price total), duplicate/archive/restore, concurrent-edit warning (`app/lib/protocols/portal.js`, `test/portal.test.js`).
-- [ ] Interactive portal UI screens (extension/proxy page) — blocked on dev store + Spike S1.
+- [x] Interactive portal UI screens (`renderPortalLiquid` in `app/lib/protocols/portal.js`, `routes.js`, `test/routes.test.js`: zero-extension App Proxy `/apps/protocols` portal, sign-in gate, approval status, active/starter/archived protocol cards, share kit buttons).
 
 ## M4 — Share kit
 - [x] Pure vector QR SVG generator (ISO/IEC 18004, GF(256) Reed-Solomon) and printable one-page HTML/CSS handout (`app/lib/protocols/qr.js`, `handout.js`, `test/handout.test.js`).

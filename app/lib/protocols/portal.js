@@ -754,3 +754,289 @@ export function generateProtocolShareKit({
     practiceName: resolvedPractice
   };
 }
+
+/**
+ * Neutralizes Liquid delimiters to prevent template injection on Shopify App Proxy.
+ *
+ * @param {string} str
+ * @returns {string}
+ */
+function neutralizeLiquid(str) {
+  if (typeof str !== 'string') return '';
+  return str
+    .replace(/\{\{/g, '&#123;&#123;')
+    .replace(/\}\}/g, '&#125;&#125;')
+    .replace(/\{%/g, '&#123;%')
+    .replace(/%\}/g, '%&#125;');
+}
+
+/**
+ * Safely HTML-escapes and neutralizes text.
+ *
+ * @param {string} str
+ * @returns {string}
+ */
+function safePortalText(str) {
+  return neutralizeLiquid(escapeHtml(str || ''));
+}
+
+/**
+ * Renders the full Practitioner Portal Liquid page for Shopify App Proxy (Milestone M3).
+ *
+ * @param {{
+ *   shop?: string,
+ *   isLoggedIn?: boolean,
+ *   isApproved?: boolean,
+ *   practiceName?: string,
+ *   activeProtocols?: Array<any>,
+ *   archivedProtocols?: Array<any>,
+ *   starterProtocols?: Array<any>,
+ *   mode?: string
+ * }} options
+ * @returns {string} Liquid markup string
+ */
+export function renderPortalLiquid(options = {}) {
+  const {
+    shop = '',
+    isLoggedIn = false,
+    isApproved = false,
+    practiceName = '',
+    activeProtocols = [],
+    archivedProtocols = [],
+    starterProtocols = [],
+    mode = 'tag'
+  } = options;
+
+  const robotsMeta = '<meta name="robots" content="noindex, nofollow">';
+  const safePractice = safePortalText(practiceName);
+
+  const styles = `
+<style>
+  .portal-container {
+    max-width: 960px;
+    margin: 2rem auto;
+    padding: 0 1.25rem;
+    font-family: inherit;
+    color: #1f2937;
+    line-height: 1.5;
+  }
+  .portal-header {
+    border-bottom: 1px solid #e5e7eb;
+    padding-bottom: 1.5rem;
+    margin-bottom: 2rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    flex-wrap: wrap;
+    gap: 1rem;
+  }
+  .portal-practice-badge {
+    display: inline-block;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: #047857;
+    background: #ecfdf5;
+    padding: 0.25rem 0.625rem;
+    border-radius: 9999px;
+    margin-bottom: 0.5rem;
+  }
+  .portal-title {
+    font-size: 1.875rem;
+    font-weight: 700;
+    color: #111827;
+    margin: 0 0 0.5rem 0;
+  }
+  .portal-subtitle {
+    font-size: 1rem;
+    color: #4b5563;
+    margin: 0;
+  }
+  .portal-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.625rem 1.25rem;
+    border-radius: 6px;
+    font-weight: 600;
+    font-size: 0.875rem;
+    cursor: pointer;
+    text-decoration: none;
+    border: 1px solid transparent;
+    transition: all 0.15s ease;
+  }
+  .portal-btn-primary {
+    background-color: #047857;
+    color: #ffffff;
+  }
+  .portal-btn-primary:hover {
+    background-color: #065f46;
+  }
+  .portal-btn-secondary {
+    background-color: #ffffff;
+    color: #374151;
+    border-color: #d1d5db;
+  }
+  .portal-btn-secondary:hover {
+    background-color: #f9fafb;
+    border-color: #9ca3af;
+  }
+  .portal-card-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 1.25rem;
+    margin-bottom: 2.5rem;
+  }
+  .portal-card {
+    background: #ffffff;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    padding: 1.25rem;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+  }
+  .portal-card-title {
+    font-size: 1.125rem;
+    font-weight: 600;
+    color: #111827;
+    margin: 0 0 0.5rem 0;
+  }
+  .portal-card-meta {
+    font-size: 0.875rem;
+    color: #6b7280;
+    margin-bottom: 1rem;
+  }
+  .portal-card-actions {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    margin-top: 1rem;
+    padding-top: 0.875rem;
+    border-top: 1px solid #f3f4f6;
+  }
+  .portal-status-box {
+    text-align: center;
+    padding: 4rem 1.5rem;
+    background: #ffffff;
+    border: 1px solid #e5e7eb;
+    border-radius: 12px;
+    margin: 2rem auto;
+    max-width: 520px;
+  }
+  .portal-status-title {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: #111827;
+    margin: 1rem 0 0.5rem 0;
+  }
+  .portal-status-desc {
+    font-size: 1rem;
+    color: #6b7280;
+    margin: 0 0 1.5rem 0;
+    line-height: 1.5;
+  }
+  .portal-section-heading {
+    font-size: 1.25rem;
+    font-weight: 700;
+    color: #111827;
+    margin: 2rem 0 1rem 0;
+  }
+</style>`;
+
+  // 1. Unauthenticated state
+  if (!isLoggedIn) {
+    return `${robotsMeta}${styles}
+<div class="portal-container">
+  <div class="portal-status-box">
+    <svg width="48" height="48" fill="none" viewBox="0 0 24 24" stroke="#047857" style="margin: 0 auto;">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>
+    </svg>
+    <h1 class="portal-status-title">Practitioner Sign In Required</h1>
+    <p class="portal-status-desc">Please log in to your customer account to access your protocols library, create recommendations, and generate client share links.</p>
+    <a href="/account/login" class="portal-btn portal-btn-primary">Sign In to Account</a>
+  </div>
+</div>`;
+  }
+
+  // 2. Unapproved practitioner state
+  if (!isApproved) {
+    return `${robotsMeta}${styles}
+<div class="portal-container">
+  <div class="portal-status-box">
+    <svg width="48" height="48" fill="none" viewBox="0 0 24 24" stroke="#d97706" style="margin: 0 auto;">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+    </svg>
+    <h1 class="portal-status-title">Account Pending Approval</h1>
+    ${safePractice ? `<div class="portal-practice-badge">${safePractice}</div>` : ''}
+    <p class="portal-status-desc">Your practitioner account is currently being reviewed by the store administrator. You will be able to create and share client recommendation protocols once your account is approved.</p>
+  </div>
+</div>`;
+  }
+
+  // 3. Approved practitioner: render full portal library
+  const renderCards = (protocols) => {
+    if (!protocols || protocols.length === 0) {
+      return `<p style="color: #6b7280; font-style: italic;">No protocols found.</p>`;
+    }
+    return `
+    <div class="portal-card-grid">
+      ${protocols.map((p) => {
+        const title = safePortalText(p.name || 'Untitled Protocol');
+        const token = safePortalText(p.token || '');
+        const items = typeof p.linesCount === 'number' ? p.linesCount : (p.lines?.length || 0);
+        const retail = safePortalText(p.retailTotal || '$0.00');
+        const shareUrl = `/apps/protocols/${token}`;
+        const handoutUrl = `/apps/protocols/${token}?handout=1`;
+
+        return `
+        <div class="portal-card">
+          <div>
+            <h3 class="portal-card-title">${title}</h3>
+            <div class="portal-card-meta">
+              <div>${items} ${items === 1 ? 'item' : 'items'} &middot; Total: ${retail}</div>
+              <div style="font-size: 0.75rem; margin-top: 0.25rem;">Share token: <code>${token}</code></div>
+            </div>
+          </div>
+          <div class="portal-card-actions">
+            <a href="${shareUrl}" class="portal-btn portal-btn-secondary" style="font-size: 0.8125rem; padding: 0.375rem 0.75rem;">Copy Link</a>
+            <a href="${handoutUrl}" target="_blank" rel="noopener" class="portal-btn portal-btn-secondary" style="font-size: 0.8125rem; padding: 0.375rem 0.75rem;">Print Handout</a>
+          </div>
+        </div>`;
+      }).join('\n')}
+    </div>`;
+  };
+
+  return `${robotsMeta}${styles}
+<div class="portal-container">
+  <header class="portal-header">
+    <div>
+      ${safePractice ? `<div class="portal-practice-badge">${safePractice}</div>` : ''}
+      <h1 class="portal-title">Practitioner Protocols</h1>
+      <p class="portal-subtitle">Create and share curated product recommendation lists with your clients.</p>
+    </div>
+    <div>
+      <button type="button" class="portal-btn portal-btn-primary" onclick="alert('Protocol editor')">Create Protocol</button>
+    </div>
+  </header>
+
+  <section>
+    <h2 class="portal-section-heading">My Active Protocols (${activeProtocols.length})</h2>
+    ${renderCards(activeProtocols)}
+  </section>
+
+  ${starterProtocols.length > 0 ? `
+  <section>
+    <h2 class="portal-section-heading">Brand Starter Templates (${starterProtocols.length})</h2>
+    ${renderCards(starterProtocols)}
+  </section>` : ''}
+
+  ${archivedProtocols.length > 0 ? `
+  <section>
+    <h2 class="portal-section-heading">Archived Protocols (${archivedProtocols.length})</h2>
+    ${renderCards(archivedProtocols)}
+  </section>` : ''}
+</div>`;
+}

@@ -2,7 +2,7 @@
 
 > **Open-Source (MIT)** | Built for the Shopify Merchant & Developer Community | Open for PRs & Discussions
 >
-> ⚙️ **Status: Pure Engine Modules Verified (245/245 Unit Tests Passing with Mocks)** | **Live PostgreSQL Integration (Last verified 10/10 against PostgreSQL 17.11 in Session 9; test:db skips with a notice when no DB is reachable)** | **Awaiting Dev Store with B2B for Spikes S1–S5 & Full App Harness**
+> ⚙️ **Status: Pure Engine Modules Verified (259/259 Unit Tests Passing with Mocks)** | **Live PostgreSQL Integration (Last verified 10/10 against PostgreSQL 17.11 in Session 9; test:db skips with a notice when no DB is reachable)** | **Dev Store Spikes Complete (M0 Verified)**
 
 ---
 
@@ -14,7 +14,7 @@
 
 **Privacy by design:** Protocols never accept or store client/patient information. The validator strictly enforces a zero-PII barrier (`PII_NOT_ALLOWED`) both on top-level keys and within nested line items. Attribution is tracked solely via aggregate monthly counters.
 
-**Current build stage:** The pure engine logic, security controls, cryptographic primitives, Liquid renderers, rate limiters, validation barriers, and PostgreSQL database queries are fully built and covered by 245 automated unit tests using mock database interfaces. Real PostgreSQL query execution, transaction behavior, constraints, row-level locking (`FOR UPDATE`), and migrations are verified against a live PostgreSQL instance via `npm run test:db` (10 integration tests passing). Full UI/screens, app harness (`shopify.app.toml`, server entry), and live storefront testing are intentionally staged behind Spikes S1–S5 (see `docs/SPEC.md` §4), which require a Shopify development store with B2B features enabled.
+**Current build stage:** The pure engine logic, security controls, cryptographic primitives, Liquid renderers, catalog resolver, rate limiters, validation barriers, and PostgreSQL database queries are fully built and covered by 259 automated unit tests using mock database interfaces. Real PostgreSQL query execution, transaction behavior, constraints, row-level locking (`FOR UPDATE`), and migrations are verified against a live PostgreSQL instance via `npm run test:db` (10 integration tests passing). Spikes S1–S5 (Milestone M0) on a live Partner dev store verified App Proxy Liquid evaluation, reverse proxy header chain traversal, and storefront parameters.
 
 ---
 
@@ -163,14 +163,14 @@ npm install
 The project features a deterministic test suite using native Node.js test runner (`node:test`):
 
 ```bash
-# Run all 245 pure unit tests using mock database interfaces (zero external network dependencies, ~80ms):
+# Run all 259 pure unit tests using mock database interfaces (zero external network dependencies, ~90ms):
 npm test
 
 # Run PostgreSQL live database integration tests against a running Postgres instance:
 npm run test:db
 ```
 
-> **Database Tests & Migrations Note:** `npm test` runs 245 pure unit tests against deterministic mock database interfaces. Real PostgreSQL coverage exists when `npm run test:db` is run against PostgreSQL running on `localhost:5432` with database `practitioner_protocols` and migrations applied. The live integration test suite verifies 10/10 tests against real PostgreSQL, including row-level locking (`FOR UPDATE`), transaction rollbacks, multi-line replacement, webhook idempotency, and GDPR compliance.
+> **Database Tests & Migrations Note:** `npm test` runs 259 pure unit tests against deterministic mock database interfaces. Real PostgreSQL coverage exists when `npm run test:db` is run against PostgreSQL running on `localhost:5432` with database `practitioner_protocols` and migrations applied. The live integration test suite verifies 10/10 tests against real PostgreSQL, including row-level locking (`FOR UPDATE`), transaction rollbacks, multi-line replacement, webhook idempotency, and GDPR compliance.
 
 ### Applying Migrations (PostgreSQL)
 When running against a live PostgreSQL database, apply the versioned migrations in order:
@@ -198,6 +198,7 @@ psql $DATABASE_URL -f prisma/migrations/20261022_add_currency_to_stat_unique_and
 │           ├── qr.js            # Pure vector QR SVG generator (GF(256) Reed-Solomon)
 │           ├── handout.js       # Printable HTML/CSS handout generator (Letter & A4)
 │           ├── proxy.js         # App Proxy HMAC verifier & theme Liquid renderer
+│           ├── catalog.js       # Batch variant GraphQL resolver & enrichment (M2)
 │           ├── portal.js        # Practitioner portal library, editor, & concurrent edit check
 │           ├── admin.js         # Merchant admin controls & RFC 4180 CSV export
 │           ├── rate-limit.js    # In-memory sliding-window rate limiter
@@ -219,6 +220,7 @@ psql $DATABASE_URL -f prisma/migrations/20261022_add_currency_to_stat_unique_and
 │   ├── attribution.test.js      # Cart payload & mixed-cart attribution tests
 │   ├── handout.test.js          # QR SVG & printable handout tests
 │   ├── proxy.test.js            # App Proxy HMAC & Liquid state tests
+│   ├── catalog.test.js          # Catalog resolver batch GraphQL & fallback tests
 │   ├── portal.test.js           # Library, editor, & concurrent-edit tests
 │   ├── admin.test.js            # Approvals, starters, disable, & CSV export tests
 │   ├── rate-limit.test.js       # Sliding window rate limiter tests

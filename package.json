@@ -10,7 +10,7 @@
     "node": ">=22.12"
   },
   "scripts": {
-    "test": "node --test test/token.test.js test/validation.test.js test/permissions.test.js test/attribution.test.js test/handout.test.js test/proxy.test.js test/webhooks.test.js test/portal.test.js test/admin.test.js test/rate-limit.test.js test/routes.test.js",
+    "test": "node --test test/token.test.js test/validation.test.js test/permissions.test.js test/attribution.test.js test/handout.test.js test/proxy.test.js test/webhooks.test.js test/portal.test.js test/admin.test.js test/rate-limit.test.js test/routes.test.js test/catalog.test.js",
     "test:db": "node --test test/database.integration.test.js",
     "test:all": "node --test test/**/*.test.js"
   },

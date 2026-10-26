@@ -1,6 +1,6 @@
 # Practitioner Protocols — Project Context (for Claude)
 
-_Snapshot: 2026-10-22 · Core pure engine library fully implemented (245 pure unit tests passing) · Session 10 complete · Awaiting dev store with B2B for Spikes S1–S5 and app UI scaffold._
+_Snapshot: 2026-10-27 · Core pure engine library fully implemented (259 pure unit tests passing) · Session 13 complete · Catalog Resolver implemented · Spikes S1–S5 verified._
 _Contains NO secrets. Never paste `.env` values or tokens into chat or docs._
 
 ## 1. What this is
@@ -309,3 +309,22 @@ Run the five spikes in a day or two on a dev store; write the answers into secti
 - **Verification Status:**
   - `npm test`: **245/245 pure unit tests passing** (66 suites, 0 failures, ~80ms).
   - Background spike harness daemon safely terminated; core repo (`04-practitioner-protocols`) remains pristine.
+
+## 23. Session Log — 2026-10-27 (Session 13: Catalog Resolver Implementation — Milestone M2)
+- **Context:** Implemented the batch Catalog Resolver (`app/lib/protocols/catalog.js`, `test/catalog.test.js`) resolving Defect 4 as specified in `docs/PROPOSAL_CATALOG_RESOLVER.md`.
+- **Implementation Details:**
+  1. **Batch GraphQL Variant Resolution (`buildVariantQuery`, `parseCatalogNodes`, `resolveVariants`):**
+     - Constructs `nodes(ids: $ids)` query with optional `$country` and `$language` using `@inContext(country: $country, language: $language)`.
+     - Resolves variant titles, product titles, prices, stock availability (`availableForSale`), and product images.
+     - Suppresses `"Default Title"` so single-variant products display clean product titles.
+     - Correctly calculates minor currency units (`priceMinor`) respecting zero-decimal (JPY) and 3-decimal (KWD) currencies via `getCurrencyExponent`.
+     - Missing or deleted variants in Shopify return safe fallback records (`isDeleted: true`, `isPublished: false`, `availableForSale: false`, `title: "Unavailable Product"`).
+     - Non-`ACTIVE` products (drafts, archived) are flagged `isPublished: false`, `availableForSale: false`.
+  2. **Protocol Line Enrichment (`enrichProtocolLines`):**
+     - Merges live catalog data into database `ProtocolLine` objects (`productTitle`, `variantTitle`, `title`, `price`, `priceFormatted`, `available`, `inStock`, `image`).
+     - Supports `filterUnavailable: true` to hide deleted or unpublished products from the client page (SPEC §5).
+  3. **Deterministic Test Factory (`createFakeVariantResolver`):**
+     - In-memory mock resolver for reproducible, network-free testing of controllers and renderers.
+- **Verification Status:**
+  - `npm test`: **259/259 pure unit tests passing** (73 suites, 0 failures, ~98ms).
+  - Clean working tree ready for commit.

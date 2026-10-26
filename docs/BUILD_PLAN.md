@@ -13,7 +13,8 @@
 ## M2 — Client page
 - [x] App-proxy pure Liquid renderer (HMAC-verified, Liquid delimiter neutralization, all states from SPEC §5, `noindex`, mobile-first in `app/lib/protocols/proxy.js`, `test/proxy.test.js`).
 - [x] Add all (one request) + per-line add + hidden attribution property logic (`app/lib/protocols/attribution.js`).
-- [ ] Live client page storefront integration and theme testing (blocked on dev store + Spike S2). Catalog resolver proposed in `docs/PROPOSAL_CATALOG_RESOLVER.md`.
+- [x] Catalog Resolver (`app/lib/protocols/catalog.js`, `test/catalog.test.js`): batch variant GraphQL resolution, fallback for deleted/draft items, out-of-stock marking, multi-currency minor units, and line enrichment.
+- [ ] Live client page storefront integration and theme testing (blocked on dev store + Spike S2).
 
 ## M3 — Practitioner portal
 - [x] Portal logic: Library data models, editor validation (limits, price total), duplicate/archive/restore, concurrent-edit warning (`app/lib/protocols/portal.js`, `test/portal.test.js`).

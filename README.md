@@ -2,7 +2,7 @@
 
 > **Open-Source (MIT)** | Built for the Shopify Merchant & Developer Community | Open for PRs & Discussions
 >
-> ⚙️ **Status: Pure Engine Modules Verified (267/267 Unit Tests Passing with Mocks)** | **Live PostgreSQL Integration (Last verified 10/10 against PostgreSQL 17.11 in Session 9; test:db skips with a notice when no DB is reachable)** | **Dev Store Spikes Complete (M0 Verified)**
+> ⚙️ **Status: Pure Engine Modules Verified (272/272 Unit Tests Passing with Mocks)** | **Live PostgreSQL Integration (Last verified 10/10 against PostgreSQL 17.11 in Session 9; test:db skips with a notice when no DB is reachable)** | **Dev Store Spikes Complete (M0 Verified)**
 
 ---
 
@@ -14,7 +14,7 @@
 
 **Privacy by design:** Protocols never accept or store client/patient information. The validator strictly enforces a zero-PII barrier (`PII_NOT_ALLOWED`) both on top-level keys and within nested line items. Attribution is tracked solely via aggregate monthly counters.
 
-**Current build stage:** The pure engine logic, security controls, cryptographic primitives, Liquid renderers, catalog resolver, rate limiters, validation barriers, and PostgreSQL database queries are fully built and covered by 267 automated unit tests using mock database interfaces. Real PostgreSQL query execution, transaction behavior, constraints, row-level locking (`FOR UPDATE`), and migrations are verified against a live PostgreSQL instance via `npm run test:db` (10 integration tests passing). Spikes S1–S5 (Milestone M0) on a live Partner dev store verified App Proxy Liquid evaluation, reverse proxy header chain traversal, and storefront parameters.
+**Current build stage:** The pure engine logic, security controls, cryptographic primitives, Liquid renderers, catalog resolver, rate limiters, validation barriers, and PostgreSQL database queries are fully built and covered by 272 automated unit tests using mock database interfaces. Real PostgreSQL query execution, transaction behavior, constraints, row-level locking (`FOR UPDATE`), and migrations are verified against a live PostgreSQL instance via `npm run test:db` (10 integration tests passing). Spikes S1–S5 (Milestone M0) on a live Partner dev store verified App Proxy Liquid evaluation, reverse proxy header chain traversal, and storefront parameters.
 
 ---
 
@@ -163,14 +163,14 @@ npm install
 The project features a deterministic test suite using native Node.js test runner (`node:test`):
 
 ```bash
-# Run all 267 pure unit tests using mock database interfaces (zero external network dependencies, ~90ms):
+# Run all 272 pure unit tests using mock database interfaces (zero external network dependencies, ~90ms):
 npm test
 
 # Run PostgreSQL live database integration tests against a running Postgres instance:
 npm run test:db
 ```
 
-> **Database Tests & Migrations Note:** `npm test` runs 267 pure unit tests against deterministic mock database interfaces. Real PostgreSQL coverage exists when `npm run test:db` is run against PostgreSQL running on `localhost:5432` with database `practitioner_protocols` and migrations applied. The live integration test suite verifies 10/10 tests against real PostgreSQL, including row-level locking (`FOR UPDATE`), transaction rollbacks, multi-line replacement, webhook idempotency, and GDPR compliance.
+> **Database Tests & Migrations Note:** `npm test` runs 272 pure unit tests against deterministic mock database interfaces. Real PostgreSQL coverage exists when `npm run test:db` is run against PostgreSQL running on `localhost:5432` with database `practitioner_protocols` and migrations applied. The live integration test suite verifies 10/10 tests against real PostgreSQL, including row-level locking (`FOR UPDATE`), transaction rollbacks, multi-line replacement, webhook idempotency, and GDPR compliance.
 
 ### Applying Migrations (PostgreSQL)
 When running against a live PostgreSQL database, apply the versioned migrations in order:

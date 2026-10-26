@@ -873,3 +873,425 @@ export async function exportAttributionCsv(db, options) {
   const report = await getAttributionReport(db, options);
   return formatAttributionCsv(report);
 }
+
+/**
+ * Escapes HTML characters in a string.
+ *
+ * @param {string} str
+ * @returns {string}
+ */
+function escapeAdminText(str) {
+  if (typeof str !== 'string') return '';
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+/**
+ * Renders the full Merchant Admin embedded Polaris HTML UI (Milestone M6).
+ *
+ * @param {{
+ *   shop?: string,
+ *   profiles?: Array<any>,
+ *   starters?: Array<any>,
+ *   report?: any,
+ *   settings?: any,
+ *   activeTab?: string
+ * }} options
+ * @returns {string} Complete Polaris HTML document
+ */
+export function renderAdminHtml(options = {}) {
+  const {
+    shop = '',
+    profiles = [],
+    starters = [],
+    report = null,
+    settings = null,
+    activeTab = 'practitioners'
+  } = options;
+
+  // Enforce zero PII barrier on all inputs
+  assertNoPii(profiles);
+  assertNoPii(starters);
+  if (report) assertNoPii(report);
+  if (settings) assertNoPii(settings);
+
+  const safeShop = escapeAdminText(shop);
+  const currentTab = ['practitioners', 'starters', 'attribution', 'settings'].includes(activeTab)
+    ? activeTab
+    : 'practitioners';
+
+  const styles = `
+<style>
+  :root {
+    --p-color-bg: #f6f6f7;
+    --p-color-bg-surface: #ffffff;
+    --p-color-text: #202223;
+    --p-color-text-subdued: #6d7175;
+    --p-color-border: #e1e3e5;
+    --p-color-primary: #008060;
+    --p-color-primary-hover: #006e52;
+    --p-color-critical: #d72c0d;
+    --p-color-critical-hover: #bc2200;
+  }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background-color: var(--p-color-bg);
+    color: var(--p-color-text);
+    line-height: 1.5;
+  }
+  .Polaris-Page {
+    max-width: 1040px;
+    margin: 2rem auto;
+    padding: 0 1rem;
+  }
+  .Polaris-Header {
+    margin-bottom: 1.5rem;
+  }
+  .Polaris-Header-Title {
+    font-size: 1.75rem;
+    font-weight: 700;
+    margin: 0 0 0.25rem 0;
+  }
+  .Polaris-Header-Subdued {
+    color: var(--p-color-text-subdued);
+    font-size: 0.875rem;
+  }
+  .Polaris-Tabs {
+    display: flex;
+    gap: 0.5rem;
+    border-bottom: 1px solid var(--p-color-border);
+    margin-bottom: 1.5rem;
+  }
+  .Polaris-Tab {
+    padding: 0.75rem 1rem;
+    font-weight: 600;
+    font-size: 0.875rem;
+    color: var(--p-color-text-subdued);
+    text-decoration: none;
+    border-bottom: 2px solid transparent;
+  }
+  .Polaris-Tab--selected {
+    color: var(--p-color-primary);
+    border-bottom-color: var(--p-color-primary);
+  }
+  .Polaris-Card {
+    background: var(--p-color-bg-surface);
+    border-radius: 8px;
+    box-shadow: 0 0 0 1px rgba(63, 63, 68, 0.05), 0 1px 3px 0 rgba(63, 63, 68, 0.15);
+    padding: 1.5rem;
+    margin-bottom: 1.5rem;
+  }
+  .Polaris-Card-Title {
+    font-size: 1.125rem;
+    font-weight: 600;
+    margin: 0 0 1rem 0;
+  }
+  .Polaris-Button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.5rem 1rem;
+    font-size: 0.875rem;
+    font-weight: 600;
+    border-radius: 4px;
+    border: 1px solid var(--p-color-border);
+    background: #ffffff;
+    color: var(--p-color-text);
+    cursor: pointer;
+    text-decoration: none;
+  }
+  .Polaris-Button--primary {
+    background: var(--p-color-primary);
+    color: #ffffff;
+    border-color: var(--p-color-primary);
+  }
+  .Polaris-Button--critical {
+    background: var(--p-color-critical);
+    color: #ffffff;
+    border-color: var(--p-color-critical);
+  }
+  .Polaris-Badge {
+    display: inline-block;
+    padding: 0.25rem 0.5rem;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    font-weight: 600;
+  }
+  .Polaris-Badge--success {
+    background: #e4fbf5;
+    color: #007f5f;
+  }
+  .Polaris-Badge--attention {
+    background: #fff5ea;
+    color: #914400;
+  }
+  table.Polaris-Table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.875rem;
+  }
+  table.Polaris-Table th, table.Polaris-Table td {
+    padding: 0.75rem;
+    border-bottom: 1px solid var(--p-color-border);
+    text-align: left;
+  }
+  table.Polaris-Table th {
+    font-weight: 600;
+    color: var(--p-color-text-subdued);
+  }
+  .Polaris-Metrics-Grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+  }
+  .Polaris-Metric-Box {
+    background: #f9fafb;
+    border: 1px solid var(--p-color-border);
+    border-radius: 6px;
+    padding: 1rem;
+    text-align: center;
+  }
+  .Polaris-Metric-Val {
+    font-size: 1.75rem;
+    font-weight: 700;
+    color: var(--p-color-text);
+  }
+  .Polaris-Metric-Label {
+    font-size: 0.8125rem;
+    color: var(--p-color-text-subdued);
+    margin-top: 0.25rem;
+  }
+</style>`;
+
+  // Tab 1: Practitioners List
+  const renderPractitionersTab = () => {
+    const rows = profiles.map((p) => {
+      const gid = escapeAdminText(p.ownerGid || '');
+      const practice = escapeAdminText(p.practiceName || 'Not Set');
+      const isApproved = Boolean(p.isApproved);
+      const statusBadge = isApproved
+        ? `<span class="Polaris-Badge Polaris-Badge--success">Approved</span>`
+        : `<span class="Polaris-Badge Polaris-Badge--attention">Pending Approval</span>`;
+      const actionBtn = isApproved
+        ? `<button type="submit" class="Polaris-Button">Revoke</button>`
+        : `<button type="submit" class="Polaris-Button Polaris-Button--primary">Approve</button>`;
+
+      return `
+      <tr>
+        <td><code>${gid}</code></td>
+        <td><strong>${practice}</strong></td>
+        <td>${statusBadge}</td>
+        <td>
+          <form method="POST" action="/api/admin/practitioners/status" style="display:inline;">
+            <input type="hidden" name="ownerGid" value="${gid}">
+            <input type="hidden" name="action" value="${isApproved ? 'revoke' : 'approve'}">
+            ${actionBtn}
+          </form>
+        </td>
+      </tr>`;
+    }).join('');
+
+    return `
+    <div class="Polaris-Card">
+      <h2 class="Polaris-Card-Title">Practitioner Directory &amp; Approvals</h2>
+      <p style="color: var(--p-color-text-subdued); margin-bottom: 1rem;">Manage approved practitioners and configure practice display names.</p>
+      <table class="Polaris-Table">
+        <thead>
+          <tr>
+            <th>Practitioner GID</th>
+            <th>Practice Name (Merchant Controlled)</th>
+            <th>Status</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows || '<tr><td colspan="4" style="text-align:center; color:#6d7175;">No practitioner profiles registered.</td></tr>'}
+        </tbody>
+      </table>
+    </div>`;
+  };
+
+  // Tab 2: Starters Management
+  const renderStartersTab = () => {
+    const rows = starters.map((s) => {
+      const name = escapeAdminText(s.name || 'Untitled Starter');
+      const items = s.linesCount || s.lines?.length || 0;
+      return `
+      <tr>
+        <td><strong>${name}</strong></td>
+        <td>${items} ${items === 1 ? 'item' : 'items'}</td>
+        <td><span class="Polaris-Badge Polaris-Badge--success">Active Template</span></td>
+      </tr>`;
+    }).join('');
+
+    return `
+    <div class="Polaris-Card">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 1rem;">
+        <div>
+          <h2 class="Polaris-Card-Title" style="margin:0;">Brand Starter Templates</h2>
+          <p style="color: var(--p-color-text-subdued); margin: 0.25rem 0 0 0;">Curated protocols practitioners can duplicate and recommend to clients.</p>
+        </div>
+        <button type="button" class="Polaris-Button Polaris-Button--primary">Create Starter Template</button>
+      </div>
+      <table class="Polaris-Table">
+        <thead>
+          <tr>
+            <th>Template Name</th>
+            <th>Items</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows || '<tr><td colspan="3" style="text-align:center; color:#6d7175;">No brand starter templates created yet.</td></tr>'}
+        </tbody>
+      </table>
+    </div>`;
+  };
+
+  // Tab 3: Monthly Attribution Reports
+  const renderAttributionTab = () => {
+    const totalRev = report?.totalRevenueFormatted || '$0.00';
+    const totalOrders = report?.totalOrders ?? 0;
+    const totalUnits = report?.totalUnits ?? 0;
+    const month = escapeAdminText(report?.month || new Date().toISOString().slice(0, 7));
+
+    const rows = (report?.items || []).map((item) => {
+      const practice = escapeAdminText(item.practiceName || 'Direct');
+      const protocol = escapeAdminText(item.protocolName || 'General');
+      const orders = item.orders ?? 0;
+      const units = item.units ?? 0;
+      const rev = escapeAdminText(item.revenueFormatted || '$0.00');
+
+      return `
+      <tr>
+        <td><strong>${practice}</strong></td>
+        <td>${protocol}</td>
+        <td>${orders}</td>
+        <td>${units}</td>
+        <td><strong>${rev}</strong></td>
+      </tr>`;
+    }).join('');
+
+    return `
+    <div class="Polaris-Card">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 1.5rem;">
+        <div>
+          <h2 class="Polaris-Card-Title" style="margin:0;">Attribution &amp; Sales Reports (${month})</h2>
+          <p style="color: var(--p-color-text-subdued); margin: 0.25rem 0 0 0;">Monthly aggregate order volume and attributed retail revenue by practice.</p>
+        </div>
+        <a href="/api/admin/attribution.csv" class="Polaris-Button Polaris-Button--primary">Export CSV (RFC 4180)</a>
+      </div>
+
+      <div class="Polaris-Metrics-Grid">
+        <div class="Polaris-Metric-Box">
+          <div class="Polaris-Metric-Val">${totalRev}</div>
+          <div class="Polaris-Metric-Label">Attributed Revenue</div>
+        </div>
+        <div class="Polaris-Metric-Box">
+          <div class="Polaris-Metric-Val">${totalOrders}</div>
+          <div class="Polaris-Metric-Label">Attributed Orders</div>
+        </div>
+        <div class="Polaris-Metric-Box">
+          <div class="Polaris-Metric-Val">${totalUnits}</div>
+          <div class="Polaris-Metric-Label">Total Units Sold</div>
+        </div>
+      </div>
+
+      <table class="Polaris-Table">
+        <thead>
+          <tr>
+            <th>Practice Name</th>
+            <th>Protocol</th>
+            <th>Orders</th>
+            <th>Units</th>
+            <th>Revenue</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows || '<tr><td colspan="5" style="text-align:center; color:#6d7175;">No attributed orders recorded this month.</td></tr>'}
+        </tbody>
+      </table>
+    </div>`;
+  };
+
+  // Tab 4: Settings & Emergency Controls
+  const renderSettingsTab = () => {
+    const mode = settings?.mode === 'company' ? 'company' : 'tag';
+    const disclaimer = escapeAdminText(settings?.disclaimer || '');
+    const handout = escapeAdminText(settings?.handoutText || '');
+
+    return `
+    <div class="Polaris-Card">
+      <h2 class="Polaris-Card-Title">App Settings</h2>
+      <form method="POST" action="/api/admin/settings">
+        <div style="margin-bottom: 1rem;">
+          <label style="display:block; font-weight:600; margin-bottom:0.25rem;">Identity Mode</label>
+          <select name="mode" style="padding:0.5rem; width:100%; max-width:320px; border-radius:4px; border:1px solid var(--p-color-border);">
+            <option value="tag" ${mode === 'tag' ? 'selected' : ''}>Tag Mode (Customer Tag "practitioner")</option>
+            <option value="company" ${mode === 'company' ? 'selected' : ''}>Company Mode (B2B Company Contact)</option>
+          </select>
+        </div>
+        <div style="margin-bottom: 1rem;">
+          <label style="display:block; font-weight:600; margin-bottom:0.25rem;">Storefront Footer Disclaimer</label>
+          <textarea name="disclaimer" rows="3" style="width:100%; border-radius:4px; border:1px solid var(--p-color-border); padding:0.5rem;">${disclaimer}</textarea>
+        </div>
+        <div style="margin-bottom: 1.5rem;">
+          <label style="display:block; font-weight:600; margin-bottom:0.25rem;">Printable Handout Notice</label>
+          <textarea name="handoutText" rows="2" style="width:100%; border-radius:4px; border:1px solid var(--p-color-border); padding:0.5rem;">${handout}</textarea>
+        </div>
+        <button type="submit" class="Polaris-Button Polaris-Button--primary">Save Settings</button>
+      </form>
+    </div>
+
+    <div class="Polaris-Card" style="border-left: 4px solid var(--p-color-critical);">
+      <h2 class="Polaris-Card-Title" style="color: var(--p-color-critical);">Emergency Controls</h2>
+      <p style="color: var(--p-color-text-subdued); margin-bottom: 1rem;">
+        In the event of an urgent regulatory inquiry, brand recall, or policy violation, you can immediately disable all protocol sharing links storewide.
+      </p>
+      <form method="POST" action="/api/admin/emergency/disable-all">
+        <button type="submit" class="Polaris-Button Polaris-Button--critical">Disable All Protocols Storewide</button>
+      </form>
+    </div>`;
+  };
+
+  let tabContent = '';
+  if (currentTab === 'starters') tabContent = renderStartersTab();
+  else if (currentTab === 'attribution') tabContent = renderAttributionTab();
+  else if (currentTab === 'settings') tabContent = renderSettingsTab();
+  else tabContent = renderPractitionersTab();
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Practitioner Protocols &mdash; Admin</title>
+  ${styles}
+</head>
+<body>
+  <div class="Polaris-Page">
+    <header class="Polaris-Header">
+      <h1 class="Polaris-Header-Title">Practitioner Protocols</h1>
+      <div class="Polaris-Header-Subdued">Connected Store: ${safeShop || 'Shopify Store'}</div>
+    </header>
+
+    <nav class="Polaris-Tabs">
+      <a href="?tab=practitioners" class="Polaris-Tab ${currentTab === 'practitioners' ? 'Polaris-Tab--selected' : ''}">Practitioners</a>
+      <a href="?tab=starters" class="Polaris-Tab ${currentTab === 'starters' ? 'Polaris-Tab--selected' : ''}">Starter Templates</a>
+      <a href="?tab=attribution" class="Polaris-Tab ${currentTab === 'attribution' ? 'Polaris-Tab--selected' : ''}">Attribution &amp; Reports</a>
+      <a href="?tab=settings" class="Polaris-Tab ${currentTab === 'settings' ? 'Polaris-Tab--selected' : ''}">Settings &amp; Emergency</a>
+    </nav>
+
+    <main>
+      ${tabContent}
+    </main>
+  </div>
+</body>
+</html>`;
+}

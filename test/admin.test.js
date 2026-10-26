@@ -24,7 +24,8 @@ import {
   updateSettings,
   getAttributionReport,
   formatAttributionCsv,
-  exportAttributionCsv
+  exportAttributionCsv,
+  renderAdminHtml
 } from '../app/lib/protocols/admin.js';
 
 describe('Merchant Admin Layer (app/lib/protocols/admin.js)', () => {
@@ -944,6 +945,135 @@ describe('Merchant Admin Layer (app/lib/protocols/admin.js)', () => {
       assert.ok(csvOutput.startsWith('Month,Practice Name,Owner GID,Protocol ID'));
       assert.ok(csvOutput.includes('245.50'));
       assert.ok(csvOutput.includes('110.00'));
+    });
+  });
+
+  describe('renderAdminHtml (M6 Embedded Polaris Admin UI)', () => {
+    const mockProfiles = [
+      {
+        id: 'prof_1',
+        ownerGid: 'gid://shopify/Customer/101',
+        practiceName: 'Elite Naturopathic Clinic',
+        isApproved: true,
+        ownerType: 'customer'
+      },
+      {
+        id: 'prof_2',
+        ownerGid: 'gid://shopify/Customer/102',
+        practiceName: 'Holistic Skin Studio',
+        isApproved: false,
+        ownerType: 'customer'
+      }
+    ];
+
+    const mockStarters = [
+      {
+        id: 'starter_1',
+        name: 'Brand Gut Starter Template',
+        status: 'active',
+        linesCount: 3
+      }
+    ];
+
+    const mockReport = {
+      month: '2026-10',
+      totalOrders: 14,
+      totalUnits: 38,
+      totalRevenueFormatted: '$1,245.50',
+      items: [
+        {
+          practiceName: 'Elite Naturopathic Clinic',
+          protocolName: 'Daily Gut Regimen',
+          orders: 10,
+          units: 25,
+          revenueFormatted: '$850.00'
+        }
+      ]
+    };
+
+    const mockSettings = {
+      mode: 'tag',
+      disclaimer: 'For educational use only.',
+      handoutText: 'Recommended by your healthcare professional.'
+    };
+
+    it('renders Polaris admin container with tabs: Practitioners, Starters, Attribution, and Settings', () => {
+      const html = renderAdminHtml({
+        shop: testShop,
+        profiles: mockProfiles,
+        starters: mockStarters,
+        report: mockReport,
+        settings: mockSettings
+      });
+
+      assert.ok(html.includes('Practitioners'));
+      assert.ok(html.includes('Starter Templates'));
+      assert.ok(html.includes('Attribution &amp; Reports'));
+      assert.ok(html.includes('Settings &amp; Emergency'));
+      assert.ok(html.includes('Polaris'));
+    });
+
+    it('renders practitioner approvals list with practice names, statuses, and action buttons', () => {
+      const html = renderAdminHtml({
+        shop: testShop,
+        profiles: mockProfiles,
+        starters: mockStarters,
+        report: mockReport,
+        settings: mockSettings,
+        activeTab: 'practitioners'
+      });
+
+      assert.ok(html.includes('Elite Naturopathic Clinic'));
+      assert.ok(html.includes('Holistic Skin Studio'));
+      assert.ok(html.includes('Approved'));
+      assert.ok(html.includes('Pending Approval'));
+      assert.ok(html.includes('Revoke'));
+      assert.ok(html.includes('Approve'));
+    });
+
+    it('renders monthly attribution metrics summary and RFC 4180 CSV export link', () => {
+      const html = renderAdminHtml({
+        shop: testShop,
+        profiles: mockProfiles,
+        starters: mockStarters,
+        report: mockReport,
+        settings: mockSettings,
+        activeTab: 'attribution'
+      });
+
+      assert.ok(html.includes('$1,245.50'));
+      assert.ok(html.includes('14')); // total orders
+      assert.ok(html.includes('38')); // total units
+      assert.ok(html.includes('/api/admin/attribution.csv'));
+    });
+
+    it('renders emergency storewide disable button with warning styling in settings tab', () => {
+      const html = renderAdminHtml({
+        shop: testShop,
+        profiles: mockProfiles,
+        starters: mockStarters,
+        report: mockReport,
+        settings: mockSettings,
+        activeTab: 'settings'
+      });
+
+      assert.ok(html.includes('Emergency Controls'));
+      assert.ok(html.includes('Disable All Protocols Storewide'));
+      assert.ok(html.includes('Polaris-Button--critical'));
+    });
+
+    it('strictly rejects any PII inside renderAdminHtml payload', () => {
+      assert.throws(
+        () =>
+          renderAdminHtml({
+            shop: testShop,
+            profiles: [{ practiceName: 'Clinic', patientName: 'Forbidden' }]
+          }),
+        {
+          name: 'ProtocolAdminError',
+          code: ADMIN_ERROR_CODES.PII_NOT_ALLOWED
+        }
+      );
     });
   });
 });

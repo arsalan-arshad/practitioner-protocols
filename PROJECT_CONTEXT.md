@@ -1,6 +1,6 @@
 # Practitioner Protocols — Project Context (for Claude)
 
-_Snapshot: 2026-10-27 · Core pure engine library fully implemented (267 pure unit tests passing) · Session 15 complete · Milestone M3 Practitioner Portal UI renderer complete._
+_Snapshot: 2026-10-27 · Core pure engine library fully implemented (272 pure unit tests passing) · Session 16 complete · Milestone M6 Merchant Admin Polaris UI renderer complete._
 _Contains NO secrets. Never paste `.env` values or tokens into chat or docs._
 
 ## 1. What this is
@@ -361,3 +361,20 @@ Run the five spikes in a day or two on a dev store; write the answers into secti
      - Added 4 tests in `test/portal.test.js` and 3 tests in `test/routes.test.js`.
 - **Verification Status:**
   - `npm test`: **267/267 pure unit tests passing** (74 suites, 0 failures, ~92ms).
+
+## 26. Session Log — 2026-10-27 (Session 16: Milestone M6 Merchant Admin Polaris UI Renderer)
+- **Context:** Implemented and tested the embedded Merchant Admin Polaris UI renderer (`renderAdminHtml` in `admin.js`, `test/admin.test.js`).
+- **Implementation Details:**
+  1. **Merchant Admin Polaris HTML Renderer (`renderAdminHtml` in `app/lib/protocols/admin.js`):**
+     - Renders complete Shopify Polaris responsive interface embedded inside Shopify Admin.
+     - **Practitioners Directory Tab:** Displays registered practitioner profiles, approval state badges (Approved, Pending Approval), merchant-controlled practice names, and Approve / Revoke action forms.
+     - **Starter Templates Tab:** Displays brand starter protocols and a Create Starter button.
+     - **Attribution & Reports Tab:** Renders summary metric cards (Attributed Revenue, Attributed Orders, Total Units Sold) and monthly breakdown table, plus a direct download link for RFC 4180 CSV export.
+     - **Settings & Emergency Controls Tab:** Identity Mode selection (`tag` vs `company`), storefront footer disclaimers, printable handout notices, and a critical emergency button to disable all protocols storewide.
+  2. **Security & Zero PII Barrier:**
+     - Enforces `assertNoPii` check across all input datasets (profiles, starters, reports, settings), strictly forbidding client/patient diagnostic or personal identifiers.
+     - HTML-escapes all text content against XSS and template injection.
+  3. **Automated Test Coverage:**
+     - Added 5 new automated tests in `test/admin.test.js` covering navigation tabs, practitioner directory, monthly attribution metrics, emergency controls, and PII rejection.
+- **Verification Status:**
+  - `npm test`: **272/272 pure unit tests passing** (75 suites, 0 failures, ~102ms).

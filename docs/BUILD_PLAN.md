@@ -28,7 +28,7 @@
 
 ## M6 — Merchant admin
 - [x] Pure merchant admin business logic: practitioner approvals, practice names, starters, emergency disable, settings, aggregate monthly reports, and RFC 4180 CSV export (`app/lib/protocols/admin.js`, `test/admin.test.js`).
-- [ ] Embedded Polaris admin UI screens — blocked on dev store + app scaffold.
+- [x] Embedded Polaris admin UI screens (`renderAdminHtml` in `app/lib/protocols/admin.js`, `test/admin.test.js`: tabs for practitioners directory, brand starters, monthly attribution metrics, settings, and storewide emergency controls).
 
 ## M7 — Hardening and review prep
 - [x] Compliance webhooks with error propagation and honest data request handling (`customers/data_request`, `customers/redact`, `shop/redact`, `app/uninstalled` in `app/lib/protocols/webhooks.js`).

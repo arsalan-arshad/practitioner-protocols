@@ -1,6 +1,6 @@
 # Practitioner Protocols — Project Context (for Claude)
 
-_Snapshot: 2026-10-27 · Core pure engine library fully implemented (272 pure unit tests passing) · Session 16 complete · Milestone M6 Merchant Admin Polaris UI renderer complete._
+_Snapshot: 2026-10-27 · Core pure engine library fully implemented (289 pure unit tests passing) · Spikes S1, S3–S5 open; S2 partially verified (Liquid evaluation confirmed on dev store; noindex, sitemap, and real-host proxy hop count pending) · App scaffold and UI renderers built, but real OAuth/token exchange, live session tokens, protocol editor with product search, and live admin routes remain open._
 _Contains NO secrets. Never paste `.env` values or tokens into chat or docs._
 
 ## 1. What this is
@@ -23,10 +23,10 @@ The idea grew out of a client request. The owner decided to build their **own, g
 - **01 AI Forecast Agent:** protocol demand could someday feed forecasts (aggregate by SKU) — not planned.
 
 ## 5. Open decisions
-- **D1 — Practitioner surface:** customer-account extension vs app-proxy portal. **Decided by Spike S1.**
-- **D2 — Data store:** Postgres via Prisma (recommended: simplest, atomic edits, easy reporting, matches existing hosting) vs metaobjects (merchant-visible, theme-readable). A metaobject mirror can be added later if themes should render natively.
-- **D3 — Client page rendering:** App Proxy Liquid page (no theme edits, works for any theme) vs a metaobject theme template (needs merchants to add a template). **Decided by Spike S2.**
-- **D4 — Attribution carrier:** hidden line-item property (preferred) vs cart attribute. **Decided by Spike S3.**
+- **D1 — Practitioner surface:** customer-account extension vs app-proxy portal. **Open** (needs dev store Spike S1 verification; zero-extension App Proxy is the baseline, full-page extension pending).
+- **D2 — Data store:** Postgres via Prisma (simplest, atomic edits, easy reporting, matches existing hosting; schema and migrations verified in Session 9) vs metaobjects.
+- **D3 — Client page rendering:** App Proxy Liquid page (Liquid evaluation and delimiter neutralization confirmed in Session 12; `noindex` and `sitemap.xml` exclusion pending dev store verification) vs a metaobject theme template.
+- **D4 — Attribution carrier:** hidden line-item property (`_protocol_token`) vs cart attribute. **Open** (needs dev store Spike S3 confirmation that property reaches order).
 - **D5 — Public name** and listing category; avoid "Shopify" in the name.
 - **D6 — Practice naming control:** admin-set only (recommended) vs practitioner-set with approval.
 
@@ -42,10 +42,14 @@ The idea grew out of a client request. The owner decided to build their **own, g
 
 ## 8. Punch list
 **Open:**
-- Run spikes S1–S5 (needs dev store with B2B enabled).
+- Run spikes S1, S3, S4, S5 on live dev store (using `docs/SPIKES_CHECKLIST.md`).
+- Verify `noindex` and `sitemap.xml` exclusion for S2 on live dev store.
+- Re-measure `X-Forwarded-For` chain and configure `TRUSTED_PROXY_HOPS` on production deployed host.
 - Answer Q1/Q3.
-- Owner decision on Catalog Resolver token & scope (`docs/PROPOSAL_CATALOG_RESOLVER.md`: Option b requires `unauthenticated_read_product_listings` vs Option a private token).
-- Scaffold Shopify app harness (`shopify.app.toml`, Remix/server entry) once dev store is ready.
+- Owner decision on Catalog Resolver token & scope (`docs/PROPOSAL_CATALOG_RESOLVER.md`: Option a private token vs Option b `unauthenticated_read_product_listings`).
+- Real authentication: OAuth or token exchange for admin, session-token verification on admin API routes.
+- Build interactive protocol editor UI with product search (SPEC §7, Acceptance Criterion 1).
+- Wire live admin action route handlers (`/api/admin/practitioners/status`, `/api/admin/settings`, `/api/admin/emergency/disable-all`).
 
 **Resolved:**
 - Clean-room approach decided (owner, 2026-10-08).
@@ -56,6 +60,9 @@ The idea grew out of a client request. The owner decided to build their **own, g
 - Verify migrations and integration tests against real live PostgreSQL instance (verified on real PostgreSQL 17 in Session 9).
 - Zero order IDs stored in `ProcessedWebhook` (verified by automated test parameter assertions).
 - Absolute paths removed.
+- Storefront API Catalog Resolver: removed `product.status` from Storefront query; handles missing/null nodes cleanly (Session 17).
+- Cleaned `shopify.app.toml`: minimal scopes (`read_orders`), subscribed compliance topics and `orders/paid`, dropped unhandled `app/scopes_update` (Session 17).
+- Moved `pg` to `dependencies` in `package.json` (Session 17).
 
 ## 9. Where to start
 Run the five spikes in a day or two on a dev store; write the answers into section 5 above; only then build UI screens. See `docs/BUILD_PLAN.md`.
@@ -281,19 +288,20 @@ Run the five spikes in a day or two on a dev store; write the answers into secti
 - **Verification Status:**
   - `npm test`: **245/245 pure unit tests passing** (66 suites, 0 failures).
 
-## 22. Session Log — 2026-10-27 (Session 12: Live Dev Store Spike S2 Verification & M0 Closure)
+## 22. Session Log — 2026-10-27 (Session 12: Live Dev Store Spike S2 Partial Verification)
 - **Context:** Executed live Partner store spike experiments on `ai-agent-app-h9qwnwd8.myshopify.com` via isolated clean-room harness (`pp-spike-harness`). Verified App Proxy Liquid evaluation, reverse proxy header chain traversal, and storefront query signature parameters.
 - **Key Findings & Verified Platform Behaviors:**
-  1. **App Proxy Liquid Evaluation Confirmed (Spike S2):**
+  1. **App Proxy Liquid Evaluation Confirmed (Spike S2 partial):**
      - Shopify's App Proxy server-side renderer compiles and evaluates responses served with `Content-Type: application/liquid`.
      - When raw unescaped Liquid tags (e.g. `{% endraw %}`) were returned in the payload, Shopify's storefront engine threw:
        `Liquid syntax error (line 19): Unknown tag 'endraw'`.
      - Empirically proves that our HTML-entity delimiter neutralization barrier (`renderLiquidClientPage` in `app/lib/protocols/proxy.js`) is strictly mandatory to prevent practitioner input (protocol title, notes) from breaking storefront rendering or executing unintended Liquid.
+     - Note: `noindex` tag verification and `sitemap.xml` exclusion under S2 remain open.
   2. **Reverse Proxy Headers & Rate Limiting (`TRUSTED_PROXY_HOPS`):**
-     - Captured incoming request headers forwarded by Shopify's Cloudflare edge to the app proxy:
+     - Captured incoming request headers forwarded by Shopify's Cloudflare edge to the app proxy through the dev tunnel:
        `cf-connecting-ip`: Cloudflare edge node IP (`2a06:98c0:3600::103`).
        `x-forwarded-for`: Real client IP prepended before edge IP (`151.123.243.96,2a06:98c0:3600::103`).
-     - Empirically validates our Session 10 security decision: `TRUST_CF_CONNECTING_IP` must remain `false` by default, and client IP extraction must walk `x-forwarded-for` according to `TRUSTED_PROXY_HOPS`.
+     - Demonstrates that `TRUST_CF_CONNECTING_IP` must remain `false` by default, and client IP extraction requires walking `x-forwarded-for`. Because the dev tunnel introduced an extra hop, the exact `TRUSTED_PROXY_HOPS` setting must be verified on the production host (e.g., Railway).
   3. **App Proxy Query Parameters & Signature:**
      - Verified query parameters delivered to `/api/proxy`:
        `shop`: `ai-agent-app-h9qwnwd8.myshopify.com`
@@ -301,11 +309,9 @@ Run the five spikes in a day or two on a dev store; write the answers into secti
        `timestamp`: unix epoch string
        `signature`: SHA-256 HMAC of sorted query params
        `logged_in_customer_id`: empty string `""` on anonymous visits; customer numeric ID string when authenticated.
-  4. **Decisions Settled:**
-     - **D1 (Practitioner Surface):** Path B (Zero-extension App Proxy portal `/apps/practitioner-protocols`) is the universal baseline; works across all Shopify plans without requiring New Customer Accounts full-page extensions. Path A is an optional enhancement for merchants on New Customer Accounts.
-     - **D2 (Data Store):** PostgreSQL via Prisma confirmed (migrated & verified in Session 9).
-     - **D3 (Client Page Rendering):** App Proxy Liquid page confirmed.
-     - **D4 (Attribution Carrier):** Line-item property (`_protocol_token`) via Cart AJAX confirmed.
+  4. **Status of Spikes:**
+     - S2 is partially verified (Liquid compilation confirmed; `noindex` and `sitemap.xml` open).
+     - S1 (practitioner surface), S3 (hidden property reaching order), S4 (20 lines in one request), and S5 (practitioner pricing) remain open and must be run on the dev store following `docs/SPIKES_CHECKLIST.md`.
 - **Verification Status:**
   - `npm test`: **245/245 pure unit tests passing** (66 suites, 0 failures, ~80ms).
   - Background spike harness daemon safely terminated; core repo (`04-practitioner-protocols`) remains pristine.
@@ -377,4 +383,29 @@ Run the five spikes in a day or two on a dev store; write the answers into secti
   3. **Automated Test Coverage:**
      - Added 5 new automated tests in `test/admin.test.js` covering navigation tabs, practitioner directory, monthly attribution metrics, emergency controls, and PII rejection.
 - **Verification Status:**
-  - `npm test`: **272/272 pure unit tests passing** (75 suites, 0 failures, ~102ms).
+  - `npm test`: **289/289 pure unit tests passing** (81 suites, 0 failures, ~109ms).
+
+## 27. Session Log — 2026-10-27 (Session 17: Build Plan Realignment, Scope & Catalog Corrections)
+- **Context:** An independent code review cross-examined the repository against `docs/SPEC.md` and `docs/BUILD_PLAN.md`. Several documentation overstatements and technical configuration issues were identified and remediated.
+- **Remediated Items:**
+  1. **Documentation Realignment (BUILD_PLAN.md, PROJECT_CONTEXT.md):**
+     - Reopened M0 Spikes: S1, S3, S4, and S5. Recorded that S2 only verified Liquid compilation and dev-tunnel proxy headers; `noindex`, `sitemap.xml`, and real-host IP hop count remain open.
+     - Reopened M1 App Scaffold (pending real OAuth/session token exchange).
+     - Reopened M3 Interactive Portal UI (pending interactive protocol editor and product search).
+     - Reopened M6 Merchant Admin UI (pending session token authentication and live action route handlers).
+     - Refreshed Section 8 Punch List to reflect open spikes, auth, search, and action routes.
+  2. **`shopify.app.toml` Corrections:**
+     - Removed unneeded write scopes (`write_products`, `write_metaobjects`, `write_metaobject_definitions`) since app data is stored in PostgreSQL.
+     - Added required scope `read_orders` for `orders/paid` attribution.
+     - Subscribed mandatory compliance topics (`customers/data_request`, `customers/redact`, `shop/redact`) and `orders/paid`.
+     - Dropped `app/scopes_update` (which the webhook router rejected as unhandled).
+  3. **Catalog Resolver Storefront Query Correction (`catalog.js`, `test/catalog.test.js`):**
+     - Removed `status` from Storefront GraphQL query on `Product` (`Product` in Storefront API has no `status` field; drafts/archives simply return null/omitted nodes).
+     - Verified that missing/null nodes in `parseCatalogNodes` are correctly treated as deleted/unavailable.
+  4. **Server Hardening & Production Dependencies (`server.js`, `package.json`):**
+     - Moved `pg` from `devDependencies` to `dependencies` in `package.json` to prevent crashes in production deployments.
+     - Removed hardcoded secret fallback in `server.js`; missing `SHOPIFY_API_SECRET` strictly returns HTTP 500 fail-closed on signed routes.
+     - Replaced health-adjacent demo data ("Gut Health") with neutral retail routine examples ("Daily Essentials Protocol") to adhere to the zero-health-claims policy.
+     - Added POST handlers for admin action forms (`/api/admin/practitioners/status`, `/api/admin/settings`, `/api/admin/emergency/disable-all`).
+- **Verification Status:**
+  - `npm test`: **289/289 pure unit tests passing** (81 suites, 0 failures, ~109ms).

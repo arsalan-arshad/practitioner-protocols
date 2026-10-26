@@ -23,6 +23,8 @@ describe('Catalog Resolver Layer (app/lib/protocols/catalog.js)', () => {
       assert.ok(query.includes('availableForSale'));
       assert.ok(query.includes('price'));
       assert.ok(query.includes('product'));
+      // Storefront API Product has no status field; verify status is not queried
+      assert.equal(query.includes('status'), false);
     });
 
     it('injects @inContext directive when country or language is specified', () => {

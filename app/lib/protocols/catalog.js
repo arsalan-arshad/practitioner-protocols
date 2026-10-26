@@ -88,7 +88,6 @@ export function buildVariantQuery(options = {}) {
         id
         title
         handle
-        status
         featuredImage {
           url
           altText

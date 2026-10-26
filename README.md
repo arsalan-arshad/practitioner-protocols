@@ -2,7 +2,7 @@
 
 > **Open-Source (MIT)** | Built for the Shopify Merchant & Developer Community | Open for PRs & Discussions
 >
-> ⚙️ **Status: Pure Engine Modules Verified (272/272 Unit Tests Passing with Mocks)** | **Live PostgreSQL Integration (Last verified 10/10 against PostgreSQL 17.11 in Session 9; test:db skips with a notice when no DB is reachable)** | **Dev Store Spikes Complete (M0 Verified)**
+> ⚙️ **Status: Pure Engine Modules Verified (289/289 Unit Tests Passing with Mocks)** | **Live PostgreSQL Integration (Last verified 10/10 against PostgreSQL 17.11 in Session 9; test:db skips with a notice when no DB is reachable)** | **Dev Store Spikes Partially Done (S2 Liquid Evaluation Verified; S1, S3–S5 Open)**
 
 ---
 
@@ -14,7 +14,7 @@
 
 **Privacy by design:** Protocols never accept or store client/patient information. The validator strictly enforces a zero-PII barrier (`PII_NOT_ALLOWED`) both on top-level keys and within nested line items. Attribution is tracked solely via aggregate monthly counters.
 
-**Current build stage:** The pure engine logic, security controls, cryptographic primitives, Liquid renderers, catalog resolver, rate limiters, validation barriers, and PostgreSQL database queries are fully built and covered by 272 automated unit tests using mock database interfaces. Real PostgreSQL query execution, transaction behavior, constraints, row-level locking (`FOR UPDATE`), and migrations are verified against a live PostgreSQL instance via `npm run test:db` (10 integration tests passing). Spikes S1–S5 (Milestone M0) on a live Partner dev store verified App Proxy Liquid evaluation, reverse proxy header chain traversal, and storefront parameters.
+**Current build stage:** The pure engine logic, security controls, cryptographic primitives, Liquid renderers, catalog resolver, rate limiters, validation barriers, and PostgreSQL database queries are fully built and covered by 289 automated unit tests using mock database interfaces. Real PostgreSQL query execution, transaction behavior, constraints, row-level locking (`FOR UPDATE`), and migrations are verified against a live PostgreSQL instance via `npm run test:db` (10 integration tests passing). Spikes are partially done: Spike S2 verified App Proxy Liquid evaluation on a live dev store; Spikes S1, S3–S5, noindex/sitemap verification, and production proxy hop calibration remain open.
 
 ---
 
@@ -56,7 +56,7 @@
 
 ### E. Practitioner Portal ([`app/lib/protocols/portal.js`](app/lib/protocols/portal.js))
 - **Protocol Library:** Library card view with line counters, live retail price total calculation (`calculateProtocolRetailTotal`), starter template badges, and out-of-stock notices (*"1 product no longer available"*).
-- **Protocol Editor:** Add/remove products, adjust quantities (1–10), set usage instructions, and reorder lines.
+- **Protocol Editor (Not Built Yet):** Pure validation and data models for line management exist (`prepareProtocolEditorPayload`, `addProtocolLine`, `updateProtocolLine`, `removeProtocolLine`, `reorderProtocolLines`), but the interactive editor UI screen and product search are not built yet.
 - **Concurrent Edit Detection:** Compares `updatedAt` to warn practitioners in the same practice if another member edited the protocol simultaneously (`PEER_PRACTITIONER_EDIT`).
 
 ### F. Vector QR Code & Printable Handout ([`app/lib/protocols/qr.js`](app/lib/protocols/qr.js), [`handout.js`](app/lib/protocols/handout.js))
@@ -102,7 +102,7 @@
 flowchart TD
     subgraph Practitioner ["Practitioner (Signed In)"]
         UI["Portal UI & Library\n(Tag Mode: Customer · B2B Mode: Company)"]
-        ED["Protocol Editor\n(1-20 lines, usage notes, reorder)"]
+        ED["Protocol Editor (Not Built Yet)\n(1-20 lines, usage notes, reorder)"]
         SH["Share Kit\n(Vector QR SVG, Printable Handout)"]
     end
 

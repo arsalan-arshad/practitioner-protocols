@@ -6,8 +6,8 @@ embedded = true
 name = "Practitioner Protocols"
 
 [access_scopes]
-# Authorized scopes under Rule 10 (no escalation)
-scopes = "write_products,write_metaobjects,write_metaobject_definitions"
+# Minimal scopes required: read_orders for orders/paid attribution.
+scopes = "read_orders"
 
 [app_proxy]
 url = "https://example.com/api/proxy"
@@ -18,12 +18,20 @@ prefix = "apps"
 api_version = "2026-01"
 
   [[webhooks.subscriptions]]
+  uri = "/webhooks"
+  compliance_topics = [
+    "customers/data_request",
+    "customers/redact",
+    "shop/redact"
+  ]
+
+  [[webhooks.subscriptions]]
   uri = "/webhooks/app/uninstalled"
   topics = [ "app/uninstalled" ]
 
   [[webhooks.subscriptions]]
-  uri = "/webhooks/app/scopes_update"
-  topics = [ "app/scopes_update" ]
+  uri = "/webhooks/orders/paid"
+  topics = [ "orders/paid" ]
 
 [auth]
 redirect_urls = [ "https://example.com/api/auth" ]

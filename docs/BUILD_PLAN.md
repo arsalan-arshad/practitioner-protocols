@@ -1,7 +1,7 @@
 # Practitioner Protocols — Build Plan
 
 ## M0 — Spikes (1–2 days, dev store with B2B + new customer accounts)
-- [ ] S1 practitioner surface · S2 app-proxy page in theme layout + noindex (and verify correct trusted proxy hop count for X-Forwarded-For rate limiting) · S3 attribution carrier · S4 Cart AJAX 20 lines · S5 practitioner-preview pricing.
+- [ ] S1 practitioner surface · S2 app-proxy page in theme layout + noindex (and verify correct trusted proxy hop count for X-Forwarded-For rate limiting) · S3 attribution carrier · S4 Cart AJAX 20 lines · S5 practitioner-preview pricing. Detailed execution plan in [`docs/SPIKES_CHECKLIST.md`](SPIKES_CHECKLIST.md).
 - [ ] Record each answer in `PROJECT_CONTEXT.md` §5 and update D1–D4. Re-rank scope if a spike fails.
 
 ## M1 — Foundation

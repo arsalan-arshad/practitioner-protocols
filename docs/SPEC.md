@@ -24,7 +24,7 @@ Practitioner portal, share kit, client page with add-all, per-line attribution i
 Both modes use the same data model (`ownerType`, `ownerId`).
 
 ## 4. Spikes — answer these on a dev store before building screens
-Run on a Partner dev store with B2B enabled and **new customer accounts**. Record answers in `PROJECT_CONTEXT.md`.
+Run on a Partner dev store with B2B enabled and **new customer accounts**. Record answers in `PROJECT_CONTEXT.md`. See [`docs/SPIKES_CHECKLIST.md`](SPIKES_CHECKLIST.md) for the complete operational checklist, prerequisites, and step-by-step test procedure.
 
 | # | Question | Why it matters |
 |---|---|---|

@@ -272,3 +272,11 @@ Run the five spikes in a day or two on a dev store; write the answers into secti
 - **Verification Status:**
   - `npm test`: **245/245 pure unit tests passing** (66 suites, 0 failures).
   - `npm run test:db`: **Skipped (no DB reachable)** with loud warning notice; 10/10 integration tests passing result is from Session 9 against real PostgreSQL 17.11.
+
+## 21. Session Log — 2026-10-22 (Session 11: Spikes Checklist Documentation)
+- **Context:** Prepared and integrated the operational Spike Checklist for Milestones M0 Spikes S1–S5.
+- **Actions:**
+  - Added `docs/SPIKES_CHECKLIST.md` containing the full 2-day operational plan, prerequisites, step-by-step test procedure, failure escalation paths, and decision templates for Spikes S1–S5 and the Catalog Resolver check.
+  - Linked `docs/SPIKES_CHECKLIST.md` from `docs/BUILD_PLAN.md` §M0 and `docs/SPEC.md` §4.
+- **Verification Status:**
+  - `npm test`: **245/245 pure unit tests passing** (66 suites, 0 failures).

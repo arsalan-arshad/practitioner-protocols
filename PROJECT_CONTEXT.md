@@ -280,3 +280,32 @@ Run the five spikes in a day or two on a dev store; write the answers into secti
   - Linked `docs/SPIKES_CHECKLIST.md` from `docs/BUILD_PLAN.md` §M0 and `docs/SPEC.md` §4.
 - **Verification Status:**
   - `npm test`: **245/245 pure unit tests passing** (66 suites, 0 failures).
+
+## 22. Session Log — 2026-10-27 (Session 12: Live Dev Store Spike S2 Verification & M0 Closure)
+- **Context:** Executed live Partner store spike experiments on `ai-agent-app-h9qwnwd8.myshopify.com` via isolated clean-room harness (`pp-spike-harness`). Verified App Proxy Liquid evaluation, reverse proxy header chain traversal, and storefront query signature parameters.
+- **Key Findings & Verified Platform Behaviors:**
+  1. **App Proxy Liquid Evaluation Confirmed (Spike S2):**
+     - Shopify's App Proxy server-side renderer compiles and evaluates responses served with `Content-Type: application/liquid`.
+     - When raw unescaped Liquid tags (e.g. `{% endraw %}`) were returned in the payload, Shopify's storefront engine threw:
+       `Liquid syntax error (line 19): Unknown tag 'endraw'`.
+     - Empirically proves that our HTML-entity delimiter neutralization barrier (`renderLiquidClientPage` in `app/lib/protocols/proxy.js`) is strictly mandatory to prevent practitioner input (protocol title, notes) from breaking storefront rendering or executing unintended Liquid.
+  2. **Reverse Proxy Headers & Rate Limiting (`TRUSTED_PROXY_HOPS`):**
+     - Captured incoming request headers forwarded by Shopify's Cloudflare edge to the app proxy:
+       `cf-connecting-ip`: Cloudflare edge node IP (`2a06:98c0:3600::103`).
+       `x-forwarded-for`: Real client IP prepended before edge IP (`151.123.243.96,2a06:98c0:3600::103`).
+     - Empirically validates our Session 10 security decision: `TRUST_CF_CONNECTING_IP` must remain `false` by default, and client IP extraction must walk `x-forwarded-for` according to `TRUSTED_PROXY_HOPS`.
+  3. **App Proxy Query Parameters & Signature:**
+     - Verified query parameters delivered to `/api/proxy`:
+       `shop`: `ai-agent-app-h9qwnwd8.myshopify.com`
+       `path_prefix`: `/apps/pp-spike`
+       `timestamp`: unix epoch string
+       `signature`: SHA-256 HMAC of sorted query params
+       `logged_in_customer_id`: empty string `""` on anonymous visits; customer numeric ID string when authenticated.
+  4. **Decisions Settled:**
+     - **D1 (Practitioner Surface):** Path B (Zero-extension App Proxy portal `/apps/practitioner-protocols`) is the universal baseline; works across all Shopify plans without requiring New Customer Accounts full-page extensions. Path A is an optional enhancement for merchants on New Customer Accounts.
+     - **D2 (Data Store):** PostgreSQL via Prisma confirmed (migrated & verified in Session 9).
+     - **D3 (Client Page Rendering):** App Proxy Liquid page confirmed.
+     - **D4 (Attribution Carrier):** Line-item property (`_protocol_token`) via Cart AJAX confirmed.
+- **Verification Status:**
+  - `npm test`: **245/245 pure unit tests passing** (66 suites, 0 failures, ~80ms).
+  - Background spike harness daemon safely terminated; core repo (`04-practitioner-protocols`) remains pristine.

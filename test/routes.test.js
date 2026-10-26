@@ -19,6 +19,7 @@ import { calculateAppProxySignature } from '../app/lib/protocols/proxy.js';
 import { ProtocolValidationError } from '../app/lib/protocols/validation.js';
 import { ProtocolServiceError } from '../app/lib/protocols/service.js';
 import { DENIAL_REASONS } from '../app/lib/protocols/permissions.js';
+import { createFakeVariantResolver } from '../app/lib/protocols/catalog.js';
 
 describe('HTTP Routes & Request Handlers (app/lib/protocols/routes.js)', () => {
   const testShop = 'wellness-store.myshopify.com';
@@ -423,6 +424,37 @@ describe('HTTP Routes & Request Handlers (app/lib/protocols/routes.js)', () => {
       assert.equal(res.status, 200);
       const liquid = await res.text();
       assert.ok(liquid.includes('Gut Health Daily Regimen'));
+    });
+
+    it('enriches protocol lines with live catalog titles and prices when variantResolver is provided', async () => {
+      const fakeResolver = createFakeVariantResolver({
+        'gid://shopify/ProductVariant/554433': {
+          productTitle: 'Live Resolved Probiotic',
+          variantTitle: '60 capsules',
+          price: '34.95',
+          currency: 'USD',
+          availableForSale: true
+        }
+      });
+
+      const params = {
+        shop: testShop,
+        token: testProtocol.token,
+        path_prefix: '/apps/protocols',
+        timestamp: '1729500000'
+      };
+      const signature = calculateAppProxySignature(params, apiSecret);
+      const url = `https://${testShop}/apps/protocols?shop=${testShop}&token=${testProtocol.token}&path_prefix=%2Fapps%2Fprotocols&timestamp=1729500000&signature=${signature}`;
+
+      const res = await handleAppProxyRequest(db, new Request(url), {
+        apiSecret,
+        variantResolver: fakeResolver
+      });
+
+      assert.equal(res.status, 200);
+      const liquid = await res.text();
+      assert.ok(liquid.includes('Live Resolved Probiotic - 60 capsules'));
+      assert.ok(liquid.includes('$34.95'));
     });
 
     it('rejects tampered query parameters with 401 Unauthorized', async () => {

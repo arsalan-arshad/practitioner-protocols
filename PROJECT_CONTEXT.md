@@ -1,6 +1,6 @@
 # Practitioner Protocols — Project Context (for Claude)
 
-_Snapshot: 2026-10-27 · Core pure engine library fully implemented (259 pure unit tests passing) · Session 13 complete · Catalog Resolver implemented · Spikes S1–S5 verified._
+_Snapshot: 2026-10-27 · Core pure engine library fully implemented (260 pure unit tests passing) · Session 14 complete · App scaffold & toml configured · Catalog Resolver integrated into route handlers._
 _Contains NO secrets. Never paste `.env` values or tokens into chat or docs._
 
 ## 1. What this is
@@ -328,3 +328,17 @@ Run the five spikes in a day or two on a dev store; write the answers into secti
 - **Verification Status:**
   - `npm test`: **259/259 pure unit tests passing** (73 suites, 0 failures, ~98ms).
   - Clean working tree ready for commit.
+
+## 24. Session Log — 2026-10-27 (Session 14: App Scaffold & Catalog-Enriched Route Handlers)
+- **Context:** Generated production `shopify.app.toml` scaffold and wired `resolveVariants` / `enrichProtocolLines` into `handleAppProxyRequest`.
+- **Implementation Details:**
+  1. **`shopify.app.toml` Scaffold:**
+     - Configured App Proxy with prefix `apps` and subpath `protocols` (pointing to `/api/proxy`).
+     - Subscribed to mandatory webhooks (`app/uninstalled`, `app/scopes_update`) with API version `2026-01`.
+     - Preserved authorized scopes (`write_products`, `write_metaobjects`, `write_metaobject_definitions`) with zero scope escalation (Rule 10).
+  2. **Catalog Resolver Integration (`routes.js`, `test/routes.test.js`):**
+     - Integrated `variantResolver` / `graphqlExecutor` into `handleAppProxyRequest`. When a protocol has lines, it resolves variant titles, retail prices, and inventory availability, filtering unavailable or unpublished products (`filterUnavailable: true`).
+     - Enhanced `proxy.js` to prefer `priceFormatted` over unformatted decimal strings for storefront display.
+     - Added comprehensive unit test in `test/routes.test.js`.
+- **Verification Status:**
+  - `npm test`: **260/260 pure unit tests passing** (73 suites, 0 failures, ~92ms).

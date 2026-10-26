@@ -1,0 +1,33 @@
+# Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
+
+client_id = "156022e3dbfc32e0eeec20bff8c07349"
+application_url = "https://example.com"
+embedded = true
+name = "Practitioner Protocols"
+
+[access_scopes]
+# Authorized scopes under Rule 10 (no escalation)
+scopes = "write_products,write_metaobjects,write_metaobject_definitions"
+
+[app_proxy]
+url = "https://example.com/api/proxy"
+subpath = "protocols"
+prefix = "apps"
+
+[webhooks]
+api_version = "2026-01"
+
+  [[webhooks.subscriptions]]
+  uri = "/webhooks/app/uninstalled"
+  topics = [ "app/uninstalled" ]
+
+  [[webhooks.subscriptions]]
+  uri = "/webhooks/app/scopes_update"
+  topics = [ "app/scopes_update" ]
+
+[auth]
+redirect_urls = [ "https://example.com/api/auth" ]
+
+[build]
+include_config_on_deploy = true
+automatically_update_urls_on_dev = true

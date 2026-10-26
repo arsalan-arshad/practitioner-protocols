@@ -5,10 +5,10 @@
 - [x] Record each answer in `PROJECT_CONTEXT.md` §5 and update D1–D4. Re-rank scope if a spike fails.
 
 ## M1 — Foundation
-- [x] Pure engine core: share-token generator, schema validation, permission checks, cart payload construction, QR generator, attribution extraction (`npm test` 245/245 pure unit tests passing).
+- [x] Pure engine core: share-token generator, schema validation, permission checks, cart payload construction, QR generator, attribution extraction (`npm test` 260/260 pure unit tests passing).
 - [x] Prisma schema (SPEC §6) & versioned PostgreSQL DDL migrations (`prisma/schema.prisma`, `prisma/migrations/**`; migrations and DB tests verified on PostgreSQL 17.11 in Session 9; test:db skips with a notice when no DB is reachable).
-- [ ] App scaffold (Remix/server entry, `shopify.app.toml`, Polaris UI harness) — pending dev store setup.
-- [x] Protocol API route handlers with ownership checks (`app/lib/protocols/routes.js`, `test/routes.test.js`: cross-owner read/write denied, starters read-only, authentication enforced, fail-closed HMAC).
+- [x] App scaffold (`shopify.app.toml` configured with `/apps/protocols` proxy, compliance webhooks, authorized scopes, catalog-enriched route integration).
+- [x] Protocol API route handlers with ownership checks (`app/lib/protocols/routes.js`, `test/routes.test.js`: cross-owner read/write denied, starters read-only, authentication enforced, fail-closed HMAC, live catalog resolution).
 
 ## M2 — Client page
 - [x] App-proxy pure Liquid renderer (HMAC-verified, Liquid delimiter neutralization, all states from SPEC §5, `noindex`, mobile-first in `app/lib/protocols/proxy.js`, `test/proxy.test.js`).

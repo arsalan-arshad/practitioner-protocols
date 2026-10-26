@@ -569,7 +569,7 @@ export function renderProtocolLiquid({ protocol, practiceName = '', isLoggedInPr
     const usageNote = line.usageNote ? String(line.usageNote).trim() : '';
     const title = line.title || line.productTitle || line.name || 'Recommended Product';
     const variantTitle = line.variantTitle || '';
-    const price = line.price || line.priceFormatted || '';
+    const price = line.priceFormatted || line.price || '';
     const isAvailable = line.available !== false && line.inStock !== false;
 
     clientItems.push({

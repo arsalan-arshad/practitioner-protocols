@@ -32,6 +32,10 @@ import {
   getRateLimitHeaders,
   renderRateLimitLiquid
 } from './rate-limit.js';
+import {
+  resolveVariants,
+  enrichProtocolLines
+} from './catalog.js';
 
 export { createRateLimiter };
 
@@ -140,7 +144,8 @@ export function handleErrorResponse(err) {
  * @param {{ apiSecret?: string, rateLimiter?: any }} [options]
  * @returns {Promise<Response>}
  */
-export async function handleAppProxyRequest(db, request, { apiSecret, rateLimiter } = {}) {
+export async function handleAppProxyRequest(db, request, options = {}) {
+  const { apiSecret, rateLimiter, variantResolver, graphqlExecutor } = options;
   const activeRateLimiter = rateLimiter !== undefined ? rateLimiter : defaultProxyRateLimiter;
   let urlObj;
   if (typeof request === 'string') {
@@ -242,6 +247,17 @@ export async function handleAppProxyRequest(db, request, { apiSecret, rateLimite
   let protocol = null;
   if (token && shop) {
     protocol = await getProtocolByToken(db, { shop, token: token.trim() });
+    if (protocol?.lines?.length) {
+      if (options?.variantResolver && typeof options.variantResolver.resolveVariants === 'function') {
+        const gids = protocol.lines.map((l) => l.variantGid).filter(Boolean);
+        const catalogMap = await options.variantResolver.resolveVariants(shop, gids, options);
+        protocol.lines = enrichProtocolLines(protocol.lines, catalogMap, { filterUnavailable: true });
+      } else if (typeof options?.graphqlExecutor === 'function') {
+        const gids = protocol.lines.map((l) => l.variantGid).filter(Boolean);
+        const catalogMap = await resolveVariants(shop, gids, options);
+        protocol.lines = enrichProtocolLines(protocol.lines, catalogMap, { filterUnavailable: true });
+      }
+    }
   }
 
   // 5. Check if logged-in practitioner previewing protocol (requires isApproved = true)

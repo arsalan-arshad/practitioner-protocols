@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import {
   verifyAppProxyHmac,
   calculateAppProxySignature,
+  calculateOAuthSignature,
+  verifyOAuthHmac,
   normalizeQueryParams,
   getLoggedInCustomerGid,
   renderProtocolLiquid,
@@ -70,6 +72,41 @@ describe('Shopify App Proxy & Storefront (app/lib/protocols/proxy.js)', () => {
       assert.equal(verifyAppProxyHmac({ shop: 'wellness.myshopify.com' }, apiSecret), false);
       assert.equal(verifyAppProxyHmac({ shop: 'wellness.myshopify.com', signature: 'invalid_sig' }, apiSecret), false);
       assert.equal(verifyAppProxyHmac(null, apiSecret), false);
+    });
+  });
+
+  describe('verifyOAuthHmac', () => {
+    it('verifies a valid Shopify OAuth callback HMAC signature', () => {
+      const params = {
+        code: 'auth_code_123',
+        shop: 'wellness.myshopify.com',
+        state: 'nonce_state_abc',
+        timestamp: '1729500000',
+      };
+      const hmac = calculateOAuthSignature(params, apiSecret);
+      const queryWithHmac = { ...params, hmac };
+
+      assert.equal(verifyOAuthHmac(queryWithHmac, apiSecret), true);
+    });
+
+    it('rejects tampered OAuth parameters', () => {
+      const params = {
+        code: 'auth_code_123',
+        shop: 'wellness.myshopify.com',
+        state: 'nonce_state_abc',
+        timestamp: '1729500000',
+      };
+      const hmac = calculateOAuthSignature(params, apiSecret);
+      const tampered = { ...params, shop: 'attacker.myshopify.com', hmac };
+
+      assert.equal(verifyOAuthHmac(tampered, apiSecret), false);
+    });
+
+    it('rejects missing, empty, or invalid HMAC', () => {
+      assert.equal(verifyOAuthHmac({ shop: 'wellness.myshopify.com' }, apiSecret), false);
+      assert.equal(verifyOAuthHmac({ shop: 'wellness.myshopify.com', hmac: 'invalid_hex' }, apiSecret), false);
+      assert.equal(verifyOAuthHmac(null, apiSecret), false);
+      assert.equal(verifyOAuthHmac({ shop: 'wellness.myshopify.com' }, ''), false);
     });
   });
 

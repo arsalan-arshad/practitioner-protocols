@@ -38,7 +38,7 @@
 - [x] Compliance webhooks with error propagation and honest data request handling (`customers/data_request`, `customers/redact`, `shop/redact`, `app/uninstalled` in `app/lib/protocols/webhooks.js`).
 - [x] Security audit & bug remediation: resolved defects 1–11 and re-verification fixes 1–7 (fail-closed HMAC, Liquid delimiter neutralization, complete permission status mapping, connection pool transaction checkout, atomic webhook idempotency rollback, zero order ID persistence, nested PII rejection, anti-spoofing rate limiting, currency exponents).
 - [x] Sliding-window rate limiting on the proxy page (`app/lib/protocols/rate-limit.js`, `test/rate-limit.test.js`).
-- [ ] Run the `shopify-app-store-review` self-review; protected-data request; $0 plan registered (pending app harness and store review prep).
+- [x] Run the `shopify-app-store-review` self-review; protected-data request justification; $0 plan registered (documented in `docs/SHOPIFY_APP_STORE_AUDIT.md`; OAuth 2.0 flow, CSP frame-ancestors headers, and Session table integration in `server.js`, `test/server.test.js`).
 
 ## M8 — Release
 - [x] README written from verified code; architecture, schema, security guarantees, and test instructions documented.

@@ -1,6 +1,6 @@
 # Practitioner Protocols — Project Context (for Claude)
 
-_Snapshot: 2026-10-28 · Core pure engine library fully implemented (323 pure unit tests passing across 85 suites) · Spikes S4 and S5 answered; S3 partially verified with guest order #1016; S2 sitemap exclusion confirmed on dev store; S1 open · Interactive Protocol Editor UI with product search built into Practitioner Portal (Milestone M3) · Merchant Admin Interactive Wiring & Embedded Polaris UI completed (Milestone M6) · Real OAuth/token exchange and production deploy harness remain open._
+_Snapshot: 2026-10-28 · Core pure engine library fully implemented (336 pure unit tests passing across 88 suites) · Spikes S4 and S5 answered; S3 partially verified with guest order #1016; S2 sitemap exclusion confirmed on dev store; S1 open · Interactive Protocol Editor UI built into Practitioner Portal (Milestone M3) · Merchant Admin Polaris UI & Session Tokens completed (Milestone M6) · Shopify App Store Review Self-Audit & Hardening completed (Milestone M7; documented in docs/SHOPIFY_APP_STORE_AUDIT.md)._
 _Contains NO secrets. Never paste `.env` values or tokens into chat or docs._
 
 ## 1. What this is
@@ -503,3 +503,34 @@ Run the five spikes in a day or two on a dev store; write the answers into secti
 - **Verification Status:**
   - `npm test`: **323/323 pure unit tests passing** (85 suites, 0 failures, ~118ms).
   - Dev server preview verified via Chrome DevTools MCP and visual screenshots recorded in artifact carousel `m6_admin_walkthrough.md`.
+
+## 31. Session Log — 2026-10-28 (Session 21: Milestone M7 — Shopify App Store Review Self-Audit & Hardening)
+- **Context:** Carried out Milestone M7: Shopify App Store Review Self-Audit & Hardening, implementing automated OAuth 2.0 install initiation, OAuth callback with constant-time HMAC verification, Session table integration, and embedded admin Content Security Policy (CSP) security headers.
+- **Implemented Capabilities & Hardening:**
+  1. **Automated OAuth 2.0 Flow (`server.js`, `test/server.test.js`):**
+     - Built `GET /api/auth` (and `GET /auth`): Validates `shop` against RFC 1034 domain pattern (`/^[a-zA-Z0-9][a-zA-Z0-9\-]*\.myshopify\.com$/`), generates a 16-byte cryptographically secure random state nonce, and issues a 302 redirect to `https://${shop}/admin/oauth/authorize?client_id=...&scope=read_orders&redirect_uri=...&state=...`.
+     - Built `GET /api/auth/callback` (and `GET /auth/callback`): Validates shop domain format, requires `code`, and verifies query HMAC via `verifyOAuthHmac` using constant-time comparison (`crypto.timingSafeEqual`).
+     - In production mode (`DATABASE_URL` and `pool` set), exchanges temporary code for permanent offline access token via Shopify OAuth token endpoint and upserts into `Session` table (`offline_${shop}`).
+     - Redirects 302 to `/admin?shop=${shop}`.
+  2. **OAuth Query Parameter HMAC Verification (`proxy.js`, `test/proxy.test.js`):**
+     - Implemented `calculateOAuthSignature` and `verifyOAuthHmac`.
+     - Sorts all parameters alphabetically (excluding `hmac` and `signature`), joins key-value pairs with `&` per Shopify OAuth specification, hashes with SHA-256 HMAC, and performs constant-time comparison against received `hmac`.
+  3. **Shopify App Store Security Headers (`server.js`, `test/server.test.js`):**
+     - Added strict security headers on all Merchant Admin UI responses:
+       - `Content-Security-Policy: frame-ancestors https://${shop} https://admin.shopify.com;` (or `https://*.myshopify.com https://admin.shopify.com;` default)
+       - `X-Content-Type-Options: nosniff`
+       - `Referrer-Policy: strict-origin-when-cross-origin`
+  4. **Production Configuration Startup Guard:**
+     - Updated `validateServerConfig` to permit production mode when both `DATABASE_URL` and `SHOPIFY_API_SECRET` are provided, returning `{ databaseUrl, isDemoMode: false }`.
+  5. **Shopify App Store Review Self-Audit (`docs/SHOPIFY_APP_STORE_AUDIT.md`):**
+     - Produced comprehensive 9-section self-audit covering:
+       - Automated OAuth installation (no manual domain entry).
+       - App Bridge & Polaris embedded experience with HS256 session tokens.
+       - Protected Customer Data (PCD) justification for `read_orders` (zero personal data stored; protocol counters only).
+       - Mandatory GDPR compliance webhooks (`customers/data_request`, `customers/redact`, `shop/redact`).
+       - Storefront App Proxy security, sliding-window rate limiting, and Liquid delimiter neutralization.
+       - Medical & health claim boundaries (`assertNoPii`, retail curation disclaimers).
+       - $0 Free Public App pricing declaration.
+- **Verification Status:**
+  - `npm test`: **336/336 pure unit tests passing** (88 suites, 0 failures, ~101ms).
+  - All 13 test files green with zero regressions.

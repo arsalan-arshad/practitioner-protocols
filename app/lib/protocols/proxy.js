@@ -119,6 +119,80 @@ export function verifyAppProxyHmac(queryParams, apiSecret) {
 }
 
 /**
+ * Calculates Shopify OAuth SHA-256 HMAC signature.
+ *
+ * Sorts all query parameters alphabetically by key (excluding 'hmac' and 'signature'),
+ * joins key=value pairs with '&', and hashes the result with the app's apiSecret using HMAC-SHA256.
+ *
+ * @param {Record<string, unknown> | URLSearchParams | string} queryParams
+ * @param {string} apiSecret
+ * @returns {string} Hexadecimal HMAC signature
+ */
+export function calculateOAuthSignature(queryParams, apiSecret) {
+  if (!queryParams || !apiSecret || typeof apiSecret !== 'string') {
+    return '';
+  }
+
+  const params = normalizeQueryParams(queryParams);
+  if (!params) return '';
+
+  const sortedKeys = Object.keys(params)
+    .filter((k) => k !== 'hmac' && k !== 'signature')
+    .sort();
+
+  const message = sortedKeys
+    .map((key) => {
+      const val = params[key];
+      const strVal = Array.isArray(val)
+        ? val.join(',')
+        : (val !== null && val !== undefined ? String(val) : '');
+      return `${key}=${strVal}`;
+    })
+    .join('&');
+
+  return crypto.createHmac('sha256', apiSecret).update(message).digest('hex');
+}
+
+/**
+ * Verifies Shopify's HMAC query parameter on OAuth redirect and callback requests.
+ * Uses SHA-256 HMAC of sorted query params (excluding hmac/signature) joined by '&'
+ * and constant-time comparison.
+ *
+ * @param {Record<string, unknown> | URLSearchParams | string} queryParams
+ * @param {string} apiSecret App shared secret
+ * @returns {boolean} True if HMAC is valid and authentic
+ */
+export function verifyOAuthHmac(queryParams, apiSecret) {
+  if (!queryParams || !apiSecret || typeof apiSecret !== 'string') {
+    return false;
+  }
+
+  const params = normalizeQueryParams(queryParams);
+  if (!params) return false;
+
+  const rawHmac = params.hmac;
+  if (!rawHmac || typeof rawHmac !== 'string') {
+    return false;
+  }
+
+  const expectedSignature = calculateOAuthSignature(params, apiSecret);
+  if (!expectedSignature) return false;
+
+  const expectedBuf = Buffer.from(expectedSignature, 'utf8');
+  const actualBuf = Buffer.from(rawHmac.toLowerCase().trim(), 'utf8');
+
+  if (expectedBuf.length !== actualBuf.length) {
+    return false;
+  }
+
+  try {
+    return crypto.timingSafeEqual(expectedBuf, actualBuf);
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Extracts logged_in_customer_id from App Proxy query params and formats as Shopify Customer GID.
  *
  * @param {Record<string, unknown> | URLSearchParams | string} queryParams

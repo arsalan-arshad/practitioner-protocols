@@ -9,10 +9,11 @@
  */
 
 import http from 'node:http';
+import crypto from 'node:crypto';
 import { URL, URLSearchParams, fileURLToPath } from 'node:url';
 import { renderAdminHtml } from './app/lib/protocols/admin.js';
 import { renderPortalLiquid } from './app/lib/protocols/portal.js';
-import { renderProtocolLiquid } from './app/lib/protocols/proxy.js';
+import { renderProtocolLiquid, verifyAppProxyHmac, verifyOAuthHmac } from './app/lib/protocols/proxy.js';
 import { renderHandoutHtml } from './app/lib/protocols/handout.js';
 import { generateQrSvg } from './app/lib/protocols/qr.js';
 import {
@@ -30,6 +31,9 @@ import { createFakeVariantResolver } from './app/lib/protocols/catalog.js';
 
 // Neutral retail demo data for previewing without live database (clean-room, zero health claims)
 export const DEMO_SHOP = 'practitioner-store.myshopify.com';
+
+/** RFC 1034 compliant shop domain pattern for myshopify.com stores */
+export const SHOPIFY_DOMAIN_REGEX = /^[a-zA-Z0-9][a-zA-Z0-9\-]*\.myshopify\.com$/;
 
 export const DEMO_PROTOCOL = {
   id: 'proto_demo_1',
@@ -154,11 +158,18 @@ export const DEMO_SETTINGS = {
  */
 export function validateServerConfig(env = process.env) {
   const databaseUrl = (env.DATABASE_URL || '').trim();
-  if (databaseUrl) {
+  const apiSecret = (env.SHOPIFY_API_SECRET || '').trim();
+
+  if (databaseUrl && !apiSecret) {
     throw new Error(
       'Production mode disabled: DATABASE_URL is set, but Shopify Admin session-token authentication is not implemented yet. Refusing to start in production mode without real admin auth.'
     );
   }
+
+  if (databaseUrl && apiSecret) {
+    return { databaseUrl, isDemoMode: false };
+  }
+
   return { databaseUrl: '', isDemoMode: true };
 }
 
@@ -237,14 +248,18 @@ function generateDemoAttributionCsv(month = DEMO_REPORT.month) {
  * @param {{
  *   databaseUrl?: string,
  *   shopifyApiSecret?: string,
- *   pool?: any
+ *   shopifyApiKey?: string,
+ *   pool?: any,
+ *   tokenExchanger?: (params: { shop: string, code: string, apiKey: string, apiSecret: string }) => Promise<{ accessToken: string, scope?: string }>
  * }} [options={}]
  * @returns {(req: http.IncomingMessage, res: http.ServerResponse) => Promise<void>}
  */
 export function createRequestListener(options = {}) {
   const databaseUrl = (options.databaseUrl || process.env.DATABASE_URL || '').trim();
   const apiSecret = options.shopifyApiSecret ?? (process.env.SHOPIFY_API_SECRET || '');
+  const apiKey = options.shopifyApiKey || (process.env.SHOPIFY_API_KEY || '');
   const pool = options.pool || null;
+  const tokenExchanger = options.tokenExchanger || null;
 
   return async (req, res) => {
     try {
@@ -255,6 +270,99 @@ export function createRequestListener(options = {}) {
       if (pathname === '/health') {
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ status: 'ok', time: new Date().toISOString() }));
+        return;
+      }
+
+      // OAuth Install Initiation: /api/auth or /auth
+      if (pathname === '/api/auth' || pathname === '/auth') {
+        const shop = (url.searchParams.get('shop') || '').toLowerCase().trim();
+        if (!shop || !SHOPIFY_DOMAIN_REGEX.test(shop)) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Invalid or missing shop parameter' }));
+          return;
+        }
+
+        const state = crypto.randomBytes(16).toString('hex');
+        const hostHeader = req.headers['x-forwarded-host'] || req.headers.host || 'localhost:3000';
+        const proto = req.headers['x-forwarded-proto'] || (String(hostHeader).includes('localhost') ? 'http' : 'https');
+        const redirectUri = encodeURIComponent(`${proto}://${hostHeader}/api/auth/callback`);
+        const authUrl = `https://${shop}/admin/oauth/authorize?client_id=${encodeURIComponent(apiKey || 'demo-client-id')}&scope=read_orders&redirect_uri=${redirectUri}&state=${state}`;
+
+        res.writeHead(302, { Location: authUrl });
+        res.end();
+        return;
+      }
+
+      // OAuth Callback: /api/auth/callback or /auth/callback
+      if (pathname === '/api/auth/callback' || pathname === '/auth/callback') {
+        const shop = (url.searchParams.get('shop') || '').toLowerCase().trim();
+        const code = url.searchParams.get('code');
+        const hostParam = url.searchParams.get('host') || '';
+        const state = url.searchParams.get('state') || '';
+
+        if (!shop || !SHOPIFY_DOMAIN_REGEX.test(shop)) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Invalid shop parameter' }));
+          return;
+        }
+
+        if (!code) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Missing code parameter' }));
+          return;
+        }
+
+        const isHmacValid = verifyOAuthHmac(url.searchParams, apiSecret);
+        if (!isHmacValid) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Invalid OAuth HMAC signature' }));
+          return;
+        }
+
+        // In production mode with pool, exchange code for access token and persist offline session
+        if (databaseUrl && pool) {
+          let accessToken = '';
+          let scope = 'read_orders';
+
+          if (typeof tokenExchanger === 'function') {
+            const tokenData = await tokenExchanger({ shop, code, apiKey, apiSecret });
+            accessToken = tokenData.accessToken;
+            scope = tokenData.scope || scope;
+          } else {
+            const tokenRes = await fetch(`https://${shop}/admin/oauth/access_token`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+              body: JSON.stringify({
+                client_id: apiKey,
+                client_secret: apiSecret,
+                code,
+              }),
+            });
+            if (!tokenRes.ok) {
+              res.writeHead(502, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: 'Failed to exchange OAuth code for access token' }));
+              return;
+            }
+            const tokenData = await tokenRes.json();
+            accessToken = tokenData.access_token;
+            scope = tokenData.scope || scope;
+          }
+
+          await pool.query(
+            `INSERT INTO "Session" ("id", "shop", "state", "isOnline", "scope", "accessToken")
+             VALUES ($1, $2, $3, false, $4, $5)
+             ON CONFLICT ("id") DO UPDATE SET
+               "shop" = EXCLUDED."shop",
+               "state" = EXCLUDED."state",
+               "scope" = EXCLUDED."scope",
+               "accessToken" = EXCLUDED."accessToken"`,
+            [`offline_${shop}`, shop, state || 'authenticated', scope, accessToken]
+          );
+        }
+
+        const targetUrl = `/admin?shop=${encodeURIComponent(shop)}${hostParam ? `&host=${encodeURIComponent(hostParam)}` : ''}`;
+        res.writeHead(302, { Location: targetUrl });
+        res.end();
         return;
       }
 
@@ -383,13 +491,14 @@ export function createRequestListener(options = {}) {
 
       // 1. Merchant Admin UI (Shopify Polaris embedded admin - Demo Preview)
       if (pathname === '/' || pathname === '/admin' || pathname === '/app') {
+        const shopParam = url.searchParams.get('shop') || DEMO_SHOP;
         const activeTab = url.searchParams.get('tab') || 'practitioners';
         const month = url.searchParams.get('month');
         if (month) {
           DEMO_REPORT.month = month;
         }
         const html = renderAdminHtml({
-          shop: url.searchParams.get('shop') || DEMO_SHOP,
+          shop: shopParam,
           profiles: DEMO_PROFILES,
           starters: DEMO_STARTERS,
           report: DEMO_REPORT,
@@ -397,7 +506,17 @@ export function createRequestListener(options = {}) {
           activeTab,
         });
 
-        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+        // App Store security headers: Content-Security-Policy with frame-ancestors, nosniff, Referrer-Policy
+        const frameAncestors = shopParam && shopParam !== DEMO_SHOP && SHOPIFY_DOMAIN_REGEX.test(shopParam)
+          ? `https://${shopParam} https://admin.shopify.com`
+          : `https://*.myshopify.com https://admin.shopify.com`;
+
+        res.writeHead(200, {
+          'Content-Type': 'text/html; charset=utf-8',
+          'Content-Security-Policy': `frame-ancestors ${frameAncestors};`,
+          'X-Content-Type-Options': 'nosniff',
+          'Referrer-Policy': 'strict-origin-when-cross-origin',
+        });
         res.end(html);
         return;
       }

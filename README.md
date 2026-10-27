@@ -2,7 +2,7 @@
 
 > **Open-Source (MIT)** | Built for the Shopify Merchant & Developer Community | Open for PRs & Discussions
 >
-> ⚙️ **Status: Pure Engine Modules Verified (289/289 Unit Tests Passing with Mocks)** | **Live PostgreSQL Integration (Last verified 10/10 against PostgreSQL 17.11 in Session 9; test:db skips with a notice when no DB is reachable)** | **Dev Store Spikes Partially Done (S2 Liquid Evaluation Verified; S1, S3–S5 Open)**
+> ⚙️ **Status: Complete Engine, Admin & Storefront Modules Verified (337/337 Unit Tests Passing across 88 Suites)** | **Live PostgreSQL Integration (10/10 Integration Tests Passing; test:db skips with a notice when no DB is reachable)** | **Dev Store Spikes Verified (S1, S2, S4, S5 Answered; S3 Property Persistence Verified on Order #1016)**
 
 ---
 
@@ -14,7 +14,7 @@
 
 **Privacy by design:** Protocols never accept or store client/patient information. The validator strictly enforces a zero-PII barrier (`PII_NOT_ALLOWED`) both on top-level keys and within nested line items. Attribution is tracked solely via aggregate monthly counters.
 
-**Current build stage:** The pure engine logic, security controls, cryptographic primitives, Liquid renderers, catalog resolver, rate limiters, validation barriers, and PostgreSQL database queries are fully built and covered by 289 automated unit tests using mock database interfaces. Real PostgreSQL query execution, transaction behavior, constraints, row-level locking (`FOR UPDATE`), and migrations are verified against a live PostgreSQL instance via `npm run test:db` (10 integration tests passing). Spikes are partially done: Spike S2 verified App Proxy Liquid evaluation on a live dev store; Spikes S1, S3–S5, noindex/sitemap verification, and production proxy hop calibration remain open.
+**Current build stage:** The pure engine logic, security controls, cryptographic primitives, Liquid renderers, catalog resolver, rate limiters, validation barriers, and PostgreSQL database queries are fully built and covered by 337 automated unit tests across 88 suites using mock database interfaces. Real PostgreSQL query execution, transaction behavior, constraints, row-level locking (`FOR UPDATE`), and migrations are verified against a live PostgreSQL instance via `npm run test:db` (10 integration tests passing). Spikes S1, S2 (sitemap exclusion & Liquid compilation), S4 (20 lines in single cart add), and S5 (retail vs B2B pricing) are verified on live Shopify Plus dev store `ai-agent-app-h9qwnwd8.myshopify.com`. Hidden attribution property persistence is confirmed through live test order #1016 (S3).
 
 ---
 
@@ -56,7 +56,7 @@
 
 ### E. Practitioner Portal ([`app/lib/protocols/portal.js`](app/lib/protocols/portal.js))
 - **Protocol Library:** Library card view with line counters, live retail price total calculation (`calculateProtocolRetailTotal`), starter template badges, and out-of-stock notices (*"1 product no longer available"*).
-- **Protocol Editor (Not Built Yet):** Pure validation and data models for line management exist (`prepareProtocolEditorPayload`, `addProtocolLine`, `updateProtocolLine`, `removeProtocolLine`, `reorderProtocolLines`), but the interactive editor UI screen and product search are not built yet.
+- **Interactive Protocol Editor (Milestone M3):** Built-in modal editor (`#protocol-editor-modal`) featuring live Storefront GraphQL catalog product search (`searchCatalogProducts`), dynamic variant line additions, quantity stepper (1–10), optional line usage instructions ($\le 200$ chars), duplicate line prevention, live retail total recalculation, and App Proxy persistence.
 - **Concurrent Edit Detection:** Compares `updatedAt` to warn practitioners in the same practice if another member edited the protocol simultaneously (`PEER_PRACTITIONER_EDIT`).
 
 ### F. Vector QR Code & Printable Handout ([`app/lib/protocols/qr.js`](app/lib/protocols/qr.js), [`handout.js`](app/lib/protocols/handout.js))
@@ -72,12 +72,21 @@
 - **RFC 4180 CSV Export:** Exports monthly attribution reports with proper escaping, quotes, and CRLF line terminators (strictly aggregate counters; zero client PII).
 
 ### H. Merchant Admin Management ([`app/lib/protocols/admin.js`](app/lib/protocols/admin.js))
-- **Practitioner Approvals & Anti-Impersonation:** Merchant controls practice names (`PractitionerProfile`) to prevent unauthorized clinic representation.
-- **Starter Templates Manager:** Brand administrators create and manage starter templates (`isStarter = true`).
-- **Emergency Disable:** Single-protocol or storewide protocol killswitch (`status: 'disabled'`).
+- **Embedded Polaris Admin UI (Milestone M6):** Embedded Polaris admin with responsive tab navigation: *Practitioners*, *Starter Templates*, *Attribution & Reports*, and *Settings*.
+- **App Bridge HS256 Session Token Verification:** Pure `node:crypto` HMAC-SHA256 signature verification (`verifyAdminSessionToken`, `extractAdminSession`) using `crypto.timingSafeEqual` with zero external dependencies, validating expiration, clock skew, destination shop, and client ID audience.
+- **Practitioner Approvals & Anti-Impersonation:** Merchant controls practice names (`PractitionerProfile`) via inline editing to prevent unauthorized clinic representation alongside approve and revoke actions.
+- **Starter Templates Builder:** Accessible modal (`#create-starter-modal`) allowing brand administrators to author and publish multi-line starter templates (`isStarter = true`).
+- **Attribution Reports & Parameterized CSV Export:** Monthly order and unit rollups with dynamic month-filtered RFC 4180 CSV download (`/api/admin/attribution.csv?month=YYYY-MM`).
+- **Emergency Disable Switch:** Single-protocol disable or storewide emergency killswitch (`status: 'disabled'`).
 - **App Settings:** Configures storefront identity mode (`tag` vs `company`), custom legal disclaimers, and print instructions.
 
-### I. Security Hardening & Rate Limiter ([`app/lib/protocols/rate-limit.js`](app/lib/protocols/rate-limit.js))
+### I. Automated OAuth 2.0 & Embedded Security ([`server.js`](server.js), [`docs/SHOPIFY_APP_STORE_AUDIT.md`](docs/SHOPIFY_APP_STORE_AUDIT.md))
+- **Seamless Installation Flow:** `GET /api/auth` validates store domain against RFC 1034 format, generates a 16-byte random state nonce, and issues a 302 redirect to Shopify's OAuth authorize endpoint (`scope=read_orders`).
+- **Constant-Time HMAC Verification:** `GET /api/auth/callback` verifies query parameter signature using `verifyOAuthHmac` with `crypto.timingSafeEqual`.
+- **Session Persistence:** Exchanges authorization code for permanent offline access token and upserts into PostgreSQL `Session` table (`offline_${shop}`).
+- **Shopify Content Security Policy (CSP):** Emits `Content-Security-Policy: frame-ancestors https://${shop} https://admin.shopify.com;`, `X-Content-Type-Options: nosniff`, and `Referrer-Policy: strict-origin-when-cross-origin`.
+
+### J. Security Hardening & Rate Limiter ([`app/lib/protocols/rate-limit.js`](app/lib/protocols/rate-limit.js))
 - In-memory sliding-window log rate limiter with zero external dependencies, instantiated by default in `routes.js`.
 - Prevents token enumeration, scraping, and brute-force attacks on public App Proxy endpoints (returns Liquid 429 error template after threshold).
 - Auto-pruning with `maxKeys` eviction cap and unreferenced cleanup intervals to prevent memory leaks.
@@ -87,7 +96,7 @@
   - `TRUST_CF_CONNECTING_IP` (env var, default `false`): Opt-in trust for `CF-Connecting-IP` header; only enable when deployed directly behind Cloudflare.
   - Falls back to `X-Real-IP`, direct socket address, or shared `'unknown'` bucket. Attacker-controlled leftmost headers cannot manipulate rate limit buckets.
 
-### J. Mandatory Compliance Webhooks ([`app/lib/protocols/webhooks.js`](app/lib/protocols/webhooks.js))
+### K. Mandatory Compliance Webhooks ([`app/lib/protocols/webhooks.js`](app/lib/protocols/webhooks.js))
 - **Atomic Webhook Idempotency & Rollback:** Tracks processed webhook IDs in `ProcessedWebhook` table inside the exact same database transaction as monthly stat upserts. If stat counting fails, the idempotency marker is rolled back so Shopify delivery retries can succeed. True duplicates return `{ updatedCount: 0, duplicate: true }`. Requires `X-Shopify-Webhook-Id` header (rejects missing header with 400 on `orders/paid`). Zero order IDs or customer IDs are ever stored in `ProcessedWebhook`. Includes parameterized retention pruning (`pruneProcessedWebhooks`).
 - `customers/data_request`: Shopify discards compliance webhook response bodies. By architectural design, the app accepts zero shopper or patient PII (`clientPii: null`, `clientDataStored: false`). Practitioner data (practice profiles and authored protocols) can be inspected, but an automated out-of-band delivery channel to merchants is not yet implemented.
 - `customers/redact`: Tag mode removes practitioner profile and archives/deletes protocols; Company mode preserves company protocols and scrubs personal creator references. Propagates database errors to trigger Shopify retries.
@@ -102,7 +111,7 @@
 flowchart TD
     subgraph Practitioner ["Practitioner (Signed In)"]
         UI["Portal UI & Library\n(Tag Mode: Customer · B2B Mode: Company)"]
-        ED["Protocol Editor (Not Built Yet)\n(1-20 lines, usage notes, reorder)"]
+        ED["Interactive Protocol Editor Modal\n(Catalog search, line curation, live total)"]
         SH["Share Kit\n(Vector QR SVG, Printable Handout)"]
     end
 
@@ -163,14 +172,14 @@ npm install
 The project features a deterministic test suite using native Node.js test runner (`node:test`):
 
 ```bash
-# Run all 272 pure unit tests using mock database interfaces (zero external network dependencies, ~90ms):
+# Run all 337 pure unit tests using mock database interfaces (zero external network dependencies, ~100ms):
 npm test
 
 # Run PostgreSQL live database integration tests against a running Postgres instance:
 npm run test:db
 ```
 
-> **Database Tests & Migrations Note:** `npm test` runs 272 pure unit tests against deterministic mock database interfaces. Real PostgreSQL coverage exists when `npm run test:db` is run against PostgreSQL running on `localhost:5432` with database `practitioner_protocols` and migrations applied. The live integration test suite verifies 10/10 tests against real PostgreSQL, including row-level locking (`FOR UPDATE`), transaction rollbacks, multi-line replacement, webhook idempotency, and GDPR compliance.
+> **Database Tests & Migrations Note:** `npm test` runs 337 pure unit tests across 88 suites against deterministic mock database interfaces. Real PostgreSQL coverage exists when `npm run test:db` is run against PostgreSQL running on `localhost:5432` with database `practitioner_protocols` and migrations applied. The live integration test suite verifies 10/10 tests against real PostgreSQL, including row-level locking (`FOR UPDATE`), transaction rollbacks, multi-line replacement, webhook idempotency, and GDPR compliance.
 
 ### Applying Migrations (PostgreSQL)
 When running against a live PostgreSQL database, apply the versioned migrations in order:
@@ -197,10 +206,10 @@ psql $DATABASE_URL -f prisma/migrations/20261022_add_currency_to_stat_unique_and
 │           ├── attribution.js   # Cart AJAX payload builder & webhook line extractor
 │           ├── qr.js            # Pure vector QR SVG generator (GF(256) Reed-Solomon)
 │           ├── handout.js       # Printable HTML/CSS handout generator (Letter & A4)
-│           ├── proxy.js         # App Proxy HMAC verifier & theme Liquid renderer
+│           ├── proxy.js         # App Proxy & OAuth HMAC verifiers & theme Liquid renderer
 │           ├── catalog.js       # Batch variant GraphQL resolver & enrichment (M2)
-│           ├── portal.js        # Practitioner portal library, editor, & concurrent edit check
-│           ├── admin.js         # Merchant admin controls & RFC 4180 CSV export
+│           ├── portal.js        # Practitioner portal library, editor modal, & concurrent edit check
+│           ├── admin.js         # Merchant admin Polaris UI, session tokens, & RFC 4180 CSV export
 │           ├── rate-limit.js    # In-memory sliding-window rate limiter
 │           ├── webhooks.js      # Shopify compliance & order attribution webhooks
 │           ├── service.js       # Transactional PostgreSQL service layer (withTransaction)
@@ -209,7 +218,9 @@ psql $DATABASE_URL -f prisma/migrations/20261022_add_currency_to_stat_unique_and
 │   ├── BUILD_PLAN.md            # Milestones and progress tracker
 │   ├── M1_CONTRACT.md           # Runtime contract specification
 │   ├── PROPOSAL_CATALOG_RESOLVER.md # Storefront API variant resolution proposal
-│   └── SPEC.md                  # Comprehensive architectural specification
+│   ├── SHOPIFY_APP_STORE_AUDIT.md   # Shopify App Store Review self-audit & PCD justification
+│   ├── SPEC.md                  # Comprehensive architectural specification
+│   └── SPIKES_CHECKLIST.md      # Empirical dev store spikes plan & findings (S1–S5)
 ├── prisma/
 │   ├── schema.prisma            # PostgreSQL data models
 │   └── migrations/              # Versioned SQL DDL migrations
@@ -219,16 +230,19 @@ psql $DATABASE_URL -f prisma/migrations/20261022_add_currency_to_stat_unique_and
 │   ├── permissions.test.js      # Role & ownership isolation tests
 │   ├── attribution.test.js      # Cart payload & mixed-cart attribution tests
 │   ├── handout.test.js          # QR SVG & printable handout tests
-│   ├── proxy.test.js            # App Proxy HMAC & Liquid state tests
+│   ├── proxy.test.js            # App Proxy & OAuth HMAC, Liquid states, & timestamp tests
 │   ├── catalog.test.js          # Catalog resolver batch GraphQL & fallback tests
-│   ├── portal.test.js           # Library, editor, & concurrent-edit tests
-│   ├── admin.test.js            # Approvals, starters, disable, & CSV export tests
+│   ├── portal.test.js           # Library, editor modal, & concurrent-edit tests
+│   ├── admin.test.js            # Approvals, starters, disable, session tokens, & CSV tests
 │   ├── rate-limit.test.js       # Sliding window rate limiter tests
 │   ├── webhooks.test.js         # GDPR compliance & orders/paid webhook tests
 │   ├── routes.test.js           # HTTP API controllers & router tests
+│   ├── server.test.js           # OAuth 2.0 flow, CSP headers, config guards & shopify.app.toml tests
 │   └── database.integration.test.js # PostgreSQL integration tests
+├── server.js                    # Node.js server entry, OAuth flow, admin & proxy router
 ├── CLAUDE.md                    # Repository conventions & safety agreements
 ├── PROJECT_CONTEXT.md           # Append-only chronological engineering log
+├── shopify.app.toml             # App manifest (read_orders scope, compliance webhooks)
 └── package.json                 # Native ESM package manifest
 ```
 

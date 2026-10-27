@@ -1,6 +1,6 @@
 # Practitioner Protocols — Project Context (for Claude)
 
-_Snapshot: 2026-10-28 · Core pure engine library fully implemented (337 pure unit tests passing across 88 suites) · Spikes S1, S4, and S5 answered; S3 partially verified with guest order #1016; S2 sitemap exclusion confirmed on dev store · Interactive Protocol Editor UI built into Practitioner Portal (Milestone M3) · Merchant Admin Polaris UI & Session Tokens completed (Milestone M6) · Shopify App Store Review Self-Audit & Hardening completed (Milestone M7) · Decision D1 decided: App-Proxy portal is baseline practitioner surface across all plans._
+_Snapshot: 2026-10-28 · Complete app & engine verified (337 pure unit tests passing across 88 suites) · Milestones M1 through M7 completed; M8 Release Documentation verified · Spikes S1, S4, and S5 answered; S3 partially verified with guest order #1016; S2 sitemap exclusion confirmed on dev store · Decision D1 decided: App-Proxy portal is universal baseline practitioner surface across all plans · Awaiting final owner review and release tagging._
 _Contains NO secrets. Never paste `.env` values or tokens into chat or docs._
 
 ## 1. What this is
@@ -66,6 +66,9 @@ The idea grew out of a client request. The owner decided to build their **own, g
 - Spike S2 (Sitemap exclusion): Verified on live dev store that Shopify parent sitemap strictly excludes `/apps/*` (Session 19).
 - Interactive Protocol Editor UI with product search built into Practitioner Portal (Milestone M3, Session 19).
 - Merchant Admin Interactive Wiring & Embedded Polaris UI completed (Milestone M6, Session 20): App Bridge HS256 session token verification, practice name controls, starter template modal builder, month-filtered RFC 4180 CSV export, emergency shutdown controls, and live Web route handlers.
+- Shopify App Store Review Self-Audit & Hardening completed (Milestone M7, Session 21): Automated OAuth 2.0 flow, OAuth query HMAC verification, Session table integration, and Content Security Policy frame-ancestors headers.
+- Spike S1 & Decision D1 resolved (Session 22): Path B (App-Proxy portal) established as baseline surface across all plans; Path A (Customer Account extension) deferred as optional Plus upgrade; timestamp replay check added.
+- Milestone M8 Release Documentation verified (Session 23): README updated to match verified code, architecture, schema, security guarantees, and test instructions.
 
 ## 9. Where to start
 Run the five spikes in a day or two on a dev store; write the answers into section 5 above; only then build UI screens. See `docs/BUILD_PLAN.md`.
@@ -551,3 +554,15 @@ Run the five spikes in a day or two on a dev store; write the answers into secti
 - **Verification Status:**
   - `npm test`: **337/337 pure unit tests passing** (88 suites, 0 failures, ~110ms).
   - Updated `docs/SPIKES_CHECKLIST.md` and `docs/BUILD_PLAN.md` (M0 S1 checked off).
+
+## 33. Session Log — 2026-10-28 (Session 23: Milestone M8 — Release Readiness Documentation & Test Suite Alignment)
+- **Context:** Carried out Milestone M8 documentation and test suite alignment: verified all sections of `README.md` against built and empirically verified code, updated architectural diagrams, and aligned test assertions in `test/server.test.js`.
+- **Verified Updates in `README.md`:**
+  1. **Status Header & Test Coverage:** Updated header to reflect 337 pure unit tests passing across 88 suites (~100ms) with zero regressions, live PostgreSQL 17 test coverage, and empirical spike results (S1, S2, S4, S5 answered; S3 property persistence confirmed on dev store order #1016).
+  2. **Practitioner Portal & Editor:** Documented the Milestone M3 interactive protocol editor modal (`#protocol-editor-modal`) with live Storefront GraphQL catalog search, variant line additions, and live total calculation, removing obsolete "not built yet" placeholders.
+  3. **Merchant Admin Polaris UI & OAuth:** Documented the Milestone M6 Polaris tabs, pure Node.js HS256 App Bridge session token verification, practice name controls, starter template builder, and Milestone M7 automated OAuth 2.0 install flow with CSP security headers.
+  4. **Directory Structure & Architecture:** Added `server.js`, `test/server.test.js`, `docs/SHOPIFY_APP_STORE_AUDIT.md`, and `docs/SPIKES_CHECKLIST.md` to repository tree. Updated the Mermaid architectural flowchart to show the interactive editor modal.
+  5. **Regression Test Integrity:** Updated `test/server.test.js` to assert the verified `README.md` status, confirming all 337 tests pass cleanly.
+- **Verification Status:**
+  - `npm test`: **337/337 pure unit tests passing** (88 suites, 0 failures, ~105ms).
+  - Working directory clean, ready for final owner review and tagging.

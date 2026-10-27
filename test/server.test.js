@@ -410,18 +410,18 @@ describe('Server & Configuration Hardening (server.js, shopify.app.toml, README.
   describe('README.md Status & Scope Integrity', () => {
     const readmeContent = readFileSync(join(process.cwd(), 'README.md'), 'utf-8');
 
-    it('states spikes are partially done (S2 only)', () => {
+    it('states dev store spikes are verified (S1, S2, S4, S5 answered, S3 property persistence)', () => {
       assert.ok(
-        readmeContent.includes('Dev Store Spikes Partially Done (S2 Liquid Evaluation Verified; S1, S3–S5 Open)')
+        readmeContent.includes('Dev Store Spikes Verified')
       );
       assert.ok(
-        readmeContent.includes('Spikes are partially done: Spike S2 verified App Proxy Liquid evaluation')
+        readmeContent.includes('S1, S2, S4, S5 Answered; S3 Property Persistence Verified on Order #1016')
       );
     });
 
-    it('marks protocol editor as not built yet', () => {
-      assert.ok(readmeContent.includes('Protocol Editor (Not Built Yet)'));
-      assert.ok(readmeContent.includes('interactive editor UI screen and product search are not built yet'));
+    it('documents interactive protocol editor modal built in Milestone M3', () => {
+      assert.ok(readmeContent.includes('Interactive Protocol Editor (Milestone M3)'));
+      assert.ok(readmeContent.includes('searchCatalogProducts'));
     });
   });
 });

@@ -436,6 +436,12 @@ export function renderProtocolLiquid({ protocol, practiceName = '', isLoggedInPr
   .protocol-line-actions {
     flex-shrink: 0;
   }
+  .protocol-line-error {
+    color: #b91c1c;
+    font-size: 0.8125rem;
+    margin-top: 0.375rem;
+    font-weight: 500;
+  }
   .protocol-badge {
     display: inline-block;
     padding: 0.2rem 0.5rem;
@@ -608,6 +614,7 @@ export function renderProtocolLiquid({ protocol, practiceName = '', isLoggedInPr
         <button type="button" class="protocol-btn protocol-btn-disabled" disabled aria-disabled="true">
           Unavailable
         </button>`}
+        <div class="protocol-line-error" style="display:none;" role="alert"></div>
       </div>
     </div>`;
   }).join('\n');
@@ -671,6 +678,10 @@ ${protocolDataJson}
       btn.textContent = 'Adding...';
     }
 
+    // Clear any previous error notices
+    var allErrors = document.querySelectorAll('.protocol-line-error');
+    allErrors.forEach(function(el) { el.style.display = 'none'; el.textContent = ''; });
+
     var requestBody = {
       items: items.map(function(item) {
         var props = {
@@ -698,7 +709,14 @@ ${protocolDataJson}
     })
     .then(function(res) {
       if (!res.ok) {
-        throw new Error('Failed to add to cart: ' + res.statusText);
+        return res.json().catch(function() { return null; }).then(function(errBody) {
+          var msg = (errBody && (errBody.description || errBody.message)) ||
+            (res.statusText ? 'Failed to add to cart: ' + res.statusText : 'Unable to add products to cart.');
+          var err = new Error(msg);
+          err.status = res.status;
+          err.data = errBody;
+          throw err;
+        });
       }
       return res.json();
     })
@@ -719,7 +737,18 @@ ${protocolDataJson}
         btn.disabled = false;
         btn.textContent = originalText;
       }
-      alert('Unable to add products to cart. Please try again.');
+      var errorMsg = (err && err.message) ? err.message : 'Unable to add products to cart. Please try again.';
+      if (btn && btn.closest) {
+        var card = btn.closest('.protocol-line-card');
+        if (card) {
+          var errorEl = card.querySelector('.protocol-line-error');
+          if (errorEl) {
+            errorEl.textContent = errorMsg;
+            errorEl.style.display = 'block';
+          }
+        }
+      }
+      alert(errorMsg);
     });
   }
 

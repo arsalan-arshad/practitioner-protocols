@@ -147,6 +147,8 @@ describe('Shopify App Proxy & Storefront (app/lib/protocols/proxy.js)', () => {
       assert.ok(liquid.includes('_protocol_token'));
       assert.ok(liquid.includes('_protocol_id'));
       assert.ok(liquid.includes('/cart/add.js'));
+      assert.ok(liquid.includes('protocol-line-error'));
+      assert.ok(liquid.includes('errBody.description || errBody.message'));
     });
 
     it('shows practitioner banner when signed in as professional', () => {

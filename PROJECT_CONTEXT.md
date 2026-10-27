@@ -1,6 +1,6 @@
 # Practitioner Protocols — Project Context (for Claude)
 
-_Snapshot: 2026-10-27 · Core pure engine library fully implemented (289 pure unit tests passing) · Spikes S1, S3–S5 open; S2 partially verified (Liquid evaluation confirmed on dev store; noindex, sitemap, and real-host proxy hop count pending) · App scaffold and UI renderers built, but real OAuth/token exchange, live session tokens, protocol editor with product search, and live admin routes remain open._
+_Snapshot: 2026-10-27 · Core pure engine library fully implemented (289 pure unit tests passing) · Spikes S4 and S5 answered (S5 answered for guest, plain, tagged, B2B contact; B2B sold-out/overstock open); S3 partially verified with guest order #1016 (signed-in order & webhook payload open); S2 partially verified (Liquid evaluation confirmed; noindex, sitemap, real-host hops pending); S1 open · App scaffold and UI renderers built, but real OAuth/token exchange, live session tokens, protocol editor with product search, and live admin routes remain open._
 _Contains NO secrets. Never paste `.env` values or tokens into chat or docs._
 
 ## 1. What this is
@@ -26,7 +26,7 @@ The idea grew out of a client request. The owner decided to build their **own, g
 - **D1 — Practitioner surface:** customer-account extension vs app-proxy portal. **Open** (needs dev store Spike S1 verification; zero-extension App Proxy is the baseline, full-page extension pending).
 - **D2 — Data store:** Postgres via Prisma (simplest, atomic edits, easy reporting, matches existing hosting; schema and migrations verified in Session 9) vs metaobjects.
 - **D3 — Client page rendering:** App Proxy Liquid page (Liquid evaluation and delimiter neutralization confirmed in Session 12; `noindex` and `sitemap.xml` exclusion pending dev store verification) vs a metaobject theme template.
-- **D4 — Attribution carrier:** hidden line-item property (`_protocol_token`) vs cart attribute. **Open** (needs dev store Spike S3 confirmation that property reaches order).
+- **D4 — Attribution carrier:** hidden line-item property (`_protocol_token`) vs cart attribute. **Partially verified:** Guest order #1016 on live dev store confirmed line-item properties (`_protocol_token`, `_protocol_id`, `_protocol_usage`) reached order, visible in Admin, and hidden on Cart, Drawer, Checkout, and Order Status. Signed-in customer orders and raw `orders/paid` webhook payload verification remain open.
 - **D5 — Public name** and listing category; avoid "Shopify" in the name.
 - **D6 — Practice naming control:** admin-set only (recommended) vs practitioner-set with approval.
 
@@ -42,7 +42,9 @@ The idea grew out of a client request. The owner decided to build their **own, g
 
 ## 8. Punch list
 **Open:**
-- Run spikes S1, S3, S4, S5 on live dev store (using `docs/SPIKES_CHECKLIST.md`).
+- Run Spike S1 on live dev store (using `docs/SPIKES_CHECKLIST.md`).
+- Verify `orders/paid` webhook payload and signed-in customer order property persistence for S3.
+- Verify B2B contact sold-out and over-stock edge cases for S5.
 - Verify `noindex` and `sitemap.xml` exclusion for S2 on live dev store.
 - Re-measure `X-Forwarded-For` chain and configure `TRUSTED_PROXY_HOPS` on production deployed host.
 - Answer Q1/Q3.
@@ -63,6 +65,9 @@ The idea grew out of a client request. The owner decided to build their **own, g
 - Storefront API Catalog Resolver: removed `product.status` from Storefront query; handles missing/null nodes cleanly (Session 17).
 - Cleaned `shopify.app.toml`: minimal scopes (`read_orders`), subscribed compliance topics and `orders/paid`, dropped unhandled `app/scopes_update` (Session 17).
 - Moved `pg` to `dependencies` in `package.json` (Session 17).
+- Spike S4 (Cart batch add): Verified 20 lines added in 971ms, 21 lines in 824ms; sold-out variant causes all-or-nothing 422; overstock returns 422 with partial add.
+- Spike S3 (Guest order): Verified guest order #1016 on dev store; `_protocol_token`, `_protocol_id`, `_protocol_usage` persist into order line items, visible in Admin, hidden in Cart/Checkout/Order Status.
+- Spike S5 (B2B price check & banner rule): Verified 4 shopper states on live Plus dev store; confirmed `practitioner` tag has zero price effect; B2B company prices CAD 714 / 999 / 571 applied consistently; `/cart/add.js` quantity rule enforcement is all-or-nothing; banner rule decided based on `logged_in_customer_id` presence (Session 18).
 
 ## 9. Where to start
 Run the five spikes in a day or two on a dev store; write the answers into section 5 above; only then build UI screens. See `docs/BUILD_PLAN.md`.
@@ -409,3 +414,41 @@ Run the five spikes in a day or two on a dev store; write the answers into secti
      - Added POST handlers for admin action forms (`/api/admin/practitioners/status`, `/api/admin/settings`, `/api/admin/emergency/disable-all`).
 - **Verification Status:**
   - `npm test`: **289/289 pure unit tests passing** (81 suites, 0 failures, ~109ms).
+
+## 28. Session Log — 2026-10-27 (Session 18: Spike S5 Verification & Client Script Error Handling)
+- **Context:** An independent review evaluated Spike S5 (B2B Price Check) against the live Shopify Plus dev store `ai-agent-app-h9qwnwd8.myshopify.com` (Dawn theme "test-data", New Customer Accounts active).
+- **Test Environment & Test Data:**
+  - 3 test customers created with owner's plus-addressed inboxes (replacing `@test.invalid` which cannot receive verification codes for New Customer Accounts):
+    - Plain customer: no tags.
+    - Tagged practitioner: tag `practitioner`.
+    - B2B contact: added to demo company "Snowdevil" with Ordering permission.
+  - Active Catalog "Snowdevil B2B Wholesale" assigned to Snowdevil company location in USD:
+    - Liquid $500 (Quantity rule: minimum 2, increment 2).
+    - Oxygen $700.
+    - Hydrogen $400.
+  - Pre-existing: "Catalog for Canada" (market-assigned, −5%), unchanged.
+- **Empirical S5 Findings:**
+  | State | Product page | Cart | Checkout | Qty rule |
+  |---|---|---|---|---|
+  | Guest (signed out) | Liquid 749.95, Oxygen 1025.00, Hydrogen 600.00 USD | 2374.95 USD | 2374.95 USD | n/a |
+  | Plain customer | same as guest | 2374.95 USD | 2374.95 USD | n/a |
+  | Tagged `practitioner` | same as guest | 2374.95 USD | 2374.95 USD | n/a |
+  | B2B contact | CAD 714 / 999 / 571 | CAD 2998 (Liquid x2) | subtotal CAD 2998, shipping 43, total 3041, company label shown | enforced |
+  1. **Tag Pricing Independence:** The `practitioner` tag has zero pricing effect. Only B2B company membership changes pricing. No wholesale prices leaked to guest, plain, or tagged states.
+  2. **B2B Price Consistency:** B2B catalog prices applied consistently across product page, cart, and checkout.
+  3. **Multi-Currency & Presentment Nuances:** The B2B session ran in CAD with country CA (Snowdevil company location is in Canada), even though store base currency is USD. 714, 999, and 571 CAD are the $500, $700, and $400 USD catalog prices at rate 1.4262; the Canada catalog −5% did NOT stack. The client page and attribution engine must never assume USD.
+  4. **Quantity Rule Enforcement:** `/cart/add.js` enforces quantity rules, returning HTTP 422:
+     - Liquid x1: `"This item has a minimum of 2."`
+     - Liquid x3: `"You can only add this item in increments of 2."`
+  5. **All-or-Nothing Rule Violations:** A multi-line add where one line breaks a quantity rule fails entirely (`[Oxygen 1, Liquid 1, Hydrogen 1]` gave HTTP 422 with an empty cart). This differs from over-stock (which returns 422 but partially adds capped quantity).
+  6. **Boundary & Open Items:** Sold-out or over-stock lines as a B2B contact remain unverified in S5. In S3, guest order #1016 evidence stands, while signed-in orders and the `orders/paid` webhook payload remain open.
+- **Architectural Decision (Banner Trigger Rule):**
+  - Do not decide anything from the displayed price.
+  - Show the "prices may differ from retail" notice when `logged_in_customer_id` is present on the app-proxy request.
+  - This covers company contacts and is independent of tags and currency.
+  - When `logged_in_customer_id` is empty/absent, show retail-price view with no notice.
+  - Privacy barrier: use `logged_in_customer_id` for render decision only; NEVER log or persist it.
+- **Client Script Hardening (`app/lib/protocols/proxy.js`):**
+  - Hardened Cart AJAX add error handling. On a non-OK response from `POST /cart/add.js`, client script parses the JSON error response body, displaying `description` (or `message`) per line or as general error message, re-enabling action buttons cleanly on failure.
+- **Verification Status:**
+  - `npm test`: **289/289 pure unit tests passing** (81 suites, 0 failures, ~100ms).

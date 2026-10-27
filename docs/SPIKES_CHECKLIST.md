@@ -35,7 +35,7 @@ Companion to `docs/SPEC.md` §4 and `docs/BUILD_PLAN.md` M0. Run these on a Part
 
 1. Create the dev store (owner's Partner org): `shopify store create dev --name pp-spikes --plan plus --demo-data --country US`. Also create a second dev store on `basic` or `advanced` to answer plan-availability questions in S1.
 2. Settings → Customer accounts → **new customer accounts** on.
-3. Customers: create `tag-practitioner@test.invalid` (tag `practitioner`, no company), `b2b-contact@test.invalid` (contact at a test company with ordering permission), and `plain-customer@test.invalid` (no tag).
+3. Customers: create plus-addressed inboxes under the owner's real email domain (e.g., `owner+practitioner@domain.com` with tag `practitioner`, `owner+b2b@domain.com` as contact at a test company with ordering permission, and `owner+plain@domain.com` with no tag). Note: `@test.invalid` cannot receive the emailed one-time verification codes required by New Customer Accounts.
 4. Company: one company, one location, one **B2B catalog** assigned to the location with prices different from retail on at least 3 variants, plus a quantity rule (for example minimum 2, increment 2) on one variant.
 5. Products (published to Online Store): at least **25 variants** across several products; one sold-out variant with oversell denied; one variant with stock 3; one product in draft; one archived product. Record the variant IDs.
 6. Payments: enable Shopify's **Bogus/test gateway** only. Never a real processor.
@@ -141,11 +141,14 @@ Companion to `docs/SPEC.md` §4 and `docs/BUILD_PLAN.md` M0. Run these on a Part
 
 | Item | Signed out | Tag practitioner | B2B contact |
 |---|---|---|---|
-| Property reaches order | | | |
-| Property reaches `orders/paid` | | | |
-| Hidden at checkout | | | |
-| Hidden in emails / order status | | | |
-| Visible in theme cart (theme 1 / 2) | | | |
+| Property reaches order | Verified (Order #1016) | Open | Open |
+| Property reaches `orders/paid` | Open (payload uncaptured) | Open | Open |
+| Hidden at checkout | Hidden (Order #1016) | Open | Open |
+| Hidden in emails / order status | Hidden (Order #1016) | Open | Open |
+| Visible in theme cart (theme 1 / 2) | Hidden in Dawn (theme 1) | Open | Open |
+
+**Empirical check completed (2026-10-27):** Guest order #1016 (Confirmation `#0MTYEIIHI`, Bogus gateway) on dev store `ai-agent-app-h9qwnwd8.myshopify.com` confirmed `_protocol_token`, `_protocol_id`, and `_protocol_usage` survived into order line items. In Shopify Admin order view, merchant visibly sees all properties. Properties are 100% hidden on Cart, Drawer, Checkout, and Order Status page. GraphQL order query verified `"visible": false` on line item properties.
+**Status:** S3 partially answered. **OPEN:** Capturing the raw `orders/paid` webhook payload and verifying property persistence on signed-in customer orders (plain, tag, B2B).
 
 Also record: separate-line behaviour, cart-attribute comparison, and the currency/discount field findings.
 
@@ -181,6 +184,8 @@ Also record: separate-line behaviour, cart-attribute comparison, and the currenc
 
 **Question.** What price does a signed-in practitioner see when previewing a protocol, and how is the "clients will see retail prices" banner driven?
 
+**Status.** **Answered** for guest, plain customer, tagged practitioner, and B2B contact. **OPEN** for B2B sold-out and over-stock edge cases.
+
 **Steps**
 
 1. Pick 3 variants where the B2B catalog price differs from retail. Compare the price shown to: signed out; plain customer; tag practitioner; B2B contact.
@@ -188,18 +193,26 @@ Also record: separate-line behaviour, cart-attribute comparison, and the currenc
 3. Resolver comparison: look up the same variants through the Storefront API with no buyer context, then with country context. Which price do we get? This is what the client page will show if it resolves server-side (see `docs/PROPOSAL_CATALOG_RESOLVER.md`).
 4. Decide the banner condition: all signed-in practitioners, or only when the viewer's price differs from retail (B2B contacts)? For tag practitioners the price is retail, so the banner may be unnecessary.
 
-**Record**
+**Record (Empirical results, 2026-10-27 on `ai-agent-app-h9qwnwd8.myshopify.com`)**
 
-| Shopper | Product page | Proxy page | Cart/checkout |
-|---|---|---|---|
-| Signed out | | | |
-| Plain customer | | | |
-| Tag practitioner | | | |
-| B2B contact | | | |
+| Shopper | Product page | Cart | Checkout | Qty rule |
+|---|---|---|---|---|
+| Guest (signed out) | Liquid 749.95, Oxygen 1025.00, Hydrogen 600.00 USD | 2374.95 USD | 2374.95 USD | n/a |
+| Plain customer | same as guest | 2374.95 USD | 2374.95 USD | n/a |
+| Tagged `practitioner` | same as guest | 2374.95 USD | 2374.95 USD | n/a |
+| B2B contact (Snowdevil) | CAD 714 / 999 / 571 | CAD 2998 (Liquid x2) | subtotal CAD 2998, shipping 43, total 3041 (company label shown) | enforced |
 
-**Decision.** Banner rule and copy, and whether the client page should show Liquid-contextual prices or server-resolved retail prices. Because a client must always see retail, the page should not display contextual B2B prices to a signed-in B2B contact without the banner.
+**Findings:**
+1. The `practitioner` tag has **no pricing effect**. Only B2B company membership changes price. No wholesale price leaked to guest, plain or tagged states.
+2. B2B prices are consistent across product page, cart and checkout.
+3. The B2B session ran in CAD with country CA (Snowdevil company location is in Canada), although store currency is USD. 714, 999 and 571 CAD are the $500, $700 and $400 catalog prices at rate 1.4262, with the Canada catalog's −5% NOT stacked on top. **Do not assume USD anywhere in the client page or in attribution.**
+4. `/cart/add.js` enforces quantity rules, returning HTTP 422:
+   - Liquid x1: "This item has a minimum of 2."
+   - Liquid x3: "You can only add this item in increments of 2."
+5. A multi-line add where one line breaks a rule fails entirely: `[Oxygen 1, Liquid 1, Hydrogen 1]` gave 422 with an empty cart (all-or-nothing).
+6. **Open in S5:** Sold-out or over-stock lines as a B2B contact remain unverified.
 
-**If it fails.** If the B2B price leaks into the cart for a practitioner adding a client's protocol, that is expected Shopify behaviour, not a bug: the banner is the mitigation. Record it and move on.
+**Decision.** Banner trigger rule: Do not decide anything from the displayed price. Show the "prices may differ from retail" notice when `logged_in_customer_id` is present on the app-proxy request. This covers company contacts, and it is independent of tags and currency. For an empty `logged_in_customer_id`, show the retail-price view with no notice. Use the ID for the render decision only and never log or store it (privacy rule).
 
 ---
 

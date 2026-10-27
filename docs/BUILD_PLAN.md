@@ -32,7 +32,7 @@
 
 ## M6 — Merchant admin
 - [x] Pure merchant admin business logic: practitioner approvals, practice names, starters, emergency disable, settings, aggregate monthly reports, and RFC 4180 CSV export (`app/lib/protocols/admin.js`, `test/admin.test.js`).
-- [ ] Embedded Polaris admin UI: Template renderer exists (`renderAdminHtml` in `app/lib/protocols/admin.js`), but authenticated session-token verification and live action route handlers remain open.
+- [x] Embedded Polaris admin UI & session tokens: Embedded Polaris UI with tab navigation, practice name editor, starter template builder modal, month-filtered RFC 4180 CSV export, emergency kill switch, HS256 App Bridge session-token verification, and live Web route handlers (`renderAdminHtml`, `verifyAdminSessionToken`, `routes.js`, `server.js`).
 
 ## M7 — Hardening and review prep
 - [x] Compliance webhooks with error propagation and honest data request handling (`customers/data_request`, `customers/redact`, `shop/redact`, `app/uninstalled` in `app/lib/protocols/webhooks.js`).

@@ -38,8 +38,38 @@ import {
   searchCatalogProducts
 } from './catalog.js';
 import { renderPortalLiquid } from './portal.js';
+import {
+  ProtocolAdminError,
+  ADMIN_ERROR_CODES,
+  assertNoPii,
+  validatePracticeName,
+  listPractitionerProfiles,
+  getPractitionerProfile,
+  updatePracticeName,
+  setPractitionerApproval,
+  listStarterTemplates,
+  createStarterTemplate,
+  updateStarterTemplate,
+  emergencyDisableAllProtocols,
+  emergencyDisableProtocol,
+  restoreDisabledProtocol,
+  getSettings,
+  updateSettings,
+  getAttributionReport,
+  exportAttributionCsv,
+  renderAdminHtml,
+  extractAdminSession,
+  verifyAdminSessionToken,
+  createAdminSessionToken
+} from './admin.js';
 
-export { createRateLimiter };
+export {
+  createRateLimiter,
+  verifyAdminSessionToken,
+  createAdminSessionToken,
+  extractAdminSession,
+  renderAdminHtml
+};
 
 /**
  * Safely extracts a named header from a Request or header container.
@@ -123,6 +153,20 @@ export function handleErrorResponse(err) {
         error: err.message,
         code: err.code,
         details: err.details || null
+      },
+      { status }
+    );
+  }
+
+  if (err instanceof ProtocolAdminError || err?.name === 'ProtocolAdminError') {
+    let status = 400;
+    if (err.code === ADMIN_ERROR_CODES.UNAUTHORIZED) status = 401;
+    else if (err.code === ADMIN_ERROR_CODES.NOT_FOUND) status = 404;
+    return Response.json(
+      {
+        error: err.message,
+        code: err.code,
+        field: err.field || null
       },
       { status }
     );
@@ -532,16 +576,58 @@ export async function handleListProtocolsRequest(db, user, url) {
 }
 
 /**
+ * Parses urlencoded form string into an object, supporting nested array syntax like lines[0][variantGid].
+ * @param {string} str
+ * @returns {Record<string, any>}
+ */
+export function parseFormEncoded(str) {
+  if (!str) return {};
+  const params = new URLSearchParams(str);
+  const result = {};
+
+  for (const [key, value] of params.entries()) {
+    const match = key.match(/^([^\[]+)\[(\d+)\]\[([^\]]+)\]$/);
+    if (match) {
+      const [, arrName, idxStr, prop] = match;
+      const idx = parseInt(idxStr, 10);
+      result[arrName] = result[arrName] || [];
+      result[arrName][idx] = result[arrName][idx] || {};
+      result[arrName][idx][prop] = prop === 'quantity' ? parseInt(value, 10) || 1 : value;
+    } else {
+      result[key] = value;
+    }
+  }
+
+  if (Array.isArray(result.lines)) {
+    result.lines = result.lines.filter(Boolean);
+  }
+
+  return result;
+}
+
+/**
  * Parses request body from various input types.
  * @param {any} body
  * @returns {Promise<any>}
  */
-async function parseRequestBody(body) {
+export async function parseRequestBody(body) {
   if (body && typeof body.json === 'function') {
+    const contentType = body.headers?.get?.('content-type') || '';
+    if (contentType.includes('application/x-www-form-urlencoded')) {
+      const text = await body.text();
+      return parseFormEncoded(text);
+    }
     return await body.json();
   }
+  if (body instanceof URLSearchParams) {
+    return parseFormEncoded(body.toString());
+  }
   if (typeof body === 'string') {
-    return JSON.parse(body);
+    try {
+      return JSON.parse(body);
+    } catch {
+      return parseFormEncoded(body);
+    }
   }
   return body || {};
 }
@@ -944,5 +1030,337 @@ export async function handleWebhookRequest(db, request, { apiSecret } = {}) {
       },
       { status: 500 }
     );
+  }
+}
+
+// ==========================================
+// Admin Route Handlers (Milestone M6)
+// ==========================================
+
+/**
+ * Handles GET /admin or GET /app embedded Polaris admin dashboard request.
+ *
+ * @param {any} db Database client
+ * @param {Request | any} request Web Request or request-like object
+ * @param {{
+ *   apiSecret?: string,
+ *   apiKey?: string,
+ *   expectedShop?: string,
+ *   isDemoMode?: boolean,
+ *   demoData?: { profiles?: any[], starters?: any[], report?: any, settings?: any }
+ * }} [options={}]
+ * @returns {Promise<Response>}
+ */
+export async function handleAdminDashboardRequest(db, request, options = {}) {
+  try {
+    const session = extractAdminSession(request, options);
+    const shop = session.shop || options.expectedShop || '';
+
+    let urlObj = null;
+    if (typeof request === 'string') {
+      try { urlObj = new URL(request, 'https://admin.test'); } catch {}
+    } else if (request?.url) {
+      try { urlObj = new URL(request.url, 'https://admin.test'); } catch {}
+    } else if (request instanceof URL) {
+      urlObj = request;
+    }
+
+    const activeTab = urlObj?.searchParams?.get('tab') || request?.query?.tab || 'practitioners';
+    const month = urlObj?.searchParams?.get('month') || request?.query?.month || new Date().toISOString().slice(0, 7);
+
+    let profiles = options.demoData?.profiles || [];
+    let starters = options.demoData?.starters || [];
+    let report = options.demoData?.report || null;
+    let settings = options.demoData?.settings || null;
+
+    if (db && !session.isDemo) {
+      const profilesRes = await listPractitionerProfiles(db, { shop });
+      profiles = profilesRes.profiles;
+      starters = await listStarterTemplates(db, { shop });
+      report = await getAttributionReport(db, { shop, month });
+      settings = await getSettings(db, { shop });
+    }
+
+    const html = renderAdminHtml({
+      shop,
+      profiles,
+      starters,
+      report,
+      settings,
+      activeTab
+    });
+
+    return new Response(html, {
+      status: 200,
+      headers: { 'Content-Type': 'text/html; charset=utf-8' }
+    });
+  } catch (err) {
+    return handleErrorResponse(err);
+  }
+}
+
+/**
+ * Handles GET /api/admin/practitioners list request.
+ *
+ * @param {any} db Database client
+ * @param {Request | any} request
+ * @param {Record<string, any>} [options]
+ * @returns {Promise<Response>}
+ */
+export async function handleAdminPractitionersListRequest(db, request, options = {}) {
+  try {
+    const session = extractAdminSession(request, options);
+    const shop = session.shop || options.expectedShop || '';
+
+    let isApproved = undefined;
+    let urlObj = null;
+    if (request?.url) {
+      try { urlObj = new URL(request.url, 'https://admin.test'); } catch {}
+    }
+    const approvedParam = urlObj?.searchParams?.get('isApproved') ?? request?.query?.isApproved;
+    if (approvedParam !== undefined && approvedParam !== null) {
+      isApproved = approvedParam === 'true';
+    }
+
+    const result = await listPractitionerProfiles(db, { shop, isApproved });
+    return Response.json(result, { status: 200 });
+  } catch (err) {
+    return handleErrorResponse(err);
+  }
+}
+
+/**
+ * Handles POST /api/admin/practitioners/status approval/revoke request.
+ *
+ * @param {any} db Database client
+ * @param {Request | any} request
+ * @param {Record<string, any>} [options]
+ * @returns {Promise<Response>}
+ */
+export async function handleAdminPractitionerStatusRequest(db, request, options = {}) {
+  try {
+    const session = extractAdminSession(request, options);
+    const shop = session.shop || options.expectedShop || '';
+    const body = await parseRequestBody(request);
+
+    const ownerGid = body.ownerGid;
+    if (!ownerGid) {
+      return Response.json({ error: 'ownerGid is required', code: ADMIN_ERROR_CODES.INVALID_INPUT }, { status: 400 });
+    }
+
+    const isApproved = body.action ? body.action === 'approve' : Boolean(body.isApproved);
+    const profile = await setPractitionerApproval(db, { shop, ownerGid, isApproved });
+
+    // Handle form redirect vs JSON response
+    const acceptHeader = getHeader(request, 'accept') || '';
+    const contentType = getHeader(request, 'content-type') || '';
+    if (contentType.includes('application/x-www-form-urlencoded') || acceptHeader.includes('text/html')) {
+      return new Response(null, {
+        status: 302,
+        headers: { Location: '/admin?tab=practitioners' }
+      });
+    }
+
+    return Response.json({ ok: true, profile }, { status: 200 });
+  } catch (err) {
+    return handleErrorResponse(err);
+  }
+}
+
+/**
+ * Handles POST /api/admin/practitioners/practice-name update request.
+ *
+ * @param {any} db Database client
+ * @param {Request | any} request
+ * @param {Record<string, any>} [options]
+ * @returns {Promise<Response>}
+ */
+export async function handleAdminPracticeNameRequest(db, request, options = {}) {
+  try {
+    const session = extractAdminSession(request, options);
+    const shop = session.shop || options.expectedShop || '';
+    const body = await parseRequestBody(request);
+
+    const ownerGid = body.ownerGid;
+    const practiceName = body.practiceName;
+
+    if (!ownerGid) {
+      return Response.json({ error: 'ownerGid is required', code: ADMIN_ERROR_CODES.INVALID_INPUT }, { status: 400 });
+    }
+
+    const profile = await updatePracticeName(db, { shop, ownerGid, practiceName });
+
+    const acceptHeader = getHeader(request, 'accept') || '';
+    const contentType = getHeader(request, 'content-type') || '';
+    if (contentType.includes('application/x-www-form-urlencoded') || acceptHeader.includes('text/html')) {
+      return new Response(null, {
+        status: 302,
+        headers: { Location: '/admin?tab=practitioners' }
+      });
+    }
+
+    return Response.json({ ok: true, profile }, { status: 200 });
+  } catch (err) {
+    return handleErrorResponse(err);
+  }
+}
+
+/**
+ * Handles GET /api/admin/starters list request.
+ *
+ * @param {any} db Database client
+ * @param {Request | any} request
+ * @param {Record<string, any>} [options]
+ * @returns {Promise<Response>}
+ */
+export async function handleAdminStartersListRequest(db, request, options = {}) {
+  try {
+    const session = extractAdminSession(request, options);
+    const shop = session.shop || options.expectedShop || '';
+    const starters = await listStarterTemplates(db, { shop });
+    return Response.json({ starters, count: starters.length }, { status: 200 });
+  } catch (err) {
+    return handleErrorResponse(err);
+  }
+}
+
+/**
+ * Handles POST /api/admin/starters/create starter creation request.
+ *
+ * @param {any} db Database client
+ * @param {Request | any} request
+ * @param {Record<string, any>} [options]
+ * @returns {Promise<Response>}
+ */
+export async function handleAdminCreateStarterRequest(db, request, options = {}) {
+  try {
+    const session = extractAdminSession(request, options);
+    const shop = session.shop || options.expectedShop || '';
+    const body = await parseRequestBody(request);
+
+    assertNoPii(body);
+
+    const starter = await createStarterTemplate(db, {
+      shop,
+      adminUser: { id: session.userId, role: 'admin' },
+      input: body
+    });
+
+    const acceptHeader = getHeader(request, 'accept') || '';
+    const contentType = getHeader(request, 'content-type') || '';
+    if (contentType.includes('application/x-www-form-urlencoded') || acceptHeader.includes('text/html')) {
+      return new Response(null, {
+        status: 302,
+        headers: { Location: '/admin?tab=starters' }
+      });
+    }
+
+    return Response.json({ ok: true, starter }, { status: 201 });
+  } catch (err) {
+    return handleErrorResponse(err);
+  }
+}
+
+/**
+ * Handles POST /api/admin/settings update settings request.
+ *
+ * @param {any} db Database client
+ * @param {Request | any} request
+ * @param {Record<string, any>} [options]
+ * @returns {Promise<Response>}
+ */
+export async function handleAdminUpdateSettingsRequest(db, request, options = {}) {
+  try {
+    const session = extractAdminSession(request, options);
+    const shop = session.shop || options.expectedShop || '';
+    const body = await parseRequestBody(request);
+
+    assertNoPii(body);
+
+    const settings = await updateSettings(db, {
+      shop,
+      settings: body,
+      adminUser: { id: session.userId, role: 'admin' }
+    });
+
+    const acceptHeader = getHeader(request, 'accept') || '';
+    const contentType = getHeader(request, 'content-type') || '';
+    if (contentType.includes('application/x-www-form-urlencoded') || acceptHeader.includes('text/html')) {
+      return new Response(null, {
+        status: 302,
+        headers: { Location: '/admin?tab=settings' }
+      });
+    }
+
+    return Response.json({ ok: true, settings }, { status: 200 });
+  } catch (err) {
+    return handleErrorResponse(err);
+  }
+}
+
+/**
+ * Handles POST /api/admin/emergency/disable-all emergency shutdown request.
+ *
+ * @param {any} db Database client
+ * @param {Request | any} request
+ * @param {Record<string, any>} [options]
+ * @returns {Promise<Response>}
+ */
+export async function handleAdminEmergencyDisableAllRequest(db, request, options = {}) {
+  try {
+    const session = extractAdminSession(request, options);
+    const shop = session.shop || options.expectedShop || '';
+
+    const result = await emergencyDisableAllProtocols(db, {
+      shop,
+      adminUser: { id: session.userId, role: 'admin' }
+    });
+
+    const acceptHeader = getHeader(request, 'accept') || '';
+    const contentType = getHeader(request, 'content-type') || '';
+    if (contentType.includes('application/x-www-form-urlencoded') || acceptHeader.includes('text/html')) {
+      return new Response(null, {
+        status: 302,
+        headers: { Location: '/admin?tab=settings' }
+      });
+    }
+
+    return Response.json({ ok: true, disabledCount: result.disabledCount }, { status: 200 });
+  } catch (err) {
+    return handleErrorResponse(err);
+  }
+}
+
+/**
+ * Handles GET /api/admin/attribution.csv export request.
+ *
+ * @param {any} db Database client
+ * @param {Request | any} request
+ * @param {Record<string, any>} [options]
+ * @returns {Promise<Response>}
+ */
+export async function handleAdminAttributionCsvRequest(db, request, options = {}) {
+  try {
+    const session = extractAdminSession(request, options);
+    const shop = session.shop || options.expectedShop || '';
+
+    let urlObj = null;
+    if (request?.url) {
+      try { urlObj = new URL(request.url, 'https://admin.test'); } catch {}
+    }
+    const month = urlObj?.searchParams?.get('month') || request?.query?.month || undefined;
+
+    const csv = await exportAttributionCsv(db, { shop, month });
+    const filenameMonth = month || 'all';
+
+    return new Response(csv, {
+      status: 200,
+      headers: {
+        'Content-Type': 'text/csv; charset=utf-8',
+        'Content-Disposition': `attachment; filename="attribution-${shop}-${filenameMonth}.csv"`
+      }
+    });
+  } catch (err) {
+    return handleErrorResponse(err);
   }
 }

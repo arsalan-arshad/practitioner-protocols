@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import { createProtocol, updateProtocol } from './service.js';
 
 /**
@@ -890,6 +891,286 @@ function escapeAdminText(str) {
     .replace(/'/g, '&#39;');
 }
 
+// ==========================================
+// 6. Shopify Admin Session Token Verification
+// ==========================================
+
+/**
+ * Creates a signed HS256 admin session token (JWT) for testing or session issuance.
+ * Format follows Shopify App Bridge session token specification.
+ *
+ * @param {{
+ *   userId?: string,
+ *   shop: string,
+ *   apiKey?: string,
+ *   expiresInSec?: number
+ * }} claims
+ * @param {string} apiSecret
+ * @returns {string} Signed JWT
+ */
+export function createAdminSessionToken(claims, apiSecret) {
+  if (!apiSecret || typeof apiSecret !== 'string') {
+    throw new Error('apiSecret required to create session token');
+  }
+  const {
+    userId = 'gid://shopify/User/1',
+    shop,
+    apiKey = 'test_api_key',
+    expiresInSec = 3600
+  } = claims;
+
+  if (!shop) {
+    throw new Error('shop is required to create session token');
+  }
+
+  const cleanShop = shop.replace(/^https?:\/\//, '').split('/')[0];
+  const now = Math.floor(Date.now() / 1000);
+
+  const header = { alg: 'HS256', typ: 'JWT' };
+  const payload = {
+    iss: `https://${cleanShop}/admin`,
+    dest: `https://${cleanShop}`,
+    aud: apiKey,
+    sub: userId,
+    exp: now + expiresInSec,
+    nbf: now,
+    iat: now,
+    jti: crypto.randomBytes(16).toString('hex')
+  };
+
+  const headerB64 = Buffer.from(JSON.stringify(header)).toString('base64url');
+  const payloadB64 = Buffer.from(JSON.stringify(payload)).toString('base64url');
+  const signingInput = `${headerB64}.${payloadB64}`;
+  const signatureB64 = crypto.createHmac('sha256', apiSecret).update(signingInput).digest('base64url');
+
+  return `${headerB64}.${payloadB64}.${signatureB64}`;
+}
+
+/**
+ * Verifies a Shopify App Bridge Admin session token (JWT signed with HS256).
+ * Validates cryptographic signature, expiry, active window, destination shop, and audience.
+ *
+ * @param {string} token
+ * @param {{
+ *   apiSecret: string,
+ *   apiKey?: string,
+ *   expectedShop?: string,
+ *   clockToleranceSec?: number
+ * }} options
+ * @returns {{ userId: string, shop: string, role: string, payload: any }}
+ * @throws {ProtocolAdminError}
+ */
+export function verifyAdminSessionToken(token, options = {}) {
+  const { apiSecret, apiKey, expectedShop, clockToleranceSec = 10 } = options;
+
+  if (!apiSecret || typeof apiSecret !== 'string') {
+    throw new ProtocolAdminError(
+      'Server configuration error: missing API secret for admin verification',
+      ADMIN_ERROR_CODES.UNAUTHORIZED
+    );
+  }
+
+  if (!token || typeof token !== 'string') {
+    throw new ProtocolAdminError(
+      'Unauthorized: Missing or empty admin session token',
+      ADMIN_ERROR_CODES.UNAUTHORIZED
+    );
+  }
+
+  const parts = token.trim().split('.');
+  if (parts.length !== 3) {
+    throw new ProtocolAdminError(
+      'Unauthorized: Malformed JWT token structure',
+      ADMIN_ERROR_CODES.UNAUTHORIZED
+    );
+  }
+
+  const [headerB64, payloadB64, signatureB64] = parts;
+
+  // 1. Verify HS256 HMAC signature using crypto.timingSafeEqual
+  const signingInput = `${headerB64}.${payloadB64}`;
+  const expectedSigB64 = crypto.createHmac('sha256', apiSecret).update(signingInput).digest('base64url');
+
+  const expectedSigBuf = Buffer.from(expectedSigB64);
+  const actualSigBuf = Buffer.from(signatureB64);
+
+  if (expectedSigBuf.length !== actualSigBuf.length || !crypto.timingSafeEqual(expectedSigBuf, actualSigBuf)) {
+    throw new ProtocolAdminError(
+      'Unauthorized: Invalid session token signature',
+      ADMIN_ERROR_CODES.UNAUTHORIZED
+    );
+  }
+
+  // 2. Decode header and payload
+  let header, payload;
+  try {
+    header = JSON.parse(Buffer.from(headerB64, 'base64url').toString('utf8'));
+    payload = JSON.parse(Buffer.from(payloadB64, 'base64url').toString('utf8'));
+  } catch {
+    throw new ProtocolAdminError(
+      'Unauthorized: Failed to decode session token payload',
+      ADMIN_ERROR_CODES.UNAUTHORIZED
+    );
+  }
+
+  if (header?.alg !== 'HS256') {
+    throw new ProtocolAdminError(
+      `Unauthorized: Unsupported token algorithm '${header?.alg}'`,
+      ADMIN_ERROR_CODES.UNAUTHORIZED
+    );
+  }
+
+  const nowSec = Math.floor(Date.now() / 1000);
+
+  // 3. Expiration checks
+  if (typeof payload.exp !== 'number' || nowSec > payload.exp + clockToleranceSec) {
+    throw new ProtocolAdminError(
+      'Unauthorized: Admin session token has expired',
+      ADMIN_ERROR_CODES.UNAUTHORIZED
+    );
+  }
+
+  if (typeof payload.nbf === 'number' && nowSec < payload.nbf - clockToleranceSec) {
+    throw new ProtocolAdminError(
+      'Unauthorized: Admin session token is not active yet',
+      ADMIN_ERROR_CODES.UNAUTHORIZED
+    );
+  }
+
+  // 4. Shop / Dest verification
+  let shopFromDest = '';
+  if (payload.dest) {
+    try {
+      shopFromDest = new URL(payload.dest).hostname;
+    } catch {
+      shopFromDest = String(payload.dest).replace(/^https?:\/\//, '').split('/')[0];
+    }
+  }
+
+  if (expectedShop) {
+    const normExpected = expectedShop.toLowerCase().replace(/^https?:\/\//, '').split('/')[0];
+    const normDest = shopFromDest.toLowerCase();
+    if (normDest && normDest !== normExpected) {
+      throw new ProtocolAdminError(
+        `Unauthorized: Token destination '${normDest}' does not match expected shop '${normExpected}'`,
+        ADMIN_ERROR_CODES.UNAUTHORIZED
+      );
+    }
+  }
+
+  // 5. Audience verification
+  if (apiKey && payload.aud && payload.aud !== apiKey) {
+    throw new ProtocolAdminError(
+      `Unauthorized: Token audience '${payload.aud}' does not match expected client ID`,
+      ADMIN_ERROR_CODES.UNAUTHORIZED
+    );
+  }
+
+  return {
+    userId: payload.sub || 'gid://shopify/User/admin',
+    shop: shopFromDest || expectedShop || '',
+    role: 'admin',
+    payload
+  };
+}
+
+/**
+ * Extracts and verifies the admin session from an incoming Request, URL, or headers container.
+ * Inspects Authorization: Bearer <jwt>, query parameters (id_token, session), or permits demo preview.
+ *
+ * @param {any} req
+ * @param {{
+ *   apiSecret?: string,
+ *   apiKey?: string,
+ *   expectedShop?: string,
+ *   isDemoMode?: boolean
+ * }} [options={}]
+ * @returns {{ userId: string, shop: string, role: string, isDemo?: boolean }}
+ */
+export function extractAdminSession(req, options = {}) {
+  const { apiSecret, apiKey, expectedShop, isDemoMode = false } = options;
+
+  let authHeader = null;
+  let queryToken = null;
+  let shopParam = expectedShop || null;
+
+  if (req) {
+    // Check headers
+    if (req.headers) {
+      if (typeof req.headers.get === 'function') {
+        authHeader = req.headers.get('authorization') || req.headers.get('Authorization');
+      } else {
+        for (const [k, v] of Object.entries(req.headers)) {
+          if (k.toLowerCase() === 'authorization') {
+            authHeader = Array.isArray(v) ? v[0] : String(v);
+            break;
+          }
+        }
+      }
+    }
+
+    // Check query params
+    let urlObj = null;
+    if (typeof req === 'string') {
+      try { urlObj = new URL(req, 'https://admin.test'); } catch {}
+    } else if (req.url && typeof req.url === 'string') {
+      try { urlObj = new URL(req.url, 'https://admin.test'); } catch {}
+    } else if (req instanceof URL) {
+      urlObj = req;
+    }
+
+    if (urlObj) {
+      queryToken = urlObj.searchParams.get('id_token') || urlObj.searchParams.get('session');
+      if (!shopParam) {
+        shopParam = urlObj.searchParams.get('shop');
+      }
+    } else if (req.query) {
+      queryToken = req.query.id_token || req.query.session;
+      if (!shopParam) shopParam = req.query.shop;
+    }
+  }
+
+  let rawToken = null;
+  if (authHeader && authHeader.toLowerCase().startsWith('bearer ')) {
+    rawToken = authHeader.slice(7).trim();
+  } else if (queryToken) {
+    rawToken = queryToken.trim();
+  }
+
+  if (rawToken) {
+    if (!apiSecret) {
+      throw new ProtocolAdminError(
+        'Server configuration error: missing API secret for admin verification',
+        ADMIN_ERROR_CODES.UNAUTHORIZED
+      );
+    }
+    return verifyAdminSessionToken(rawToken, {
+      apiSecret,
+      apiKey,
+      expectedShop: shopParam || expectedShop
+    });
+  }
+
+  // Demo fallback
+  if (isDemoMode) {
+    return {
+      userId: 'gid://shopify/User/demo_admin',
+      shop: shopParam || expectedShop || 'practitioner-store.myshopify.com',
+      role: 'admin',
+      isDemo: true
+    };
+  }
+
+  throw new ProtocolAdminError(
+    'Unauthorized: Missing required Shopify Admin session token (Bearer token or id_token parameter)',
+    ADMIN_ERROR_CODES.UNAUTHORIZED
+  );
+}
+
+// ==========================================
+// 7. Embedded Polaris Admin UI (Milestone M6)
+// ==========================================
+
 /**
  * Renders the full Merchant Admin embedded Polaris HTML UI (Milestone M6).
  *
@@ -1085,7 +1366,14 @@ export function renderAdminHtml(options = {}) {
       return `
       <tr>
         <td><code>${gid}</code></td>
-        <td><strong>${practice}</strong></td>
+        <td>
+          <form method="POST" action="/api/admin/practitioners/practice-name" style="display:flex; align-items:center; gap:0.5rem; margin:0;">
+            <input type="hidden" name="ownerGid" value="${gid}">
+            <input type="text" name="practiceName" value="${practice === 'Not Set' ? '' : practice}" placeholder="Set Practice Name" style="padding:0.35rem 0.5rem; font-size:0.875rem; border:1px solid var(--p-color-border); border-radius:4px; max-width:220px;">
+            <button type="submit" class="Polaris-Button" style="padding:0.35rem 0.6rem; font-size:0.75rem;">Save Name</button>
+          </form>
+          <div style="font-size:0.75rem; color:var(--p-color-text-subdued); margin-top:0.25rem;">Current: <strong>${practice}</strong></div>
+        </td>
         <td>${statusBadge}</td>
         <td>
           <form method="POST" action="/api/admin/practitioners/status" style="display:inline;">
@@ -1137,7 +1425,7 @@ export function renderAdminHtml(options = {}) {
           <h2 class="Polaris-Card-Title" style="margin:0;">Brand Starter Templates</h2>
           <p style="color: var(--p-color-text-subdued); margin: 0.25rem 0 0 0;">Curated protocols practitioners can duplicate and recommend to clients.</p>
         </div>
-        <button type="button" class="Polaris-Button Polaris-Button--primary">Create Starter Template</button>
+        <button type="button" class="Polaris-Button Polaris-Button--primary" onclick="document.getElementById('create-starter-modal').style.display='flex'">Create Starter Template</button>
       </div>
       <table class="Polaris-Table">
         <thead>
@@ -1151,6 +1439,40 @@ export function renderAdminHtml(options = {}) {
           ${rows || '<tr><td colspan="3" style="text-align:center; color:#6d7175;">No brand starter templates created yet.</td></tr>'}
         </tbody>
       </table>
+    </div>
+
+    <!-- Create Starter Template Modal -->
+    <div id="create-starter-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:9999; align-items:center; justify-content:center;">
+      <div class="Polaris-Card" style="max-width:540px; width:90%; max-height:90vh; overflow-y:auto; margin:0;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem; border-bottom:1px solid var(--p-color-border); padding-bottom:0.75rem;">
+          <h3 style="margin:0; font-size:1.125rem;">Create Brand Starter Template</h3>
+          <button type="button" onclick="document.getElementById('create-starter-modal').style.display='none'" style="background:none; border:none; font-size:1.25rem; cursor:pointer;">&times;</button>
+        </div>
+        <form method="POST" action="/api/admin/starters/create" id="admin-create-starter-form">
+          <div style="margin-bottom:1rem;">
+            <label style="display:block; font-weight:600; margin-bottom:0.25rem; font-size:0.875rem;">Template Name (Required, max 60 chars)</label>
+            <input type="text" name="name" maxlength="60" required placeholder="e.g. Daily Essentials Routine" style="width:100%; padding:0.5rem; border:1px solid var(--p-color-border); border-radius:4px; box-sizing:border-box;">
+          </div>
+          <div style="margin-bottom:1rem;">
+            <label style="display:block; font-weight:600; margin-bottom:0.25rem; font-size:0.875rem;">Intro Note (Optional, max 500 chars)</label>
+            <textarea name="introNote" rows="2" maxlength="500" placeholder="Brand guidance for specialists..." style="width:100%; padding:0.5rem; border:1px solid var(--p-color-border); border-radius:4px; box-sizing:border-box;"></textarea>
+          </div>
+          <div style="margin-bottom:1rem;">
+            <label style="display:block; font-weight:600; margin-bottom:0.5rem; font-size:0.875rem;">Product Line Items (1–20)</label>
+            <div id="starter-lines-container">
+              <div class="starter-line-row" style="display:flex; gap:0.5rem; margin-bottom:0.5rem; align-items:center;">
+                <input type="text" name="lines[0][variantGid]" required placeholder="gid://shopify/ProductVariant/..." style="flex:2; padding:0.4rem; border:1px solid var(--p-color-border); border-radius:4px; font-size:0.8125rem;">
+                <input type="number" name="lines[0][quantity]" value="1" min="1" max="10" required style="width:60px; padding:0.4rem; border:1px solid var(--p-color-border); border-radius:4px; font-size:0.8125rem;">
+                <input type="text" name="lines[0][usageNote]" placeholder="Usage instructions" maxlength="200" style="flex:2; padding:0.4rem; border:1px solid var(--p-color-border); border-radius:4px; font-size:0.8125rem;">
+              </div>
+            </div>
+          </div>
+          <div style="display:flex; justify-content:flex-end; gap:0.5rem; margin-top:1.5rem; border-top:1px solid var(--p-color-border); padding-top:1rem;">
+            <button type="button" class="Polaris-Button" onclick="document.getElementById('create-starter-modal').style.display='none'">Cancel</button>
+            <button type="submit" class="Polaris-Button Polaris-Button--primary">Save Starter Template</button>
+          </div>
+        </form>
+      </div>
     </div>`;
   };
 
@@ -1180,12 +1502,19 @@ export function renderAdminHtml(options = {}) {
 
     return `
     <div class="Polaris-Card">
-      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 1.5rem;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 1.5rem; flex-wrap:wrap; gap:1rem;">
         <div>
           <h2 class="Polaris-Card-Title" style="margin:0;">Attribution &amp; Sales Reports (${month})</h2>
           <p style="color: var(--p-color-text-subdued); margin: 0.25rem 0 0 0;">Monthly aggregate order volume and attributed retail revenue by practice.</p>
         </div>
-        <a href="/api/admin/attribution.csv" class="Polaris-Button Polaris-Button--primary">Export CSV (RFC 4180)</a>
+        <div style="display:flex; align-items:center; gap:0.75rem;">
+          <form method="GET" action="" style="display:inline-flex; align-items:center; gap:0.5rem;">
+            <input type="hidden" name="tab" value="attribution">
+            <input type="month" name="month" value="${month}" style="padding:0.35rem 0.5rem; font-size:0.875rem; border:1px solid var(--p-color-border); border-radius:4px;">
+            <button type="submit" class="Polaris-Button" style="padding:0.35rem 0.75rem;">Filter</button>
+          </form>
+          <a href="/api/admin/attribution.csv${month ? `?month=${encodeURIComponent(month)}` : ''}" class="Polaris-Button Polaris-Button--primary">Export CSV (RFC 4180)</a>
+        </div>
       </div>
 
       <div class="Polaris-Metrics-Grid">

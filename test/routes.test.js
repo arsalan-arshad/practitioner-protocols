@@ -14,7 +14,17 @@ import {
   handleWebhookRequest,
   createRateLimiter,
   getHeader,
-  handleErrorResponse
+  handleErrorResponse,
+  handleAdminDashboardRequest,
+  handleAdminPractitionersListRequest,
+  handleAdminPractitionerStatusRequest,
+  handleAdminPracticeNameRequest,
+  handleAdminStartersListRequest,
+  handleAdminCreateStarterRequest,
+  handleAdminUpdateSettingsRequest,
+  handleAdminEmergencyDisableAllRequest,
+  handleAdminAttributionCsvRequest,
+  createAdminSessionToken
 } from '../app/lib/protocols/routes.js';
 import { calculateAppProxySignature } from '../app/lib/protocols/proxy.js';
 import { ProtocolValidationError } from '../app/lib/protocols/validation.js';
@@ -229,18 +239,63 @@ describe('HTTP Routes & Request Handlers (app/lib/protocols/routes.js)', () => {
           return { rowCount: 1, rows: [] };
         }
 
-        // 10. PractitionerProfile query (check practitioner logged-in banner)
+        // 10. PractitionerProfile query
+        if (sql.includes('SELECT COUNT(*) as total FROM') && sql.includes('"PractitionerProfile"')) {
+          let rows = state.profiles.filter(p => p.shop === params[0]);
+          return { rows: [{ total: rows.length }] };
+        }
+        if (sql.includes('UPDATE "PractitionerProfile"') && sql.includes('"practiceName" = $1')) {
+          const [practiceName, shop, ownerGid] = params;
+          const profile = state.profiles.find(p => p.shop === shop && p.ownerGid === ownerGid);
+          if (!profile) return { rows: [] };
+          profile.practiceName = practiceName;
+          profile.updatedAt = new Date();
+          return { rows: [{ ...profile }] };
+        }
+        if (sql.includes('UPDATE "PractitionerProfile"') && sql.includes('"isApproved" = $1')) {
+          const [isApproved, shop, ownerGid] = params;
+          const profile = state.profiles.find(p => p.shop === shop && p.ownerGid === ownerGid);
+          if (!profile) return { rows: [] };
+          profile.isApproved = isApproved;
+          profile.updatedAt = new Date();
+          return { rows: [{ ...profile }] };
+        }
         if (sql.includes('FROM "PractitionerProfile"')) {
           const shop = params[0];
-          const gid = params[1];
-          const prof = state.profiles.find(pr => pr.shop === shop && (pr.ownerGid === gid || pr.ownerGid === params[2]));
-          return { rows: prof ? [prof] : [] };
+          if (sql.includes('"ownerGid" = $2')) {
+            const gid = params[1];
+            const prof = state.profiles.find(pr => pr.shop === shop && pr.ownerGid === gid);
+            return { rows: prof ? [prof] : [] };
+          }
+          let rows = state.profiles.filter(p => p.shop === shop);
+          return { rows: rows.map(r => ({ ...r })) };
         }
 
-        // 11. Webhooks queries
-        if (sql.includes('FROM "Setting"')) {
-          return { rows: [{ identityMode: 'tag' }] };
+        // 11. Starters & Emergency query
+        if (sql.includes('FROM "Protocol" p') && sql.includes('p."isStarter" = true')) {
+          const shop = params[0];
+          const starters = state.protocols.filter(p => p.shop === shop && p.isStarter);
+          return { rows: starters.map(s => ({ ...s, lines: state.lines.filter(l => l.protocolId === s.id) })) };
         }
+        if (sql.includes('UPDATE "Protocol"') && sql.includes('SET "status" = \'disabled\'')) {
+          state.protocols.forEach(p => { p.status = 'disabled'; });
+          return { rowCount: state.protocols.length, rows: state.protocols.map(p => ({ id: p.id })) };
+        }
+
+        // 12. Settings & Stats queries
+        if (sql.includes('FROM "Setting"')) {
+          return { rows: state.settings.length > 0 ? state.settings : [{ shop: params[0], identityMode: 'tag', footerDisclaimer: null, handoutText: null }] };
+        }
+        if (sql.includes('INSERT INTO "Setting"')) {
+          const setting = { shop: params[0], identityMode: params[1], footerDisclaimer: params[2], handoutText: params[3] };
+          state.settings = [setting];
+          return { rows: [setting] };
+        }
+        if (sql.includes('FROM "ProtocolOrderStat"')) {
+          return { rows: state.stats.map(s => ({ ...s, protocolName: 'Test Protocol', practiceName: 'Test Practice' })) };
+        }
+
+        // 13. Webhooks & deletion queries
         if (sql.includes('DELETE FROM "ProtocolLine"') || sql.includes('DELETE FROM "ProtocolOrderStat"') ||
             sql.includes('DELETE FROM "Protocol"') || sql.includes('DELETE FROM "PractitionerProfile"') ||
             sql.includes('DELETE FROM "Session"')) {
@@ -1356,6 +1411,268 @@ describe('HTTP Routes & Request Handlers (app/lib/protocols/routes.js)', () => {
       const data = await res.json();
       assert.equal(data.protocol.name, 'Immune Support Stack');
       assert.ok(data.protocol.token);
+    });
+  });
+
+  describe('Merchant Admin Route Handlers (Milestone M6)', () => {
+    let db;
+    let adminToken;
+
+    beforeEach(() => {
+      adminToken = createAdminSessionToken({
+        userId: 'gid://shopify/User/admin_1',
+        shop: testShop,
+        expiresInSec: 3600
+      }, apiSecret);
+
+      db = createMockDb({
+        profiles: [
+          {
+            id: 'prof_1',
+            shop: testShop,
+            ownerGid: 'gid://shopify/Customer/112233',
+            practiceName: 'Elite Naturopathic Clinic',
+            isApproved: false,
+            createdAt: new Date(),
+            updatedAt: new Date()
+          }
+        ],
+        protocols: [
+          {
+            id: 'proto_1',
+            shop: testShop,
+            token: 'tok_active_1',
+            name: 'Immune Protocol',
+            status: 'active',
+            isStarter: false
+          },
+          {
+            id: 'proto_starter_1',
+            shop: testShop,
+            token: 'tok_starter_1',
+            name: 'Brand Starter Protocol',
+            status: 'active',
+            isStarter: true
+          }
+        ],
+        settings: [
+          {
+            shop: testShop,
+            identityMode: 'tag',
+            footerDisclaimer: 'Demo Disclaimer',
+            handoutText: 'Demo Handout'
+          }
+        ],
+        stats: [
+          {
+            shop: testShop,
+            month: '2026-10',
+            protocolId: 'proto_1',
+            ownerId: 'gid://shopify/Customer/112233',
+            orders: 5,
+            units: 12,
+            revenueMinor: 125000,
+            currency: 'USD'
+          }
+        ]
+      });
+    });
+
+    it('handleAdminDashboardRequest returns 200 HTML with Polaris tabs', async () => {
+      const req = new Request(`https://${testShop}/admin?tab=practitioners`, {
+        headers: { Authorization: `Bearer ${adminToken}` }
+      });
+
+      const res = await handleAdminDashboardRequest(db, req, { apiSecret, expectedShop: testShop });
+      assert.equal(res.status, 200);
+      assert.ok(res.headers.get('content-type').includes('text/html'));
+      const text = await res.text();
+      assert.ok(text.includes('Practitioner Directory'));
+      assert.ok(text.includes('Elite Naturopathic Clinic'));
+    });
+
+    it('handleAdminDashboardRequest rejects unauthenticated requests with 401', async () => {
+      const req = new Request(`https://${testShop}/admin?tab=practitioners`);
+      const res = await handleAdminDashboardRequest(db, req, { apiSecret, expectedShop: testShop });
+      assert.equal(res.status, 401);
+    });
+
+    it('handleAdminPractitionersListRequest returns profiles list', async () => {
+      const req = new Request(`https://${testShop}/api/admin/practitioners`, {
+        headers: { Authorization: `Bearer ${adminToken}` }
+      });
+
+      const res = await handleAdminPractitionersListRequest(db, req, { apiSecret, expectedShop: testShop });
+      assert.equal(res.status, 200);
+      const data = await res.json();
+      assert.equal(data.profiles.length, 1);
+      assert.equal(data.profiles[0].practiceName, 'Elite Naturopathic Clinic');
+    });
+
+    it('handleAdminPractitionerStatusRequest updates approval status', async () => {
+      const req = new Request(`https://${testShop}/api/admin/practitioners/status`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${adminToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          ownerGid: 'gid://shopify/Customer/112233',
+          action: 'approve'
+        })
+      });
+
+      const res = await handleAdminPractitionerStatusRequest(db, req, { apiSecret, expectedShop: testShop });
+      assert.equal(res.status, 200);
+      const data = await res.json();
+      assert.equal(data.ok, true);
+      assert.equal(data.profile.isApproved, true);
+    });
+
+    it('handleAdminPracticeNameRequest updates practice name and prevents impersonation', async () => {
+      const req = new Request(`https://${testShop}/api/admin/practitioners/practice-name`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${adminToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          ownerGid: 'gid://shopify/Customer/112233',
+          practiceName: 'Renamed Holistic Center'
+        })
+      });
+
+      const res = await handleAdminPracticeNameRequest(db, req, { apiSecret, expectedShop: testShop });
+      assert.equal(res.status, 200);
+      const data = await res.json();
+      assert.equal(data.ok, true);
+      assert.equal(data.profile.practiceName, 'Renamed Holistic Center');
+    });
+
+    it('handleAdminPracticeNameRequest strictly rejects PII in practice name', async () => {
+      const req = new Request(`https://${testShop}/api/admin/practitioners/practice-name`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${adminToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          ownerGid: 'gid://shopify/Customer/112233',
+          practiceName: 'Clinic with patient name John'
+        })
+      });
+
+      const res = await handleAdminPracticeNameRequest(db, req, { apiSecret, expectedShop: testShop });
+      assert.equal(res.status, 400);
+      const data = await res.json();
+      assert.equal(data.code, 'PII_NOT_ALLOWED');
+    });
+
+    it('handleAdminStartersListRequest returns starter templates', async () => {
+      const req = new Request(`https://${testShop}/api/admin/starters`, {
+        headers: { Authorization: `Bearer ${adminToken}` }
+      });
+
+      const res = await handleAdminStartersListRequest(db, req, { apiSecret, expectedShop: testShop });
+      assert.equal(res.status, 200);
+      const data = await res.json();
+      assert.ok(data.starters.length >= 1);
+      assert.ok(data.starters.some(s => s.name === 'Brand Starter Protocol'));
+    });
+
+    it('handleAdminCreateStarterRequest creates brand starter template', async () => {
+      const req = new Request(`https://${testShop}/api/admin/starters/create`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${adminToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          name: 'Seasonal Routine Starter',
+          introNote: 'Guidance for all specialists',
+          lines: [
+            { variantGid: 'gid://shopify/ProductVariant/5050', quantity: 1, usageNote: 'Daily morning' }
+          ]
+        })
+      });
+
+      const res = await handleAdminCreateStarterRequest(db, req, { apiSecret, expectedShop: testShop });
+      assert.equal(res.status, 201);
+      const data = await res.json();
+      assert.equal(data.ok, true);
+      assert.equal(data.starter.name, 'Seasonal Routine Starter');
+      assert.equal(data.starter.isStarter, true);
+    });
+
+    it('handleAdminCreateStarterRequest rejects starter template containing PII', async () => {
+      const req = new Request(`https://${testShop}/api/admin/starters/create`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${adminToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          name: 'Care Plan',
+          patientName: 'Jane Smith',
+          lines: [
+            { variantGid: 'gid://shopify/ProductVariant/5050', quantity: 1 }
+          ]
+        })
+      });
+
+      const res = await handleAdminCreateStarterRequest(db, req, { apiSecret, expectedShop: testShop });
+      assert.equal(res.status, 400);
+      const data = await res.json();
+      assert.equal(data.code, 'PII_NOT_ALLOWED');
+    });
+
+    it('handleAdminUpdateSettingsRequest updates shop identity mode and disclaimers', async () => {
+      const req = new Request(`https://${testShop}/api/admin/settings`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${adminToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          identityMode: 'company',
+          footerDisclaimer: 'Updated company footer disclaimer',
+          handoutText: 'Updated handout instructions'
+        })
+      });
+
+      const res = await handleAdminUpdateSettingsRequest(db, req, { apiSecret, expectedShop: testShop });
+      assert.equal(res.status, 200);
+      const data = await res.json();
+      assert.equal(data.ok, true);
+      assert.equal(data.settings.identityMode, 'company');
+      assert.equal(data.settings.footerDisclaimer, 'Updated company footer disclaimer');
+    });
+
+    it('handleAdminEmergencyDisableAllRequest shuts down all protocols storewide', async () => {
+      const req = new Request(`https://${testShop}/api/admin/emergency/disable-all`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${adminToken}` }
+      });
+
+      const res = await handleAdminEmergencyDisableAllRequest(db, req, { apiSecret, expectedShop: testShop });
+      assert.equal(res.status, 200);
+      const data = await res.json();
+      assert.equal(data.ok, true);
+      assert.ok(data.disabledCount >= 1);
+      assert.ok(db.state.protocols.every(p => p.status === 'disabled'));
+    });
+
+    it('handleAdminAttributionCsvRequest streams RFC 4180 compliant CSV', async () => {
+      const req = new Request(`https://${testShop}/api/admin/attribution.csv?month=2026-10`, {
+        headers: { Authorization: `Bearer ${adminToken}` }
+      });
+
+      const res = await handleAdminAttributionCsvRequest(db, req, { apiSecret, expectedShop: testShop });
+      assert.equal(res.status, 200);
+      assert.ok(res.headers.get('content-type').includes('text/csv'));
+      assert.ok(res.headers.get('content-disposition').includes('attribution-wellness-store.myshopify.com-2026-10.csv'));
+      const csv = await res.text();
+      assert.ok(csv.startsWith('Month,Practice Name,Owner GID,Protocol ID,Protocol Name,Is Starter,Orders,Units,Revenue,Currency'));
     });
   });
 });

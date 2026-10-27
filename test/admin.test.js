@@ -25,7 +25,10 @@ import {
   getAttributionReport,
   formatAttributionCsv,
   exportAttributionCsv,
-  renderAdminHtml
+  renderAdminHtml,
+  createAdminSessionToken,
+  verifyAdminSessionToken,
+  extractAdminSession
 } from '../app/lib/protocols/admin.js';
 
 describe('Merchant Admin Layer (app/lib/protocols/admin.js)', () => {
@@ -1073,6 +1076,144 @@ describe('Merchant Admin Layer (app/lib/protocols/admin.js)', () => {
           name: 'ProtocolAdminError',
           code: ADMIN_ERROR_CODES.PII_NOT_ALLOWED
         }
+      );
+    });
+  });
+
+  describe('Admin Session Token Verification', () => {
+    const apiSecret = 'shpss_test_secret_for_admin_12345';
+    const apiKey = 'test_client_key_99';
+    const shop = 'brand-store.myshopify.com';
+
+    it('verifies a valid HS256 admin session token', () => {
+      const token = createAdminSessionToken({
+        userId: 'gid://shopify/User/42',
+        shop,
+        apiKey,
+        expiresInSec: 3600
+      }, apiSecret);
+
+      const session = verifyAdminSessionToken(token, {
+        apiSecret,
+        apiKey,
+        expectedShop: shop
+      });
+
+      assert.equal(session.userId, 'gid://shopify/User/42');
+      assert.equal(session.shop, shop);
+      assert.equal(session.role, 'admin');
+      assert.ok(session.payload.exp > Math.floor(Date.now() / 1000));
+    });
+
+    it('rejects missing or empty token', () => {
+      assert.throws(
+        () => verifyAdminSessionToken('', { apiSecret }),
+        { code: ADMIN_ERROR_CODES.UNAUTHORIZED }
+      );
+      assert.throws(
+        () => verifyAdminSessionToken(null, { apiSecret }),
+        { code: ADMIN_ERROR_CODES.UNAUTHORIZED }
+      );
+    });
+
+    it('rejects missing API secret', () => {
+      const token = createAdminSessionToken({ shop }, apiSecret);
+      assert.throws(
+        () => verifyAdminSessionToken(token, { apiSecret: '' }),
+        { code: ADMIN_ERROR_CODES.UNAUTHORIZED }
+      );
+    });
+
+    it('rejects malformed token parts', () => {
+      assert.throws(
+        () => verifyAdminSessionToken('header.payload', { apiSecret }),
+        { code: ADMIN_ERROR_CODES.UNAUTHORIZED }
+      );
+      assert.throws(
+        () => verifyAdminSessionToken('a.b.c.d', { apiSecret }),
+        { code: ADMIN_ERROR_CODES.UNAUTHORIZED }
+      );
+    });
+
+    it('rejects tampered token signature', () => {
+      const token = createAdminSessionToken({ shop }, apiSecret);
+      const parts = token.split('.');
+      parts[2] = parts[2].slice(0, -4) + 'zzzz';
+      const tampered = parts.join('.');
+
+      assert.throws(
+        () => verifyAdminSessionToken(tampered, { apiSecret }),
+        { code: ADMIN_ERROR_CODES.UNAUTHORIZED }
+      );
+    });
+
+    it('rejects token signed with wrong secret', () => {
+      const token = createAdminSessionToken({ shop }, 'wrong_secret_123');
+      assert.throws(
+        () => verifyAdminSessionToken(token, { apiSecret }),
+        { code: ADMIN_ERROR_CODES.UNAUTHORIZED }
+      );
+    });
+
+    it('rejects expired token', () => {
+      const token = createAdminSessionToken({ shop, expiresInSec: -100 }, apiSecret);
+      assert.throws(
+        () => verifyAdminSessionToken(token, { apiSecret }),
+        { code: ADMIN_ERROR_CODES.UNAUTHORIZED }
+      );
+    });
+
+    it('rejects destination shop mismatch', () => {
+      const token = createAdminSessionToken({ shop: 'other-store.myshopify.com' }, apiSecret);
+      assert.throws(
+        () => verifyAdminSessionToken(token, { apiSecret, expectedShop: shop }),
+        { code: ADMIN_ERROR_CODES.UNAUTHORIZED }
+      );
+    });
+
+    it('rejects audience client ID mismatch', () => {
+      const token = createAdminSessionToken({ shop, apiKey: 'wrong_api_key' }, apiSecret);
+      assert.throws(
+        () => verifyAdminSessionToken(token, { apiSecret, apiKey }),
+        { code: ADMIN_ERROR_CODES.UNAUTHORIZED }
+      );
+    });
+
+    it('extractAdminSession extracts bearer token from Authorization header', () => {
+      const token = createAdminSessionToken({ shop }, apiSecret);
+      const req = {
+        headers: {
+          authorization: `Bearer ${token}`
+        }
+      };
+
+      const session = extractAdminSession(req, { apiSecret, expectedShop: shop });
+      assert.equal(session.shop, shop);
+      assert.equal(session.role, 'admin');
+    });
+
+    it('extractAdminSession extracts token from query parameter', () => {
+      const token = createAdminSessionToken({ shop }, apiSecret);
+      const req = {
+        url: `https://app.test/admin?id_token=${token}`
+      };
+
+      const session = extractAdminSession(req, { apiSecret, expectedShop: shop });
+      assert.equal(session.shop, shop);
+      assert.equal(session.role, 'admin');
+    });
+
+    it('extractAdminSession falls back to demo session when isDemoMode is enabled', () => {
+      const session = extractAdminSession(null, { isDemoMode: true, expectedShop: shop });
+      assert.equal(session.role, 'admin');
+      assert.equal(session.isDemo, true);
+      assert.equal(session.shop, shop);
+    });
+
+    it('extractAdminSession throws UNAUTHORIZED when no token is provided and not in demo mode', () => {
+      assert.throws(
+        () => extractAdminSession(null, { isDemoMode: false, apiSecret }),
+        { code: ADMIN_ERROR_CODES.UNAUTHORIZED }
       );
     });
   });

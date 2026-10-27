@@ -15,7 +15,17 @@ import { renderPortalLiquid } from './app/lib/protocols/portal.js';
 import { renderProtocolLiquid } from './app/lib/protocols/proxy.js';
 import { renderHandoutHtml } from './app/lib/protocols/handout.js';
 import { generateQrSvg } from './app/lib/protocols/qr.js';
-import { handleAppProxyRequest, handleWebhookRequest } from './app/lib/protocols/routes.js';
+import {
+  handleAppProxyRequest,
+  handleWebhookRequest,
+  handleAdminPractitionerStatusRequest,
+  handleAdminPracticeNameRequest,
+  handleAdminCreateStarterRequest,
+  handleAdminUpdateSettingsRequest,
+  handleAdminEmergencyDisableAllRequest,
+  handleAdminAttributionCsvRequest,
+  handleAdminDashboardRequest
+} from './app/lib/protocols/routes.js';
 import { createFakeVariantResolver } from './app/lib/protocols/catalog.js';
 
 // Neutral retail demo data for previewing without live database (clean-room, zero health claims)
@@ -202,14 +212,15 @@ async function parseFormData(req) {
 /**
  * Formats demo attribution report as RFC 4180 CSV.
  *
+ * @param {string} [month]
  * @returns {string}
  */
-function generateDemoAttributionCsv() {
+function generateDemoAttributionCsv(month = DEMO_REPORT.month) {
   const headers = ['Month', 'Practice Name', 'Protocol', 'Orders', 'Units', 'Revenue'];
   const lines = [headers.join(',')];
   for (const item of DEMO_REPORT.items) {
     lines.push([
-      `"${DEMO_REPORT.month}"`,
+      `"${month || DEMO_REPORT.month}"`,
       `"${item.practiceName.replace(/"/g, '""')}"`,
       `"${item.protocolName.replace(/"/g, '""')}"`,
       item.orders,
@@ -248,15 +259,23 @@ export function createRequestListener(options = {}) {
       }
 
       // Admin Action Routes & Attribution CSV:
-      // When DATABASE_URL is set (production mode), return 501 Not Implemented because real
-      // admin operations require session-token authentication. Never use a hard-coded adminUser.
+      // When DATABASE_URL is set (production mode), requests without session-token verification
+      // return 501 Not Implemented. Never use a hard-coded adminUser.
       if (
         pathname === '/api/admin/practitioners/status' ||
+        pathname === '/api/admin/practitioners/practice-name' ||
+        pathname === '/api/admin/starters/create' ||
         pathname === '/api/admin/settings' ||
         pathname === '/api/admin/emergency/disable-all' ||
         pathname === '/api/admin/attribution.csv'
       ) {
-        if (databaseUrl) {
+        const hasSession = Boolean(
+          req.headers.authorization ||
+          url.searchParams.get('id_token') ||
+          url.searchParams.get('session')
+        );
+
+        if (databaseUrl && !hasSession) {
           res.writeHead(501, { 'Content-Type': 'application/json' });
           res.end(
             JSON.stringify({
@@ -267,6 +286,33 @@ export function createRequestListener(options = {}) {
           return;
         }
 
+        if (databaseUrl && hasSession) {
+          const webReq = await toWebRequest(req);
+          let webRes;
+          const handlerOpts = { apiSecret, expectedShop: url.searchParams.get('shop') || DEMO_SHOP };
+
+          if (pathname === '/api/admin/practitioners/status') {
+            webRes = await handleAdminPractitionerStatusRequest(pool, webReq, handlerOpts);
+          } else if (pathname === '/api/admin/practitioners/practice-name') {
+            webRes = await handleAdminPracticeNameRequest(pool, webReq, handlerOpts);
+          } else if (pathname === '/api/admin/starters/create') {
+            webRes = await handleAdminCreateStarterRequest(pool, webReq, handlerOpts);
+          } else if (pathname === '/api/admin/settings') {
+            webRes = await handleAdminUpdateSettingsRequest(pool, webReq, handlerOpts);
+          } else if (pathname === '/api/admin/emergency/disable-all') {
+            webRes = await handleAdminEmergencyDisableAllRequest(pool, webReq, handlerOpts);
+          } else if (pathname === '/api/admin/attribution.csv') {
+            webRes = await handleAdminAttributionCsvRequest(pool, webReq, handlerOpts);
+          }
+
+          if (webRes) {
+            res.writeHead(webRes.status, Object.fromEntries(webRes.headers.entries()));
+            const text = await webRes.text();
+            res.end(text);
+            return;
+          }
+        }
+
         // Demo Mode (no DATABASE_URL configured): in-memory mutations only, zero adminUser
         if (pathname === '/api/admin/practitioners/status' && req.method === 'POST') {
           const formData = await parseFormData(req);
@@ -275,6 +321,33 @@ export function createRequestListener(options = {}) {
           const prof = DEMO_PROFILES.find((p) => p.ownerGid === ownerGid);
           if (prof) prof.isApproved = action === 'approve';
           res.writeHead(302, { Location: '/admin?tab=practitioners' });
+          res.end();
+          return;
+        }
+
+        if (pathname === '/api/admin/practitioners/practice-name' && req.method === 'POST') {
+          const formData = await parseFormData(req);
+          const ownerGid = formData.get('ownerGid');
+          const practiceName = formData.get('practiceName');
+          const prof = DEMO_PROFILES.find((p) => p.ownerGid === ownerGid);
+          if (prof && practiceName) prof.practiceName = practiceName.trim();
+          res.writeHead(302, { Location: '/admin?tab=practitioners' });
+          res.end();
+          return;
+        }
+
+        if (pathname === '/api/admin/starters/create' && req.method === 'POST') {
+          const formData = await parseFormData(req);
+          const name = formData.get('name');
+          if (name) {
+            DEMO_STARTERS.push({
+              id: `starter_${Date.now()}`,
+              name: name.trim(),
+              status: 'active',
+              linesCount: 1,
+            });
+          }
+          res.writeHead(302, { Location: '/admin?tab=starters' });
           res.end();
           return;
         }
@@ -297,10 +370,11 @@ export function createRequestListener(options = {}) {
         }
 
         if (pathname === '/api/admin/attribution.csv') {
-          const csv = generateDemoAttributionCsv();
+          const month = url.searchParams.get('month') || DEMO_REPORT.month;
+          const csv = generateDemoAttributionCsv(month);
           res.writeHead(200, {
             'Content-Type': 'text/csv; charset=utf-8',
-            'Content-Disposition': `attachment; filename="attribution-${DEMO_SHOP}-2026-10.csv"`,
+            'Content-Disposition': `attachment; filename="attribution-${DEMO_SHOP}-${month}.csv"`,
           });
           res.end(csv);
           return;
@@ -310,6 +384,10 @@ export function createRequestListener(options = {}) {
       // 1. Merchant Admin UI (Shopify Polaris embedded admin - Demo Preview)
       if (pathname === '/' || pathname === '/admin' || pathname === '/app') {
         const activeTab = url.searchParams.get('tab') || 'practitioners';
+        const month = url.searchParams.get('month');
+        if (month) {
+          DEMO_REPORT.month = month;
+        }
         const html = renderAdminHtml({
           shop: url.searchParams.get('shop') || DEMO_SHOP,
           profiles: DEMO_PROFILES,

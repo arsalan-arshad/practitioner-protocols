@@ -1,6 +1,6 @@
 # Practitioner Protocols — Project Context (for Claude)
 
-_Snapshot: 2026-10-28 · Core pure engine library fully implemented (298 pure unit tests passing across 83 suites) · Spikes S4 and S5 answered; S3 partially verified with guest order #1016; S2 sitemap exclusion confirmed on dev store; S1 open · Interactive Protocol Editor UI with product search built into Practitioner Portal (Milestone M3) · Real OAuth/token exchange and live admin routes remain open._
+_Snapshot: 2026-10-28 · Core pure engine library fully implemented (323 pure unit tests passing across 85 suites) · Spikes S4 and S5 answered; S3 partially verified with guest order #1016; S2 sitemap exclusion confirmed on dev store; S1 open · Interactive Protocol Editor UI with product search built into Practitioner Portal (Milestone M3) · Merchant Admin Interactive Wiring & Embedded Polaris UI completed (Milestone M6) · Real OAuth/token exchange and production deploy harness remain open._
 _Contains NO secrets. Never paste `.env` values or tokens into chat or docs._
 
 ## 1. What this is
@@ -69,6 +69,7 @@ The idea grew out of a client request. The owner decided to build their **own, g
 - Spike S5 (B2B price check & banner rule): Verified 4 shopper states on live Plus dev store; confirmed `practitioner` tag has zero price effect; B2B company prices CAD 714 / 999 / 571 applied consistently; `/cart/add.js` quantity rule enforcement is all-or-nothing; banner rule decided based on `logged_in_customer_id` presence (Session 18).
 - Spike S2 (Sitemap exclusion): Verified on live dev store that Shopify parent sitemap strictly excludes `/apps/*` (Session 19).
 - Interactive Protocol Editor UI with product search built into Practitioner Portal (Milestone M3, Session 19).
+- Merchant Admin Interactive Wiring & Embedded Polaris UI completed (Milestone M6, Session 20): App Bridge HS256 session token verification, practice name controls, starter template modal builder, month-filtered RFC 4180 CSV export, emergency shutdown controls, and live Web route handlers.
 
 ## 9. Where to start
 Run the five spikes in a day or two on a dev store; write the answers into section 5 above; only then build UI screens. See `docs/BUILD_PLAN.md`.
@@ -478,3 +479,27 @@ Run the five spikes in a day or two on a dev store; write the answers into secti
      - Added "Edit" action buttons to active protocol cards in the library.
 - **Verification Status:**
   - `npm test`: **298/298 pure unit tests passing** (83 suites, 0 failures, ~104ms).
+
+## 30. Session Log — 2026-10-28 (Session 20: Milestone M6 — Merchant Admin Interactive Wiring & Embedded Polaris UI)
+- **Context:** Implemented Milestone M6: Merchant Admin Interactive Wiring with authenticated session token verification, embedded Polaris UI tab enhancements, and live Web route handlers.
+- **Implemented Capabilities:**
+  1. **Shopify App Bridge HS256 Session Token Verification (`admin.js`, `test/admin.test.js`):**
+     - Built `verifyAdminSessionToken` using standard `node:crypto` HMAC-SHA256 and constant-time signature comparison with `crypto.timingSafeEqual` (zero external dependencies).
+     - Validates expiration (`exp`), activation window (`nbf`) with clock skew tolerance, destination shop match (`dest`), and app client ID (`aud`).
+     - Implemented `createAdminSessionToken` for deterministic signing of valid/expired/tampered tokens in tests and session issuance.
+     - Implemented `extractAdminSession` to extract tokens from `Authorization: Bearer <jwt>`, query parameters (`id_token`, `session`), or transparent demo mode fallback.
+  2. **Interactive Polaris Admin UI Enhancements (`renderAdminHtml` in `admin.js`):**
+     - **Practitioners Directory Tab:** Inline practice name editing form submitting to `POST /api/admin/practitioners/practice-name`, enabling merchant control over practice names to prevent impersonation, alongside existing Approve / Revoke actions.
+     - **Starter Templates Tab:** Added accessible modal `#create-starter-modal` and form submitting to `POST /api/admin/starters/create` with template name (required, max 60 chars), intro note (optional, max 500 chars), and dynamic product line items builder (variant GID, quantity 1-10, usage instructions).
+     - **Attribution & Reports Tab:** Added monthly filter selector (`<input type="month">`) and dynamically parameterized RFC 4180 CSV export link (`/api/admin/attribution.csv?month=YYYY-MM`).
+     - **Settings & Emergency Tab:** Styled mode selection (`tag` vs `company`), footer disclaimers, printable handout text, and critical emergency storewide kill switch.
+  3. **Live Admin Web Route Handlers (`routes.js`, `test/routes.test.js`):**
+     - Implemented and exported standard Web API handlers: `handleAdminDashboardRequest`, `handleAdminPractitionersListRequest`, `handleAdminPractitionerStatusRequest`, `handleAdminPracticeNameRequest`, `handleAdminStartersListRequest`, `handleAdminCreateStarterRequest`, `handleAdminUpdateSettingsRequest`, `handleAdminEmergencyDisableAllRequest`, `handleAdminAttributionCsvRequest`.
+     - Built `parseFormEncoded` supporting nested array syntax (`lines[0][variantGid]`, etc.) to support both standard HTML form POSTs and JSON API calls seamlessly.
+     - Added `ProtocolAdminError` mapping to `handleErrorResponse` (401 for unauthorized, 404 for not found, 400 for invalid input or PII).
+  4. **Server Integration (`server.js`, `test/server.test.js`):**
+     - Connected all live admin handlers into `createRequestListener`.
+     - Seamlessly handles database persistence when configured with session tokens and executes in-memory demo mutations when in demo mode.
+- **Verification Status:**
+  - `npm test`: **323/323 pure unit tests passing** (85 suites, 0 failures, ~118ms).
+  - Dev server preview verified via Chrome DevTools MCP and visual screenshots recorded in artifact carousel `m6_admin_walkthrough.md`.

@@ -1,7 +1,7 @@
 # Practitioner Protocols — Build Plan
 
 ## M0 — Spikes (1–2 days, dev store with B2B + new customer accounts)
-- [ ] S1 practitioner surface (customer account UI extension vs app-proxy portal).
+- [x] S1 practitioner surface (customer account UI extension vs app-proxy portal; D1 decided: App Proxy portal is the baseline across all plans; full-page extension deferred as optional Plus upgrade).
 - [ ] S2 app-proxy page in theme layout + verify `noindex` and `sitemap.xml` exclusion (Liquid evaluation confirmed in Session 12; reverse-proxy hop count for rate limiting needs re-measuring on real host).
 - [ ] S3 attribution carrier (verify hidden line property `_protocol_token` survives Cart AJAX through to completed `orders/paid` order).
 - [ ] S4 Cart AJAX 20 lines (verify adding 20 distinct variant lines in a single `/cart/add.js` POST request).

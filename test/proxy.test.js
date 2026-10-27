@@ -73,6 +73,38 @@ describe('Shopify App Proxy & Storefront (app/lib/protocols/proxy.js)', () => {
       assert.equal(verifyAppProxyHmac({ shop: 'wellness.myshopify.com', signature: 'invalid_sig' }, apiSecret), false);
       assert.equal(verifyAppProxyHmac(null, apiSecret), false);
     });
+
+    it('enforces timestamp freshness when maxAgeSeconds is configured (Spike S1 hardening)', () => {
+      const now = 1729500100;
+      const freshParams = {
+        shop: 'wellness.myshopify.com',
+        timestamp: '1729500080', // 20 seconds old
+      };
+      const freshSig = calculateAppProxySignature(freshParams, apiSecret);
+      assert.equal(
+        verifyAppProxyHmac({ ...freshParams, signature: freshSig }, apiSecret, { maxAgeSeconds: 60, nowSeconds: now }),
+        true
+      );
+
+      const staleParams = {
+        shop: 'wellness.myshopify.com',
+        timestamp: '1729499000', // 1100 seconds old
+      };
+      const staleSig = calculateAppProxySignature(staleParams, apiSecret);
+      assert.equal(
+        verifyAppProxyHmac({ ...staleParams, signature: staleSig }, apiSecret, { maxAgeSeconds: 60, nowSeconds: now }),
+        false
+      );
+
+      const missingTsParams = {
+        shop: 'wellness.myshopify.com',
+      };
+      const missingTsSig = calculateAppProxySignature(missingTsParams, apiSecret);
+      assert.equal(
+        verifyAppProxyHmac({ ...missingTsParams, signature: missingTsSig }, apiSecret, { maxAgeSeconds: 60, nowSeconds: now }),
+        false
+      );
+    });
   });
 
   describe('verifyOAuthHmac', () => {

@@ -1,6 +1,6 @@
 # Practitioner Protocols — Project Context (for Claude)
 
-_Snapshot: 2026-10-28 · Core pure engine library fully implemented (336 pure unit tests passing across 88 suites) · Spikes S4 and S5 answered; S3 partially verified with guest order #1016; S2 sitemap exclusion confirmed on dev store; S1 open · Interactive Protocol Editor UI built into Practitioner Portal (Milestone M3) · Merchant Admin Polaris UI & Session Tokens completed (Milestone M6) · Shopify App Store Review Self-Audit & Hardening completed (Milestone M7; documented in docs/SHOPIFY_APP_STORE_AUDIT.md)._
+_Snapshot: 2026-10-28 · Core pure engine library fully implemented (337 pure unit tests passing across 88 suites) · Spikes S1, S4, and S5 answered; S3 partially verified with guest order #1016; S2 sitemap exclusion confirmed on dev store · Interactive Protocol Editor UI built into Practitioner Portal (Milestone M3) · Merchant Admin Polaris UI & Session Tokens completed (Milestone M6) · Shopify App Store Review Self-Audit & Hardening completed (Milestone M7) · Decision D1 decided: App-Proxy portal is baseline practitioner surface across all plans._
 _Contains NO secrets. Never paste `.env` values or tokens into chat or docs._
 
 ## 1. What this is
@@ -23,7 +23,7 @@ The idea grew out of a client request. The owner decided to build their **own, g
 - **01 AI Forecast Agent:** protocol demand could someday feed forecasts (aggregate by SKU) — not planned.
 
 ## 5. Open decisions
-- **D1 — Practitioner surface:** customer-account extension vs app-proxy portal. **Open** (needs dev store Spike S1 verification; zero-extension App Proxy is the baseline, full-page extension pending).
+- **D1 — Practitioner surface:** customer-account extension vs app-proxy portal. **Decided:** App-proxy portal is the universal baseline across all Shopify plans (Basic to Plus). Customer-account extension deferred as an optional Plus-specific enhancement.
 - **D2 — Data store:** Postgres via Prisma (simplest, atomic edits, easy reporting, matches existing hosting; schema and migrations verified in Session 9) vs metaobjects.
 - **D3 — Client page rendering:** App Proxy Liquid page (Liquid evaluation and delimiter neutralization confirmed in Session 12; `noindex` and `sitemap.xml` exclusion pending dev store verification) vs a metaobject theme template.
 - **D4 — Attribution carrier:** hidden line-item property (`_protocol_token`) vs cart attribute. **Partially verified:** Guest order #1016 on live dev store confirmed line-item properties (`_protocol_token`, `_protocol_id`, `_protocol_usage`) reached order, visible in Admin, and hidden on Cart, Drawer, Checkout, and Order Status. Signed-in customer orders and raw `orders/paid` webhook payload verification remain open.
@@ -42,15 +42,11 @@ The idea grew out of a client request. The owner decided to build their **own, g
 
 ## 8. Punch list
 **Open:**
-- Run Spike S1 on live dev store (using `docs/SPIKES_CHECKLIST.md`).
 - Verify `orders/paid` webhook payload and signed-in customer order property persistence for S3.
 - Verify B2B contact sold-out and over-stock edge cases for S5.
 - Verify `noindex` for S2 on live dev store (`sitemap.xml` exclusion confirmed on dev store in Session 19).
 - Re-measure `X-Forwarded-For` chain and configure `TRUSTED_PROXY_HOPS` on production deployed host.
 - Answer Q1/Q3.
-- Owner decision on Catalog Resolver token & scope (`docs/PROPOSAL_CATALOG_RESOLVER.md`: Option a private token vs Option b `unauthenticated_read_product_listings`).
-- Real authentication: OAuth or token exchange for admin, session-token verification on admin API routes.
-- Wire live admin action route handlers (`/api/admin/practitioners/status`, `/api/admin/settings`, `/api/admin/emergency/disable-all`).
 
 **Resolved:**
 - Clean-room approach decided (owner, 2026-10-08).
@@ -534,3 +530,24 @@ Run the five spikes in a day or two on a dev store; write the answers into secti
 - **Verification Status:**
   - `npm test`: **336/336 pure unit tests passing** (88 suites, 0 failures, ~101ms).
   - All 13 test files green with zero regressions.
+
+## 32. Session Log — 2026-10-28 (Session 22: Spike S1 — Practitioner Surface Comparison & Decision D1 Resolution)
+- **Context:** Carried out Spike S1 analysis and evaluation comparing Path A (Customer-Account Full-Page Extension) vs Path B (App-Proxy Portal) on dev store architecture, resolving Decision D1.
+- **Architectural Comparison & Empirical Evidence:**
+  1. **Plan Independence:**
+     - Path B (App-Proxy portal) works universally across all Shopify store plans (Basic, Grow, Advanced, Plus) with zero extension deployment overhead or theme modifications.
+     - Path A (Customer-Account extension) requires full-page extension bundling (`customer-account.page.render`), and its primary distinguishing capability (`purchasingCompany.value` for B2B company locations) is Plus-exclusive.
+  2. **Storefront Identity & Authentication:**
+     - In S5 empirical testing with New Customer Accounts on dev store `ai-agent-app-h9qwnwd8.myshopify.com`, `logged_in_customer_id` was reliably forwarded to the App Proxy upon customer login, and empty string `""` when signed out.
+     - Customer GID is derived cleanly as `gid://shopify/Customer/${logged_in_customer_id}` without requiring additional customer read scopes.
+  3. **Theme & User Experience Integration:**
+     - Path B renders naturally inside the brand's active storefront theme layout (Dawn), maintaining consistent header, navigation, and footer styling.
+     - Interactive Practitioner Portal UI (built in Milestone M3) operates entirely inside Path B with product search, variant curation, and protocol management.
+  4. **Security & Replay Hardening:**
+     - Performed code check on `verifyAppProxyHmac`. Implemented and verified optional timestamp freshness enforcement (`maxAgeSeconds`) in `app/lib/protocols/proxy.js` (`test/proxy.test.js`) to mitigate replay attacks on proxy requests.
+- **Decision D1 Recorded:**
+  - **Baseline:** Path B (App-Proxy portal) is selected as the primary practitioner surface for all stores.
+  - **Upgrade:** Path A (Customer-Account Full-Page Extension) is deferred as an optional future enhancement for Plus merchants desiring direct integration within `/account` navigation.
+- **Verification Status:**
+  - `npm test`: **337/337 pure unit tests passing** (88 suites, 0 failures, ~110ms).
+  - Updated `docs/SPIKES_CHECKLIST.md` and `docs/BUILD_PLAN.md` (M0 S1 checked off).

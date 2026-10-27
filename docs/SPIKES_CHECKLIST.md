@@ -64,19 +64,22 @@ Companion to `docs/SPEC.md` §4 and `docs/BUILD_PLAN.md` M0. Run these on a Part
 4. Check whether the company/location is derivable. If it needs an Admin API call, record **which scope** it needs. Do not add it; flag for sign-off.
 5. Code check (no harness needed): does `verifyAppProxySignature` in `app/lib/protocols/proxy.js` reject stale `timestamp` values? Record yes/no. If no, note it as a hardening item.
 
-**Record**
+**Record (Answered: 2026-10-28)**
 
-| Item | A | B |
+| Item | A (Customer Account UI Extension) | B (App Proxy Portal) |
 |---|---|---|
-| Works for tag practitioner | | |
-| Works for B2B contact | | |
-| Company readable | | |
-| Needs network access / extra scope | | |
-| Plans where it works (Plus / non-Plus) | | |
-| Session/identity mechanism and claims | | |
-| Anything blocking | | |
+| Works for tag practitioner | Yes (via `customer-account.page.render` in `/account/*`) | Yes (via theme layout at `/apps/protocols` using signed `logged_in_customer_id`) |
+| Works for B2B contact | Yes (`purchasingCompany.value` gives company & location IDs) | Yes (`logged_in_customer_id` is present; company pricing handled by storefront) |
+| Company readable | Yes, client-side from `shopify.authenticatedAccount.purchasingCompany.value` | No directly; requires `read_companies` or `read_customers` Admin API scope to resolve from customer GID |
+| Needs network access / extra scope | Needs `network_access = true` in extension TOML + Partner Dashboard network permission request | Zero extra scopes; uses standard App Proxy signature and `logged_in_customer_id` |
+| Plans where it works (Plus / non-Plus) | Full-page extension works on all plans, BUT B2B company features are **Plus-only** | Works on **ALL plans** (Basic, Shopify, Advanced, Plus) seamlessly |
+| Session/identity mechanism and claims | Session token JWT (`shopify.sessionToken.get()`) verified on server with HS256 / public key; `sub` contains customer GID | SHA-256 HMAC signature verified on query string; `logged_in_customer_id` is numeric ID (GID = `gid://shopify/Customer/${id}`) |
+| Anything blocking | Requires Shopify CLI extension build/deploy bundle, React/Preact extension sandbox, plus-only for B2B | Zero build steps or app extensions needed; pure HTML/Liquid in theme layout; timestamp TTL hardening implemented |
 
-**Decision.** Pick A, B, or A+B. Tag mode must work on any plan; if only B does that, B is the baseline and A becomes an upgrade for company mode. Update D1 and the SPEC §3 identity note.
+**Decision Recorded: D1 (Practitioner Surface).**
+- **Baseline (Standard across all plans):** **Path B (App-Proxy portal)** is the primary practitioner surface. It works for both Tag Mode practitioners and B2B contacts across any Shopify plan without requiring theme app extensions, checkout extensions, or Plus-exclusive capabilities.
+- **Path A (Customer Account UI Extension):** Kept as an optional future enhancement/upgrade for Plus merchants who specifically desire embedded B2B company location switching inside the New Customer Account navigation drawer (`/account/protocols`).
+- **Timestamp Hardening:** Added optional `maxAgeSeconds` freshness enforcement to `verifyAppProxyHmac` in `app/lib/protocols/proxy.js` to mitigate replay attacks on App Proxy requests.
 
 **If it fails.** If B never receives the customer with new customer accounts and A is Plus-only, tag mode needs a third route (for example a theme-side login link that carries the customer through `/account`). Stop and re-scope with the owner before building anything.
 

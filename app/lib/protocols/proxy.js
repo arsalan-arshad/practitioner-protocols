@@ -86,9 +86,10 @@ export function calculateAppProxySignature(queryParams, apiSecret) {
  *
  * @param {Record<string, unknown> | URLSearchParams | string} queryParams
  * @param {string} apiSecret App shared secret
+ * @param {{ maxAgeSeconds?: number, nowSeconds?: number }} [options={}] Optional freshness options
  * @returns {boolean} True if signature is valid and authentic
  */
-export function verifyAppProxyHmac(queryParams, apiSecret) {
+export function verifyAppProxyHmac(queryParams, apiSecret, options = {}) {
   if (!queryParams || !apiSecret || typeof apiSecret !== 'string') {
     return false;
   }
@@ -99,6 +100,18 @@ export function verifyAppProxyHmac(queryParams, apiSecret) {
   const rawSignature = params.signature;
   if (!rawSignature || typeof rawSignature !== 'string') {
     return false;
+  }
+
+  // Optional timestamp freshness verification (replay attack mitigation)
+  if (typeof options.maxAgeSeconds === 'number' && options.maxAgeSeconds > 0) {
+    const rawTimestamp = params.timestamp;
+    if (!rawTimestamp) return false;
+    const ts = parseInt(String(rawTimestamp), 10);
+    if (Number.isNaN(ts)) return false;
+    const now = options.nowSeconds ?? Math.floor(Date.now() / 1000);
+    if (Math.abs(now - ts) > options.maxAgeSeconds) {
+      return false;
+    }
   }
 
   const expectedSignature = calculateAppProxySignature(params, apiSecret);

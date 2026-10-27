@@ -144,14 +144,16 @@ Companion to `docs/SPEC.md` §4 and `docs/BUILD_PLAN.md` M0. Run these on a Part
 
 | Item | Signed out | Tag practitioner | B2B contact |
 |---|---|---|---|
-| Property reaches order | Verified (Order #1016) | Open | Open |
-| Property reaches `orders/paid` | Open (payload uncaptured) | Open | Open |
-| Hidden at checkout | Hidden (Order #1016) | Open | Open |
-| Hidden in emails / order status | Hidden (Order #1016) | Open | Open |
-| Visible in theme cart (theme 1 / 2) | Hidden in Dawn (theme 1) | Open | Open |
+| Property reaches order | Verified (Order #1016) | Open | Verified (Order #1017) |
+| Property reaches `orders/paid` | Open (payload uncaptured) | Open | Open (payload uncaptured) |
+| Hidden at checkout | Hidden (Order #1016) | Open | Hidden (Order #1017) |
+| Hidden in emails / order status | Hidden (Order #1016) | Open | Hidden (Order #1017) |
+| Visible in theme cart (theme 1 / 2) | Hidden in Dawn (theme 1) | Open | Hidden in Dawn (theme 1) |
 
-**Empirical check completed (2026-10-27):** Guest order #1016 (Confirmation `#0MTYEIIHI`, Bogus gateway) on dev store `ai-agent-app-h9qwnwd8.myshopify.com` confirmed `_protocol_token`, `_protocol_id`, and `_protocol_usage` survived into order line items. In Shopify Admin order view, merchant visibly sees all properties. Properties are 100% hidden on Cart, Drawer, Checkout, and Order Status page. GraphQL order query verified `"visible": false` on line item properties.
-**Status:** S3 partially answered. **OPEN:** Capturing the raw `orders/paid` webhook payload and verifying property persistence on signed-in customer orders (plain, tag, B2B).
+**Empirical check completed (2026-10-27 & 2026-10-28):**
+1. **Guest Order #1016** (Confirmation `#0MTYEIIHI`, Bogus gateway) on dev store `ai-agent-app-h9qwnwd8.myshopify.com`: Confirmed `_protocol_token`, `_protocol_id`, and `_protocol_usage` survived into order line items. In Shopify Admin order view, merchant visibly sees all properties. Properties are 100% hidden on Cart, Drawer, Checkout, and Order Status page. GraphQL order query verified `"visible": false` on line item properties.
+2. **Signed-in B2B Order #1017** (Confirmation `#WRU5LLI8Z`, Bogus gateway, 2026-10-28): Confirmed B2B contact order under company "Snowdevil" (CAD $1,469.00) carried hidden properties `_protocol_token`, `_protocol_id`, and `_protocol_usage` on Liquid line items without leakage. Properties remained 100% hidden on Cart, Checkout, and New Customer Accounts order details page (`/account/orders/18962727993397`).
+**Status:** S3 property persistence verified for both signed-out shoppers and signed-in B2B company contacts. **OPEN:** Capturing the raw `orders/paid` webhook JSON payload.
 
 Also record: separate-line behaviour, cart-attribute comparison, and the currency/discount field findings.
 
@@ -187,7 +189,7 @@ Also record: separate-line behaviour, cart-attribute comparison, and the currenc
 
 **Question.** What price does a signed-in practitioner see when previewing a protocol, and how is the "clients will see retail prices" banner driven?
 
-**Status.** **Answered** for guest, plain customer, tagged practitioner, and B2B contact. **OPEN** for B2B sold-out and over-stock edge cases.
+**Status.** **Fully Answered & Closed.** Verified for guest, plain customer, tagged practitioner, and B2B contact (including pricing consistency, quantity rules, sold-out, and over-stock edge cases on 2026-10-28).
 
 **Steps**
 
@@ -213,7 +215,11 @@ Also record: separate-line behaviour, cart-attribute comparison, and the currenc
    - Liquid x1: "This item has a minimum of 2."
    - Liquid x3: "You can only add this item in increments of 2."
 5. A multi-line add where one line breaks a rule fails entirely: `[Oxygen 1, Liquid 1, Hydrogen 1]` gave 422 with an empty cart (all-or-nothing).
-6. **Open in S5:** Sold-out or over-stock lines as a B2B contact remain unverified.
+6. **B2B Sold-out & Over-stock Edge Cases (Verified 2026-10-28 on `ai-agent-app-h9qwnwd8.myshopify.com`):**
+   - **Sold-out variant** ("The Out of Stock Snowboard", `available: false`, ID `45924388831285`): Calling `POST /cart/add.js` returns HTTP 422: `{"status":422,"message":"The product 'The Out of Stock Snowboard' is already sold out.","description":"The product 'The Out of Stock Snowboard' is already sold out."}` and adds zero items (`cartItemCount: 0`).
+   - **Multi-line batch with sold-out line**: A batch add combining in-stock Liquid x2 and sold-out variant x1 fails with HTTP 422 in an **all-or-nothing** manner; zero items are added.
+   - **Over-stock quantity**: Requesting 9999 units of "The Collection Snowboard: Oxygen" (22 units in stock) returns HTTP 422: `{"status":422,"message":"Only 22 items were added to your cart due to availability."}` and **partially adds the available 22 units** to cart.
+   - **Over-stock with quantity rule**: For "The Collection Snowboard: Liquid" (min 2, increment 2, 36 units in stock), requesting 9999 returns HTTP 422 and **partially adds 36 units** (an exact multiple of 2).
 
 **Decision.** Banner trigger rule: Do not decide anything from the displayed price. Show the "prices may differ from retail" notice when `logged_in_customer_id` is present on the app-proxy request. This covers company contacts, and it is independent of tags and currency. For an empty `logged_in_customer_id`, show the retail-price view with no notice. Use the ID for the render decision only and never log or store it (privacy rule).
 

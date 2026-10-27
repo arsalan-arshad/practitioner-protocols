@@ -1,6 +1,6 @@
 # Practitioner Protocols — Project Context (for Claude)
 
-_Snapshot: 2026-10-28 · Complete app & engine verified (337 pure unit tests passing across 88 suites) · Milestones M1 through M7 completed; M8 Release Documentation verified · Spikes S1, S4, and S5 answered; S3 partially verified with guest order #1016; S2 sitemap exclusion confirmed on dev store · Decision D1 decided: App-Proxy portal is universal baseline practitioner surface across all plans · Awaiting final owner review and release tagging._
+_Snapshot: 2026-10-28 · Complete app & engine verified (337 pure unit tests passing across 88 suites) · Spikes S1, S4, S5 fully answered & closed; S3 property persistence verified across guest order #1016 and signed-in B2B order #1017; S2 sitemap exclusion confirmed on dev store · v0.1.0 tagged on main._
 _Contains NO secrets. Never paste `.env` values or tokens into chat or docs._
 
 ## 1. What this is
@@ -26,7 +26,7 @@ The idea grew out of a client request. The owner decided to build their **own, g
 - **D1 — Practitioner surface:** customer-account extension vs app-proxy portal. **Decided:** App-proxy portal is the universal baseline across all Shopify plans (Basic to Plus). Customer-account extension deferred as an optional Plus-specific enhancement.
 - **D2 — Data store:** Postgres via Prisma (simplest, atomic edits, easy reporting, matches existing hosting; schema and migrations verified in Session 9) vs metaobjects.
 - **D3 — Client page rendering:** App Proxy Liquid page (Liquid evaluation and delimiter neutralization confirmed in Session 12; `noindex` and `sitemap.xml` exclusion pending dev store verification) vs a metaobject theme template.
-- **D4 — Attribution carrier:** hidden line-item property (`_protocol_token`) vs cart attribute. **Partially verified:** Guest order #1016 on live dev store confirmed line-item properties (`_protocol_token`, `_protocol_id`, `_protocol_usage`) reached order, visible in Admin, and hidden on Cart, Drawer, Checkout, and Order Status. Signed-in customer orders and raw `orders/paid` webhook payload verification remain open.
+- **D4 — Attribution carrier:** hidden line-item property (`_protocol_token`) vs cart attribute. **Verified on Live Orders:** Dev store orders #1016 (guest) and #1017 (signed-in B2B company contact) confirmed line-item properties (`_protocol_token`, `_protocol_id`, `_protocol_usage`) reached completed order, visible in Admin, and hidden on Cart, Drawer, Checkout, and Order Status. Raw `orders/paid` webhook JSON payload inspection remains open.
 - **D5 — Public name** and listing category; avoid "Shopify" in the name.
 - **D6 — Practice naming control:** admin-set only (recommended) vs practitioner-set with approval.
 
@@ -42,11 +42,10 @@ The idea grew out of a client request. The owner decided to build their **own, g
 
 ## 8. Punch list
 **Open:**
-- Verify `orders/paid` webhook payload and signed-in customer order property persistence for S3.
-- Verify B2B contact sold-out and over-stock edge cases for S5.
+- Verify raw `orders/paid` webhook JSON payload for S3.
 - Verify `noindex` for S2 on live dev store (`sitemap.xml` exclusion confirmed on dev store in Session 19).
 - Re-measure `X-Forwarded-For` chain and configure `TRUSTED_PROXY_HOPS` on production deployed host.
-- Answer Q1/Q3.
+- Answer Q1 (First brand reference store).
 
 **Resolved:**
 - Clean-room approach decided (owner, 2026-10-08).
@@ -69,6 +68,8 @@ The idea grew out of a client request. The owner decided to build their **own, g
 - Shopify App Store Review Self-Audit & Hardening completed (Milestone M7, Session 21): Automated OAuth 2.0 flow, OAuth query HMAC verification, Session table integration, and Content Security Policy frame-ancestors headers.
 - Spike S1 & Decision D1 resolved (Session 22): Path B (App-Proxy portal) established as baseline surface across all plans; Path A (Customer Account extension) deferred as optional Plus upgrade; timestamp replay check added.
 - Milestone M8 Release Documentation verified (Session 23): README updated to match verified code, architecture, schema, security guarantees, and test instructions.
+- Spike S5 fully closed (Session 24): B2B sold-out failure verified as all-or-nothing (HTTP 422, zero added); B2B over-stock quantity verified as partial add (HTTP 422, capping to available stock respecting quantity rule increments).
+- Signed-in B2B Order #1017 verified (Session 24): Line item attribution properties (`_protocol_token`, `_protocol_id`, `_protocol_usage`) survived into completed B2B company order ($1,469.00 CAD), 100% hidden on Cart, Checkout, and Customer Account Order Details.
 
 ## 9. Where to start
 Run the five spikes in a day or two on a dev store; write the answers into section 5 above; only then build UI screens. See `docs/BUILD_PLAN.md`.
@@ -566,3 +567,22 @@ Run the five spikes in a day or two on a dev store; write the answers into secti
 - **Verification Status:**
   - `npm test`: **337/337 pure unit tests passing** (88 suites, 0 failures, ~105ms).
   - Working directory clean, ready for final owner review and tagging.
+
+## 34. Session Log — 2026-10-28 (Session 24: Spike S5 Edge Cases & Spike S3 Signed-in B2B Order Empirical Verification)
+- **Context:** Executed empirical verification on live dev store `ai-agent-app-h9qwnwd8.myshopify.com` for remaining Spike S5 B2B edge cases (sold-out and over-stock lines) and Spike S3 attribution property persistence for a signed-in B2B company contact.
+- **Empirical Findings Recorded:**
+  1. **Spike S5 — B2B Sold-out & Over-stock Edge Cases (Closed):**
+     - **Sold-out Single Line:** Calling `POST /cart/add.js` with sold-out variant ("The Out of Stock Snowboard", ID `45924388831285`, `available: false`) returns HTTP 422: `{"status":422,"message":"The product 'The Out of Stock Snowboard' is already sold out.","description":"The product 'The Out of Stock Snowboard' is already sold out."}`. Zero items added (`cartItemCount: 0`).
+     - **Multi-line Batch with Sold-out Line:** Batch addition containing in-stock Liquid x2 and sold-out item x1 fails with HTTP 422 in an all-or-nothing manner; zero items added to cart.
+     - **Over-stock Single Line:** Requesting 9999 units of "Oxygen" (22 units in stock) returns HTTP 422: `{"status":422,"message":"Only 22 items were added to your cart due to availability."}` and partially adds the available 22 units to cart.
+     - **Over-stock with B2B Quantity Rule:** Requesting 9999 units of "Liquid" (min 2, increment 2, 36 units in stock) returns HTTP 422 and partially adds 36 units (exact multiple of 2).
+  2. **Spike S3 — Signed-in B2B Company Contact Order #1017:**
+     - Contact `arsalanarshad.dev+b2b@gmail.com` under company "Snowdevil" checked out 2 units of Liquid with hidden attribution properties (`_protocol_token: "tok_test_b2b_s3"`, `_protocol_id: "proto_test_b2b_123"`, `_protocol_usage: "Take 2 daily"`).
+     - Bogus gateway checkout completed successfully: **Order #1017** (Confirmation `#WRU5LLI8Z`, Order ID `18962727993397`, CAD $1,469.00 total).
+     - Line item properties survived intact into order without leakage.
+     - Hidden properties remained 100% hidden on Cart, Drawer, Checkout, and New Customer Accounts order details page (`/account/orders/18962727993397`).
+- **Release Tagging:**
+  - Annotated git tag `v0.1.0` created on `07c8d86` following completion of M8 release readiness.
+- **Verification Status:**
+  - `npm test`: **337/337 pure unit tests passing** (88 suites, 0 failures, ~99ms).
+  - Spikes S1, S4, and S5 fully resolved and closed; S3 verified across both guest and signed-in B2B orders.

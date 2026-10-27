@@ -4,6 +4,7 @@ import crypto from 'node:crypto';
 import {
   handleAppProxyRequest,
   handleListProtocolsRequest,
+  handleProductSearchRequest,
   handleCreateProtocolRequest,
   handleGetProtocolRequest,
   handleUpdateProtocolRequest,
@@ -1244,6 +1245,117 @@ describe('HTTP Routes & Request Handlers (app/lib/protocols/routes.js)', () => {
       const data = await res.json();
       assert.equal(data.error, 'Webhook processing failed');
       assert.equal(data.retryable, true);
+    });
+  });
+
+  describe('Product Search and App Proxy Interactive Actions (Milestone M3)', () => {
+    let db;
+    beforeEach(() => {
+      db = createMockDb({
+        profiles: [
+          {
+            id: 'prof_1',
+            shop: testShop,
+            ownerGid: 'gid://shopify/Customer/112233',
+            isApproved: true,
+            practiceName: 'Elite Naturopathic Clinic'
+          }
+        ]
+      });
+    });
+
+    it('handles product search requests and returns products array', async () => {
+      const mockResolver = createFakeVariantResolver({}, [
+        {
+          id: 'gid://shopify/Product/1',
+          title: 'Liposomal Vitamin C',
+          variants: [
+            { id: 'gid://shopify/ProductVariant/101', displayTitle: 'Liposomal Vitamin C - 150ml', price: '24.99' }
+          ]
+        }
+      ]);
+
+      const res = await handleProductSearchRequest(testShop, 'vitamin', {
+        variantResolver: mockResolver
+      });
+
+      assert.equal(res.status, 200);
+      const data = await res.json();
+      assert.equal(data.products.length, 1);
+      assert.equal(data.products[0].title, 'Liposomal Vitamin C');
+    });
+
+    it('returns empty products array for blank search query', async () => {
+      const res = await handleProductSearchRequest(testShop, '   ');
+      assert.equal(res.status, 200);
+      const data = await res.json();
+      assert.deepEqual(data.products, []);
+    });
+
+    it('dispatches action=search through handleAppProxyRequest', async () => {
+      const mockResolver = createFakeVariantResolver({}, [
+        {
+          id: 'gid://shopify/Product/2',
+          title: 'Organic Ashwagandha',
+          variants: [
+            { id: 'gid://shopify/ProductVariant/201', displayTitle: 'Organic Ashwagandha - 60 Caps', price: '19.99' }
+          ]
+        }
+      ]);
+
+      const params = {
+        shop: testShop,
+        action: 'search',
+        q: 'ashwagandha',
+        logged_in_customer_id: '112233',
+        timestamp: '1729500000'
+      };
+      const signature = calculateAppProxySignature(params, apiSecret);
+      const url = `https://${testShop}/apps/protocols?shop=${testShop}&action=search&q=ashwagandha&logged_in_customer_id=112233&timestamp=1729500000&signature=${signature}`;
+
+      const res = await handleAppProxyRequest(db, new Request(url), {
+        apiSecret,
+        variantResolver: mockResolver
+      });
+
+      assert.equal(res.status, 200);
+      const data = await res.json();
+      assert.equal(data.products.length, 1);
+      assert.equal(data.products[0].title, 'Organic Ashwagandha');
+    });
+
+    it('dispatches action=create through handleAppProxyRequest when practitioner is approved', async () => {
+      // Ensure profile is approved
+      db.state.profiles[0].isApproved = true;
+
+      const payload = {
+        name: 'Immune Support Stack',
+        introNote: 'Take daily during winter',
+        lines: [
+          { variantGid: 'gid://shopify/ProductVariant/9901', quantity: 1, usageNote: '1 cap daily' }
+        ]
+      };
+
+      const params = {
+        shop: testShop,
+        action: 'create',
+        logged_in_customer_id: '112233',
+        timestamp: '1729500000'
+      };
+      const signature = calculateAppProxySignature(params, apiSecret);
+      const url = `https://${testShop}/apps/protocols?shop=${testShop}&action=create&logged_in_customer_id=112233&timestamp=1729500000&signature=${signature}`;
+
+      const req = new Request(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      const res = await handleAppProxyRequest(db, req, { apiSecret });
+      assert.equal(res.status, 201);
+      const data = await res.json();
+      assert.equal(data.protocol.name, 'Immune Support Stack');
+      assert.ok(data.protocol.token);
     });
   });
 });

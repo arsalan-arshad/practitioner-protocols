@@ -324,6 +324,52 @@ export function createRequestListener(options = {}) {
         return;
       }
 
+      // Demo search endpoint for local preview
+      if (pathname === '/apps/protocols' && url.searchParams.get('action') === 'search') {
+        const q = (url.searchParams.get('q') || '').toLowerCase().trim();
+        const demoCatalog = [
+          {
+            id: 'gid://shopify/Product/101',
+            title: 'Hydrating Daily Cleanser',
+            variants: [
+              { id: 'gid://shopify/ProductVariant/101', title: '200ml Bottle', displayTitle: 'Hydrating Daily Cleanser - 200ml Bottle', price: '34.00', priceFormatted: '$34.00' }
+            ]
+          },
+          {
+            id: 'gid://shopify/Product/102',
+            title: 'Antioxidant Facial Serum',
+            variants: [
+              { id: 'gid://shopify/ProductVariant/102', title: '30ml Dropper', displayTitle: 'Antioxidant Facial Serum - 30ml Dropper', price: '48.50', priceFormatted: '$48.50' }
+            ]
+          },
+          {
+            id: 'gid://shopify/Product/103',
+            title: 'Barrier Recovery Lip Balm',
+            variants: [
+              { id: 'gid://shopify/ProductVariant/103', title: '15ml Tube', displayTitle: 'Barrier Recovery Lip Balm - 15ml Tube', price: '28.00', priceFormatted: '$28.00' }
+            ]
+          },
+          {
+            id: 'gid://shopify/Product/104',
+            title: 'Omega-3 EPA/DHA Pure',
+            variants: [
+              { id: 'gid://shopify/ProductVariant/104', title: '60 Softgels', displayTitle: 'Omega-3 EPA/DHA Pure - 60 Softgels', price: '32.00', priceFormatted: '$32.00' }
+            ]
+          },
+          {
+            id: 'gid://shopify/Product/105',
+            title: 'Magnesium Glycinate Complex',
+            variants: [
+              { id: 'gid://shopify/ProductVariant/105', title: '120 Capsules', displayTitle: 'Magnesium Glycinate Complex - 120 Capsules', price: '26.50', priceFormatted: '$26.50' }
+            ]
+          }
+        ];
+        const matches = demoCatalog.filter(p => !q || p.title.toLowerCase().includes(q) || p.variants.some(v => v.displayTitle.toLowerCase().includes(q)));
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ products: matches }));
+        return;
+      }
+
       // 2. Practitioner Portal Preview
       if (pathname === '/portal' || pathname === '/portal/preview') {
         const isApproved = url.searchParams.get('approved') !== 'false';
@@ -339,6 +385,8 @@ export function createRequestListener(options = {}) {
               id: DEMO_PROTOCOL.id,
               token: DEMO_PROTOCOL.token,
               name: DEMO_PROTOCOL.name,
+              introNote: DEMO_PROTOCOL.introNote,
+              lines: DEMO_PROTOCOL.lines,
               linesCount: DEMO_PROTOCOL.lines.length,
               retailTotal: '$110.50',
             },

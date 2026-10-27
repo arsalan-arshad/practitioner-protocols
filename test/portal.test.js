@@ -714,6 +714,11 @@ describe('Practitioner Portal (app/lib/protocols/portal.js)', () => {
       assert.ok(liquid.includes('$75.00'));
       assert.ok(liquid.includes('Copy Link'));
       assert.ok(liquid.includes('Print Handout'));
+      assert.ok(liquid.includes('protocol-editor-modal'));
+      assert.ok(liquid.includes('product-search-input'));
+      assert.ok(liquid.includes('protocol-selected-lines'));
+      assert.ok(liquid.includes('protocol-save-btn'));
+      assert.ok(liquid.includes('portal-edit-btn'));
     });
 
     it('neutralizes Liquid delimiters in protocol names and practice names', () => {

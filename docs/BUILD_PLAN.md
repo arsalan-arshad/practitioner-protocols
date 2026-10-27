@@ -22,7 +22,7 @@
 
 ## M3 — Practitioner portal
 - [x] Portal logic: Library data models, editor validation (limits, price total), duplicate/archive/restore, concurrent-edit warning (`app/lib/protocols/portal.js`, `test/portal.test.js`).
-- [ ] Interactive portal UI: Template renderer exists (`renderPortalLiquid` in `app/lib/protocols/portal.js`, `routes.js`), but interactive protocol editor UI with product search (SPEC §7) and live persistence remain open.
+- [x] Interactive portal UI: Interactive protocol editor modal with product search, variant line curation, quantity controls, usage notes, and App Proxy persistence (`renderPortalLiquid` in `app/lib/protocols/portal.js`, `routes.js`, `catalog.js`).
 
 ## M4 — Share kit
 - [x] Pure vector QR SVG generator (ISO/IEC 18004, GF(256) Reed-Solomon) and printable one-page HTML/CSS handout (`app/lib/protocols/qr.js`, `handout.js`, `test/handout.test.js`).

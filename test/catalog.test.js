@@ -6,7 +6,10 @@ import {
   resolveVariants,
   enrichProtocolLines,
   createFakeVariantResolver,
-  formatPrice
+  formatPrice,
+  buildProductSearchQuery,
+  parseProductSearchNodes,
+  searchCatalogProducts
 } from '../app/lib/protocols/catalog.js';
 
 describe('Catalog Resolver Layer (app/lib/protocols/catalog.js)', () => {
@@ -359,6 +362,142 @@ describe('Catalog Resolver Layer (app/lib/protocols/catalog.js)', () => {
       assert.equal(formatPrice('15.50', 'EUR'), '€15.50');
       assert.equal(formatPrice('12.00', 'GBP'), '£12.00');
       assert.equal(formatPrice('50.00', 'AUD'), 'A$50.00');
+    });
+  });
+
+  describe('Product Search Query & Parser', () => {
+    it('builds product search query with parameters', () => {
+      const { query } = buildProductSearchQuery();
+      assert.ok(query.includes('query SearchProducts($query: String!, $first: Int!)'));
+      assert.ok(query.includes('products(first: $first, query: $query)'));
+      assert.ok(query.includes('variants(first: 20)'));
+    });
+
+    it('builds product search query with @inContext directive', () => {
+      const { query } = buildProductSearchQuery({ country: 'CA', language: 'FR' });
+      assert.ok(query.includes('@inContext(country: $country, language: $language)'));
+    });
+
+    it('parses product search nodes into clean product and variant representations', () => {
+      const rawEdges = [
+        {
+          node: {
+            id: 'gid://shopify/Product/1',
+            title: 'Magnesium Glycinate',
+            handle: 'magnesium-glycinate',
+            featuredImage: { url: 'https://cdn.shopify.com/magnesium.png', altText: 'Magnesium' },
+            variants: {
+              edges: [
+                {
+                  node: {
+                    id: 'gid://shopify/ProductVariant/201',
+                    title: '120 Capsules',
+                    availableForSale: true,
+                    price: { amount: '34.95', currencyCode: 'USD' },
+                    image: { url: 'https://cdn.shopify.com/mag-120.png', altText: '120 Caps' }
+                  }
+                },
+                {
+                  node: {
+                    id: 'gid://shopify/ProductVariant/202',
+                    title: 'Default Title',
+                    availableForSale: false,
+                    price: { amount: '19.95', currencyCode: 'USD' }
+                  }
+                }
+              ]
+            }
+          }
+        }
+      ];
+
+      const products = parseProductSearchNodes(rawEdges);
+      assert.equal(products.length, 1);
+      const prod = products[0];
+      assert.equal(prod.id, 'gid://shopify/Product/1');
+      assert.equal(prod.productId, '1');
+      assert.equal(prod.title, 'Magnesium Glycinate');
+      assert.equal(prod.handle, 'magnesium-glycinate');
+      assert.equal(prod.imageUrl, 'https://cdn.shopify.com/magnesium.png');
+      assert.equal(prod.variants.length, 2);
+
+      const v1 = prod.variants[0];
+      assert.equal(v1.id, 'gid://shopify/ProductVariant/201');
+      assert.equal(v1.variantId, '201');
+      assert.equal(v1.title, '120 Capsules');
+      assert.equal(v1.displayTitle, 'Magnesium Glycinate - 120 Capsules');
+      assert.equal(v1.price, '34.95');
+      assert.equal(v1.priceFormatted, '$34.95');
+      assert.equal(v1.availableForSale, true);
+      assert.equal(v1.imageUrl, 'https://cdn.shopify.com/mag-120.png');
+
+      const v2 = prod.variants[1];
+      assert.equal(v2.title, null); // Suppresses 'Default Title'
+      assert.equal(v2.displayTitle, 'Magnesium Glycinate');
+      assert.equal(v2.availableForSale, false);
+    });
+
+    it('executes searchCatalogProducts using mock executor', async () => {
+      const mockExecutor = async () => ({
+        products: {
+          edges: [
+            {
+              node: {
+                id: 'gid://shopify/Product/10',
+                title: 'Zinc Picolinate',
+                variants: {
+                  edges: [
+                    {
+                      node: {
+                        id: 'gid://shopify/ProductVariant/301',
+                        title: 'Default Title',
+                        availableForSale: true,
+                        price: { amount: '12.50', currencyCode: 'USD' }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ]
+        }
+      });
+
+      const results = await searchCatalogProducts('test.myshopify.com', 'Zinc', {
+        graphqlExecutor: mockExecutor
+      });
+      assert.equal(results.length, 1);
+      assert.equal(results[0].title, 'Zinc Picolinate');
+      assert.equal(results[0].variants[0].priceFormatted, '$12.50');
+    });
+
+    it('searches products with createFakeVariantResolver.searchProducts', async () => {
+      const resolver = createFakeVariantResolver({}, [
+        {
+          id: 'gid://shopify/Product/1',
+          title: 'Daily Omega 3',
+          variants: [
+            { id: 'gid://shopify/ProductVariant/1', displayTitle: 'Daily Omega 3 - 60ct' }
+          ]
+        },
+        {
+          id: 'gid://shopify/Product/2',
+          title: 'Vitamin C Powder',
+          variants: [
+            { id: 'gid://shopify/ProductVariant/2', displayTitle: 'Vitamin C Powder - 250g' }
+          ]
+        }
+      ]);
+
+      const match = await resolver.searchProducts('test.myshopify.com', 'omega');
+      assert.equal(match.length, 1);
+      assert.equal(match[0].title, 'Daily Omega 3');
+
+      const noMatch = await resolver.searchProducts('test.myshopify.com', 'nonexistent');
+      assert.equal(noMatch.length, 0);
+
+      const emptyQuery = await resolver.searchProducts('test.myshopify.com', '');
+      assert.equal(emptyQuery.length, 0);
     });
   });
 });

@@ -34,7 +34,8 @@ import {
 } from './rate-limit.js';
 import {
   resolveVariants,
-  enrichProtocolLines
+  enrichProtocolLines,
+  searchCatalogProducts
 } from './catalog.js';
 import { renderPortalLiquid } from './portal.js';
 
@@ -294,6 +295,58 @@ export async function handleAppProxyRequest(db, request, options = {}) {
       });
     }
 
+    // Handle practitioner actions (product search, protocol creation, protocol update)
+    const action = urlObj.searchParams.get('action');
+    if (action === 'search') {
+      const q = urlObj.searchParams.get('q') || '';
+      return handleProductSearchRequest(shop, q, options);
+    }
+
+    if (action === 'create' || (request?.method === 'POST' && action !== 'search')) {
+      try {
+        let body = null;
+        if (typeof request.json === 'function') {
+          body = await request.json();
+        } else if (typeof request.text === 'function') {
+          const raw = await request.text();
+          body = JSON.parse(raw);
+        }
+        const user = {
+          id: customerGid,
+          role: 'practitioner',
+          ownerType: 'customer',
+          ownerId: customerGid,
+          shop
+        };
+        return handleCreateProtocolRequest(db, user, body, { shop });
+      } catch (err) {
+        return handleErrorResponse(err);
+      }
+    }
+
+    if (action === 'update' || request?.method === 'PUT') {
+      try {
+        let body = null;
+        if (typeof request.json === 'function') {
+          body = await request.json();
+        } else if (typeof request.text === 'function') {
+          const raw = await request.text();
+          body = JSON.parse(raw);
+        }
+        const protocolId = urlObj.searchParams.get('id');
+        const user = {
+          id: customerGid,
+          role: 'practitioner',
+          ownerType: 'customer',
+          ownerId: customerGid,
+          shop
+        };
+        return handleUpdateProtocolRequest(db, user, protocolId, body, { shop });
+      } catch (err) {
+        return handleErrorResponse(err);
+      }
+    }
+
     let activeProtocols = [];
     let starterProtocols = [];
     let archivedProtocols = [];
@@ -491,6 +544,33 @@ async function parseRequestBody(body) {
     return JSON.parse(body);
   }
   return body || {};
+}
+
+/**
+ * Handles product catalog search requests for practitioners curating protocols.
+ *
+ * @param {string} shop
+ * @param {string} query
+ * @param {Record<string, any>} [options]
+ * @returns {Promise<Response>}
+ */
+export async function handleProductSearchRequest(shop, query, options = {}) {
+  const q = String(query || '').trim();
+  if (!q) {
+    return Response.json({ products: [] });
+  }
+
+  try {
+    let products = [];
+    if (options?.variantResolver && typeof options.variantResolver.searchProducts === 'function') {
+      products = await options.variantResolver.searchProducts(shop, q);
+    } else {
+      products = await searchCatalogProducts(shop, q, options);
+    }
+    return Response.json({ products });
+  } catch (err) {
+    return Response.json({ error: err.message || 'Product search failed' }, { status: 500 });
+  }
 }
 
 /**

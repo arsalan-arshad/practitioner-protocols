@@ -1,6 +1,6 @@
 # Practitioner Protocols — Project Context (for Claude)
 
-_Snapshot: 2026-10-27 · Core pure engine library fully implemented (289 pure unit tests passing) · Spikes S4 and S5 answered (S5 answered for guest, plain, tagged, B2B contact; B2B sold-out/overstock open); S3 partially verified with guest order #1016 (signed-in order & webhook payload open); S2 partially verified (Liquid evaluation confirmed; noindex, sitemap, real-host hops pending); S1 open · App scaffold and UI renderers built, but real OAuth/token exchange, live session tokens, protocol editor with product search, and live admin routes remain open._
+_Snapshot: 2026-10-28 · Core pure engine library fully implemented (298 pure unit tests passing across 83 suites) · Spikes S4 and S5 answered; S3 partially verified with guest order #1016; S2 sitemap exclusion confirmed on dev store; S1 open · Interactive Protocol Editor UI with product search built into Practitioner Portal (Milestone M3) · Real OAuth/token exchange and live admin routes remain open._
 _Contains NO secrets. Never paste `.env` values or tokens into chat or docs._
 
 ## 1. What this is
@@ -45,12 +45,11 @@ The idea grew out of a client request. The owner decided to build their **own, g
 - Run Spike S1 on live dev store (using `docs/SPIKES_CHECKLIST.md`).
 - Verify `orders/paid` webhook payload and signed-in customer order property persistence for S3.
 - Verify B2B contact sold-out and over-stock edge cases for S5.
-- Verify `noindex` and `sitemap.xml` exclusion for S2 on live dev store.
+- Verify `noindex` for S2 on live dev store (`sitemap.xml` exclusion confirmed on dev store in Session 19).
 - Re-measure `X-Forwarded-For` chain and configure `TRUSTED_PROXY_HOPS` on production deployed host.
 - Answer Q1/Q3.
 - Owner decision on Catalog Resolver token & scope (`docs/PROPOSAL_CATALOG_RESOLVER.md`: Option a private token vs Option b `unauthenticated_read_product_listings`).
 - Real authentication: OAuth or token exchange for admin, session-token verification on admin API routes.
-- Build interactive protocol editor UI with product search (SPEC §7, Acceptance Criterion 1).
 - Wire live admin action route handlers (`/api/admin/practitioners/status`, `/api/admin/settings`, `/api/admin/emergency/disable-all`).
 
 **Resolved:**
@@ -68,6 +67,8 @@ The idea grew out of a client request. The owner decided to build their **own, g
 - Spike S4 (Cart batch add): Verified 20 lines added in 971ms, 21 lines in 824ms; sold-out variant causes all-or-nothing 422; overstock returns 422 with partial add.
 - Spike S3 (Guest order): Verified guest order #1016 on dev store; `_protocol_token`, `_protocol_id`, `_protocol_usage` persist into order line items, visible in Admin, hidden in Cart/Checkout/Order Status.
 - Spike S5 (B2B price check & banner rule): Verified 4 shopper states on live Plus dev store; confirmed `practitioner` tag has zero price effect; B2B company prices CAD 714 / 999 / 571 applied consistently; `/cart/add.js` quantity rule enforcement is all-or-nothing; banner rule decided based on `logged_in_customer_id` presence (Session 18).
+- Spike S2 (Sitemap exclusion): Verified on live dev store that Shopify parent sitemap strictly excludes `/apps/*` (Session 19).
+- Interactive Protocol Editor UI with product search built into Practitioner Portal (Milestone M3, Session 19).
 
 ## 9. Where to start
 Run the five spikes in a day or two on a dev store; write the answers into section 5 above; only then build UI screens. See `docs/BUILD_PLAN.md`.
@@ -452,3 +453,28 @@ Run the five spikes in a day or two on a dev store; write the answers into secti
   - Hardened Cart AJAX add error handling. On a non-OK response from `POST /cart/add.js`, client script parses the JSON error response body, displaying `description` (or `message`) per line or as general error message, re-enabling action buttons cleanly on failure.
 - **Verification Status:**
   - `npm test`: **289/289 pure unit tests passing** (81 suites, 0 failures, ~100ms).
+
+## 29. Session Log — 2026-10-28 (Session 19: S2 Dev Store Sitemap Verification & Milestone M3 Protocol Editor)
+- **Context:** Carried out live dev store verification of Spike S2 sitemap exclusion and implemented Milestone M3 (Interactive Protocol Editor UI with live catalog product search).
+- **Spike S2 Dev Store Sitemap Findings:**
+  - Queried live dev store parent sitemap at `https://ai-agent-app-h9qwnwd8.myshopify.com/sitemap.xml` via Chrome DevTools MCP.
+  - Parent sitemap strictly links to: `sitemap_agentic_discovery.xml`, `sitemap_products_1.xml`, `sitemap_pages_1.xml`, `sitemap_collections_1.xml`, and `sitemap_blogs_1.xml`.
+  - Inspected `sitemap_pages_1.xml` which only contains `/pages/contact` and `/pages/data-sharing-opt-out`.
+  - **Empirical Confirmation:** Shopify's native automated sitemaps never include App Proxy routes (`/apps/*`), confirming the sitemap exclusion requirement of Spike S2 without requiring merchant theme edits.
+- **Milestone M3: Interactive Protocol Editor UI Implementation:**
+  1. **Catalog Product Search (`catalog.js`, `test/catalog.test.js`):**
+     - Implemented `buildProductSearchQuery`, `parseProductSearchNodes`, and `searchCatalogProducts`.
+     - Queries Storefront GraphQL `products(first: $first, query: $query)` with optional country/language context.
+     - Parses products and variants, suppressing single-variant `"Default Title"` and formatting prices.
+     - Extended `createFakeVariantResolver` with in-memory product search support.
+  2. **App Proxy Route Handlers (`routes.js`, `test/routes.test.js`):**
+     - Added `handleProductSearchRequest` for `GET /api/products/search?q=...`.
+     - Wired App Proxy dispatching for `action=search`, `action=create` (`POST /apps/protocols`), and `action=update` (`PUT /apps/protocols`).
+  3. **Practitioner Portal Liquid Editor Modal (`portal.js`, `test/portal.test.js`):**
+     - Replaced placeholder alert with an accessible `#protocol-editor-modal` container and backdrop.
+     - Form controls: Protocol Name (required, max 60 chars), Intro Note (optional, max 500 chars).
+     - Product Search: Live catalog search with dropdown variant selector.
+     - Selected Lines Management: Live variant cards with quantity selector (1-10), usage instructions note (max 200 chars), line deletion, duplicate variant guard, and live retail total calculation.
+     - Added "Edit" action buttons to active protocol cards in the library.
+- **Verification Status:**
+  - `npm test`: **298/298 pure unit tests passing** (83 suites, 0 failures, ~104ms).

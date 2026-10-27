@@ -944,6 +944,201 @@ export function renderPortalLiquid(options = {}) {
     color: #111827;
     margin: 2rem 0 1rem 0;
   }
+  /* Protocol Editor Modal */
+  .portal-modal-backdrop {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background: rgba(0, 0, 0, 0.5);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 9999;
+    padding: 1rem;
+    box-sizing: border-box;
+  }
+  .portal-modal-backdrop.is-active {
+    display: flex;
+  }
+  .portal-modal {
+    background: #ffffff;
+    border-radius: 12px;
+    max-width: 680px;
+    width: 100%;
+    max-height: 90vh;
+    overflow-y: auto;
+    box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1);
+    display: flex;
+    flex-direction: column;
+  }
+  .portal-modal-header {
+    padding: 1.25rem 1.5rem;
+    border-bottom: 1px solid #e5e7eb;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .portal-modal-title {
+    font-size: 1.25rem;
+    font-weight: 700;
+    color: #111827;
+    margin: 0;
+  }
+  .portal-modal-close {
+    background: none;
+    border: none;
+    font-size: 1.5rem;
+    cursor: pointer;
+    color: #6b7280;
+    line-height: 1;
+    padding: 0.25rem;
+  }
+  .portal-modal-close:hover {
+    color: #111827;
+  }
+  .portal-modal-body {
+    padding: 1.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1.25rem;
+  }
+  .portal-form-group {
+    display: flex;
+    flex-direction: column;
+    gap: 0.375rem;
+  }
+  .portal-form-label {
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: #374151;
+  }
+  .portal-form-input, .portal-form-textarea {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 0.625rem 0.75rem;
+    border: 1px solid #d1d5db;
+    border-radius: 6px;
+    font-size: 0.9375rem;
+    font-family: inherit;
+    color: #111827;
+  }
+  .portal-form-input:focus, .portal-form-textarea:focus {
+    outline: none;
+    border-color: #047857;
+    box-shadow: 0 0 0 1px #047857;
+  }
+  .portal-search-box {
+    display: flex;
+    gap: 0.5rem;
+    position: relative;
+  }
+  .portal-search-dropdown {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    background: #ffffff;
+    border: 1px solid #d1d5db;
+    border-radius: 6px;
+    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+    max-height: 240px;
+    overflow-y: auto;
+    z-index: 10;
+    margin-top: 0.25rem;
+  }
+  .portal-search-item {
+    padding: 0.625rem 0.875rem;
+    border-bottom: 1px solid #f3f4f6;
+    cursor: pointer;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .portal-search-item:hover {
+    background-color: #f9fafb;
+  }
+  .portal-search-item-title {
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: #111827;
+  }
+  .portal-search-item-meta {
+    font-size: 0.75rem;
+    color: #6b7280;
+  }
+  .portal-selected-lines {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+  .portal-line-item {
+    background: #f9fafb;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    padding: 0.875rem 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+  .portal-line-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .portal-line-title {
+    font-weight: 600;
+    font-size: 0.9375rem;
+    color: #111827;
+  }
+  .portal-line-remove-btn {
+    background: none;
+    border: none;
+    color: #ef4444;
+    cursor: pointer;
+    font-size: 1.25rem;
+    line-height: 1;
+    padding: 0 0.25rem;
+  }
+  .portal-line-remove-btn:hover {
+    color: #b91c1c;
+  }
+  .portal-line-inputs {
+    display: flex;
+    gap: 0.75rem;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+  .portal-line-qty {
+    width: 80px;
+  }
+  .portal-line-note {
+    flex: 1;
+    min-width: 160px;
+  }
+  .portal-modal-footer {
+    padding: 1.25rem 1.5rem;
+    border-top: 1px solid #e5e7eb;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: #f9fafb;
+    border-bottom-left-radius: 12px;
+    border-bottom-right-radius: 12px;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+  }
+  .portal-editor-error {
+    background-color: #fee2e2;
+    border: 1px solid #fca5a5;
+    color: #991b1b;
+    padding: 0.625rem 0.875rem;
+    border-radius: 6px;
+    font-size: 0.875rem;
+    width: 100%;
+    box-sizing: border-box;
+  }
 </style>`;
 
   // 1. Unauthenticated state
@@ -977,7 +1172,7 @@ export function renderPortalLiquid(options = {}) {
   }
 
   // 3. Approved practitioner: render full portal library
-  const renderCards = (protocols) => {
+  const renderCards = (protocols, isStarter = false) => {
     if (!protocols || protocols.length === 0) {
       return `<p style="color: #6b7280; font-style: italic;">No protocols found.</p>`;
     }
@@ -986,13 +1181,14 @@ export function renderPortalLiquid(options = {}) {
       ${protocols.map((p) => {
         const title = safePortalText(p.name || 'Untitled Protocol');
         const token = safePortalText(p.token || '');
+        const protoId = safePortalText(p.id || '');
         const items = typeof p.linesCount === 'number' ? p.linesCount : (p.lines?.length || 0);
         const retail = safePortalText(p.retailTotal || '$0.00');
         const shareUrl = `/apps/protocols/${token}`;
         const handoutUrl = `/apps/protocols/${token}?handout=1`;
 
         return `
-        <div class="portal-card">
+        <div class="portal-card" data-protocol-id="${protoId}">
           <div>
             <h3 class="portal-card-title">${title}</h3>
             <div class="portal-card-meta">
@@ -1003,11 +1199,20 @@ export function renderPortalLiquid(options = {}) {
           <div class="portal-card-actions">
             <a href="${shareUrl}" class="portal-btn portal-btn-secondary" style="font-size: 0.8125rem; padding: 0.375rem 0.75rem;">Copy Link</a>
             <a href="${handoutUrl}" target="_blank" rel="noopener" class="portal-btn portal-btn-secondary" style="font-size: 0.8125rem; padding: 0.375rem 0.75rem;">Print Handout</a>
+            ${!isStarter ? `<button type="button" class="portal-btn portal-btn-secondary portal-edit-btn" data-protocol-id="${protoId}" style="font-size: 0.8125rem; padding: 0.375rem 0.75rem;">Edit</button>` : ''}
           </div>
         </div>`;
       }).join('\n')}
     </div>`;
   };
+
+  const protocolsJson = JSON.stringify([...activeProtocols, ...starterProtocols])
+    .replace(/</g, '\\u003c')
+    .replace(/\{\{/g, '\\u007b\\u007b')
+    .replace(/\}\}/g, '\\u007d\\u007d')
+    .replace(/\{%/g, '\\u007b\\u0025')
+    .replace(/%\}/g, '\\u0025\\u007d')
+    .replace(/%/g, '\\u0025');
 
   return `${robotsMeta}${styles}
 <div class="portal-container">
@@ -1018,25 +1223,409 @@ export function renderPortalLiquid(options = {}) {
       <p class="portal-subtitle">Create and share curated product recommendation lists with your clients.</p>
     </div>
     <div>
-      <button type="button" class="portal-btn portal-btn-primary" onclick="alert('Protocol editor')">Create Protocol</button>
+      <button type="button" class="portal-btn portal-btn-primary" id="open-create-protocol-btn">Create Protocol</button>
     </div>
   </header>
 
   <section>
     <h2 class="portal-section-heading">My Active Protocols (${activeProtocols.length})</h2>
-    ${renderCards(activeProtocols)}
+    ${renderCards(activeProtocols, false)}
   </section>
 
   ${starterProtocols.length > 0 ? `
   <section>
     <h2 class="portal-section-heading">Brand Starter Templates (${starterProtocols.length})</h2>
-    ${renderCards(starterProtocols)}
+    ${renderCards(starterProtocols, true)}
   </section>` : ''}
 
   ${archivedProtocols.length > 0 ? `
   <section>
     <h2 class="portal-section-heading">Archived Protocols (${archivedProtocols.length})</h2>
-    ${renderCards(archivedProtocols)}
+    ${renderCards(archivedProtocols, false)}
   </section>` : ''}
-</div>`;
+</div>
+
+<!-- Protocol Editor Modal -->
+<div class="portal-modal-backdrop" id="protocol-editor-modal" role="dialog" aria-modal="true" aria-labelledby="protocol-modal-title">
+  <div class="portal-modal">
+    <div class="portal-modal-header">
+      <h2 class="portal-modal-title" id="protocol-modal-title">Create Protocol</h2>
+      <button type="button" class="portal-modal-close" id="protocol-editor-close" aria-label="Close">&times;</button>
+    </div>
+    <div class="portal-modal-body">
+      <div id="protocol-editor-error" class="portal-editor-error" style="display:none;" role="alert"></div>
+
+      <div class="portal-form-group">
+        <label class="portal-form-label" for="protocol-name-input">Protocol Name * (Max 60 chars)</label>
+        <input type="text" id="protocol-name-input" class="portal-form-input" maxlength="60" placeholder="e.g. Daily Essentials Protocol" required>
+      </div>
+
+      <div class="portal-form-group">
+        <label class="portal-form-label" for="protocol-intro-input">Intro Note / Client Message (Optional, Max 500 chars)</label>
+        <textarea id="protocol-intro-input" class="portal-form-textarea" maxlength="500" rows="3" placeholder="Instructions or guidance for your client..."></textarea>
+      </div>
+
+      <div class="portal-form-group">
+        <label class="portal-form-label" for="product-search-input">Search & Add Products</label>
+        <div class="portal-search-box">
+          <input type="text" id="product-search-input" class="portal-form-input" placeholder="Search catalog by product name...">
+          <button type="button" id="product-search-btn" class="portal-btn portal-btn-secondary">Search</button>
+          <div id="product-search-dropdown" class="portal-search-dropdown" style="display:none;"></div>
+        </div>
+      </div>
+
+      <div class="portal-form-group">
+        <label class="portal-form-label">Recommended Products (1 - 20 items)</label>
+        <div id="protocol-selected-lines" class="portal-selected-lines">
+          <p id="protocol-empty-lines-msg" style="color: #6b7280; font-size: 0.875rem; font-style: italic; margin: 0.5rem 0;">No products added yet. Use the search above to add products.</p>
+        </div>
+      </div>
+    </div>
+    <div class="portal-modal-footer">
+      <div id="protocol-editor-summary" style="font-size: 0.875rem; color: #4b5563; font-weight: 500;">
+        <span id="protocol-editor-count">0 / 20 items</span> &middot; <span id="protocol-editor-total">$0.00</span>
+      </div>
+      <div style="display: flex; gap: 0.5rem;">
+        <button type="button" class="portal-btn portal-btn-secondary" id="protocol-editor-cancel-btn">Cancel</button>
+        <button type="button" class="portal-btn portal-btn-primary" id="protocol-save-btn">Save Protocol</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script type="application/json" id="portal-protocols-data">
+${protocolsJson}
+</script>
+
+<script>
+(function() {
+  var protocolsDataEl = document.getElementById('portal-protocols-data');
+  var existingProtocols = protocolsDataEl ? JSON.parse(protocolsDataEl.textContent || '[]') : [];
+
+  var modal = document.getElementById('protocol-editor-modal');
+  var modalTitle = document.getElementById('protocol-modal-title');
+  var nameInput = document.getElementById('protocol-name-input');
+  var introInput = document.getElementById('protocol-intro-input');
+  var searchInput = document.getElementById('product-search-input');
+  var searchBtn = document.getElementById('product-search-btn');
+  var searchDropdown = document.getElementById('product-search-dropdown');
+  var linesContainer = document.getElementById('protocol-selected-lines');
+  var emptyMsg = document.getElementById('protocol-empty-lines-msg');
+  var countEl = document.getElementById('protocol-editor-count');
+  var totalEl = document.getElementById('protocol-editor-total');
+  var saveBtn = document.getElementById('protocol-save-btn');
+  var errorBox = document.getElementById('protocol-editor-error');
+
+  var currentEditingProtocolId = null;
+  var selectedLines = [];
+
+  function showError(msg) {
+    if (!errorBox) return;
+    errorBox.textContent = msg;
+    errorBox.style.display = 'block';
+  }
+
+  function clearError() {
+    if (!errorBox) return;
+    errorBox.textContent = '';
+    errorBox.style.display = 'none';
+  }
+
+  function openEditor(proto) {
+    clearError();
+    currentEditingProtocolId = proto ? (proto.id || null) : null;
+    modalTitle.textContent = proto ? 'Edit Protocol' : 'Create Protocol';
+    nameInput.value = proto ? (proto.name || '') : '';
+    introInput.value = proto ? (proto.introNote || '') : '';
+    searchInput.value = '';
+    searchDropdown.style.display = 'none';
+    searchDropdown.innerHTML = '';
+
+    selectedLines = [];
+    if (proto && Array.isArray(proto.lines)) {
+      selectedLines = proto.lines.map(function(l) {
+        return {
+          variantGid: l.variantGid,
+          title: l.title || l.productTitle || 'Product',
+          price: parseFloat(l.price || '0') || 0,
+          quantity: l.quantity || 1,
+          usageNote: l.usageNote || ''
+        };
+      });
+    }
+
+    renderSelectedLines();
+    modal.classList.add('is-active');
+  }
+
+  function closeEditor() {
+    modal.classList.remove('is-active');
+    clearError();
+  }
+
+  function renderSelectedLines() {
+    if (selectedLines.length === 0) {
+      linesContainer.innerHTML = '';
+      if (emptyMsg) {
+        linesContainer.appendChild(emptyMsg);
+        emptyMsg.style.display = 'block';
+      }
+    } else {
+      linesContainer.innerHTML = '';
+      selectedLines.forEach(function(line, idx) {
+        var card = document.createElement('div');
+        card.className = 'portal-line-item';
+        card.setAttribute('data-variant-gid', line.variantGid);
+
+        card.innerHTML = 
+          '<div class="portal-line-header">' +
+            '<span class="portal-line-title">' + (line.title || 'Product') + ' - $' + (line.price ? line.price.toFixed(2) : '0.00') + '</span>' +
+            '<button type="button" class="portal-line-remove-btn" data-index="' + idx + '" aria-label="Remove item">&times;</button>' +
+          '</div>' +
+          '<div class="portal-line-inputs">' +
+            '<div style="display:flex; align-items:center; gap:0.25rem;">' +
+              '<label style="font-size:0.75rem; color:#6b7280;">Qty:</label>' +
+              '<input type="number" min="1" max="10" value="' + (line.quantity || 1) + '" class="portal-form-input portal-line-qty" data-index="' + idx + '">' +
+            '</div>' +
+            '<input type="text" maxlength="200" value="' + (line.usageNote || '') + '" class="portal-form-input portal-line-note" data-index="' + idx + '" placeholder="Instructions (e.g. 1 with food)">' +
+          '</div>';
+
+        linesContainer.appendChild(card);
+      });
+    }
+
+    updateSummary();
+  }
+
+  function updateSummary() {
+    var count = selectedLines.length;
+    countEl.textContent = count + ' / 20 items';
+
+    var total = 0;
+    selectedLines.forEach(function(l) {
+      total += (l.price || 0) * (l.quantity || 1);
+    });
+    totalEl.textContent = '$' + total.toFixed(2);
+  }
+
+  // Open Create Protocol
+  var createBtn = document.getElementById('open-create-protocol-btn');
+  if (createBtn) {
+    createBtn.addEventListener('click', function() {
+      openEditor(null);
+    });
+  }
+
+  // Close modal handlers
+  var closeBtn = document.getElementById('protocol-editor-close');
+  if (closeBtn) closeBtn.addEventListener('click', closeEditor);
+  var cancelBtn = document.getElementById('protocol-editor-cancel-btn');
+  if (cancelBtn) cancelBtn.addEventListener('click', closeEditor);
+
+  // Edit Protocol handlers
+  var editButtons = document.querySelectorAll('.portal-edit-btn');
+  editButtons.forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      var id = btn.getAttribute('data-protocol-id');
+      var found = existingProtocols.find(function(p) { return p.id === id; });
+      openEditor(found || { id: id });
+    });
+  });
+
+  // Remove line handler
+  linesContainer.addEventListener('click', function(e) {
+    if (e.target && e.target.classList.contains('portal-line-remove-btn')) {
+      var idx = parseInt(e.target.getAttribute('data-index'), 10);
+      if (!isNaN(idx) && idx >= 0 && idx < selectedLines.length) {
+        selectedLines.splice(idx, 1);
+        renderSelectedLines();
+      }
+    }
+  });
+
+  // Quantity and Usage Note change handlers
+  linesContainer.addEventListener('input', function(e) {
+    if (!e.target) return;
+    var idx = parseInt(e.target.getAttribute('data-index'), 10);
+    if (isNaN(idx) || idx < 0 || idx >= selectedLines.length) return;
+
+    if (e.target.classList.contains('portal-line-qty')) {
+      var val = parseInt(e.target.value, 10);
+      if (val >= 1 && val <= 10) {
+        selectedLines[idx].quantity = val;
+        updateSummary();
+      }
+    } else if (e.target.classList.contains('portal-line-note')) {
+      selectedLines[idx].usageNote = e.target.value.substring(0, 200);
+    }
+  });
+
+  // Product Search handler
+  function performSearch() {
+    var query = (searchInput.value || '').trim();
+    if (!query) return;
+
+    searchBtn.disabled = true;
+    searchBtn.textContent = '...';
+
+    fetch('/apps/protocols?action=search&q=' + encodeURIComponent(query), {
+      headers: { 'Accept': 'application/json' }
+    })
+    .then(function(res) {
+      if (!res.ok) throw new Error('Search failed');
+      return res.json();
+    })
+    .then(function(data) {
+      searchBtn.disabled = false;
+      searchBtn.textContent = 'Search';
+      var products = data.products || [];
+
+      if (products.length === 0) {
+        searchDropdown.innerHTML = '<div style="padding:0.75rem; color:#6b7280; font-size:0.875rem;">No matching products found.</div>';
+        searchDropdown.style.display = 'block';
+        return;
+      }
+
+      searchDropdown.innerHTML = '';
+      products.forEach(function(prod) {
+        (prod.variants || []).forEach(function(v) {
+          var item = document.createElement('div');
+          item.className = 'portal-search-item';
+          item.innerHTML = 
+            '<div>' +
+              '<div class="portal-search-item-title">' + (v.displayTitle || prod.title) + '</div>' +
+              '<div class="portal-search-item-meta">' + (v.priceFormatted || ('$' + v.price)) + '</div>' +
+            '</div>' +
+            '<button type="button" class="portal-btn portal-btn-secondary" style="font-size:0.75rem; padding:0.25rem 0.5rem;">+ Add</button>';
+
+          item.addEventListener('click', function() {
+            addVariant(v, prod.title);
+          });
+
+          searchDropdown.appendChild(item);
+        });
+      });
+
+      searchDropdown.style.display = 'block';
+    })
+    .catch(function(err) {
+      searchBtn.disabled = false;
+      searchBtn.textContent = 'Search';
+      console.error('[Protocol Portal] Search error:', err);
+    });
+  }
+
+  if (searchBtn) searchBtn.addEventListener('click', performSearch);
+  if (searchInput) {
+    searchInput.addEventListener('keydown', function(e) {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        performSearch();
+      }
+    });
+  }
+
+  function addVariant(v, prodTitle) {
+    clearError();
+    if (selectedLines.length >= 20) {
+      showError('A protocol cannot exceed 20 product lines.');
+      return;
+    }
+    var exists = selectedLines.some(function(l) { return l.variantGid === v.id; });
+    if (exists) {
+      showError('This variant is already in the protocol.');
+      return;
+    }
+
+    selectedLines.push({
+      variantGid: v.id,
+      title: v.displayTitle || prodTitle,
+      price: parseFloat(v.price || '0') || 0,
+      quantity: 1,
+      usageNote: ''
+    });
+
+    searchDropdown.style.display = 'none';
+    searchInput.value = '';
+    renderSelectedLines();
+  }
+
+  // Save Protocol handler
+  if (saveBtn) {
+    saveBtn.addEventListener('click', function() {
+      clearError();
+      var name = (nameInput.value || '').trim();
+      var intro = (introInput.value || '').trim();
+
+      if (!name) {
+        showError('Protocol name is required.');
+        nameInput.focus();
+        return;
+      }
+      if (name.length > 60) {
+        showError('Protocol name cannot exceed 60 characters.');
+        return;
+      }
+      if (intro.length > 500) {
+        showError('Intro note cannot exceed 500 characters.');
+        return;
+      }
+      if (selectedLines.length === 0) {
+        showError('Please add at least one product line to the protocol.');
+        return;
+      }
+      if (selectedLines.length > 20) {
+        showError('A protocol cannot exceed 20 product lines.');
+        return;
+      }
+
+      var payload = {
+        name: name,
+        introNote: intro,
+        lines: selectedLines.map(function(l) {
+          return {
+            variantGid: l.variantGid,
+            quantity: l.quantity || 1,
+            usageNote: (l.usageNote || '').trim()
+          };
+        })
+      };
+
+      saveBtn.disabled = true;
+      saveBtn.textContent = 'Saving...';
+
+      var endpoint = '/apps/protocols';
+      var method = currentEditingProtocolId ? 'PUT' : 'POST';
+      var url = currentEditingProtocolId ? (endpoint + '?action=update&id=' + encodeURIComponent(currentEditingProtocolId)) : (endpoint + '?action=create');
+
+      fetch(url, {
+        method: method,
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
+        body: JSON.stringify(payload)
+      })
+      .then(function(res) {
+        return res.json().catch(function() { return null; }).then(function(data) {
+          if (!res.ok) {
+            var msg = (data && (data.error || data.message)) || ('Save failed (' + res.status + ')');
+            throw new Error(msg);
+          }
+          return data;
+        });
+      })
+      .then(function() {
+        closeEditor();
+        window.location.reload();
+      })
+      .catch(function(err) {
+        saveBtn.disabled = false;
+        saveBtn.textContent = 'Save Protocol';
+        showError(err.message || 'Unable to save protocol. Please try again.');
+      });
+    });
+  }
+})();
+</script>`;
 }

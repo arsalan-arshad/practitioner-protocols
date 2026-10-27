@@ -317,12 +317,185 @@ export function enrichProtocolLines(lines = [], catalogMap = new Map(), options 
 }
 
 /**
+ * Constructs the GraphQL query for searching products in the catalog.
+ *
+ * @param {{ country?: string, language?: string }} [options]
+ * @returns {{ query: string }}
+ */
+export function buildProductSearchQuery(options = {}) {
+  const { country, language } = options;
+  const hasContext = Boolean(country || language);
+
+  let queryHeader = 'query SearchProducts($query: String!, $first: Int!';
+  let contextDirective = '';
+
+  if (hasContext) {
+    if (country) queryHeader += ', $country: CountryCode';
+    if (language) queryHeader += ', $language: LanguageCode';
+    queryHeader += ')';
+
+    const contextArgs = [];
+    if (country) contextArgs.push('country: $country');
+    if (language) contextArgs.push('language: $language');
+    contextDirective = ` @inContext(${contextArgs.join(', ')})`;
+  } else {
+    queryHeader += ')';
+  }
+
+  const query = `${queryHeader}${contextDirective} {
+  products(first: $first, query: $query) {
+    edges {
+      node {
+        id
+        title
+        handle
+        featuredImage {
+          url
+          altText
+        }
+        variants(first: 20) {
+          edges {
+            node {
+              id
+              title
+              availableForSale
+              price {
+                amount
+                currencyCode
+              }
+              image {
+                url
+                altText
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}`;
+
+  return { query };
+}
+
+/**
+ * Parses GraphQL Storefront product search edges into clean product and variant representations.
+ *
+ * @param {Array<any>} productEdges
+ * @returns {Array<{
+ *   id: string,
+ *   productId: string,
+ *   title: string,
+ *   handle: string,
+ *   imageUrl: string | null,
+ *   variants: Array<{
+ *     id: string,
+ *     variantId: string,
+ *     title: string | null,
+ *     displayTitle: string,
+ *     price: string,
+ *     priceFormatted: string,
+ *     currency: string,
+ *     availableForSale: boolean,
+ *     imageUrl: string | null
+ *   }>
+ * }>}
+ */
+export function parseProductSearchNodes(productEdges = []) {
+  if (!Array.isArray(productEdges)) return [];
+
+  const products = [];
+
+  for (const edge of productEdges) {
+    const node = edge?.node || edge;
+    if (!node || !node.id) continue;
+
+    const productId = extractNumericId(node.id);
+    const productTitle = node.title || 'Product';
+    const handle = node.handle || '';
+    const featuredImageUrl = node.featuredImage?.url || null;
+
+    const variantEdges = node.variants?.edges || (Array.isArray(node.variants) ? node.variants : []);
+    const variants = [];
+
+    for (const vEdge of variantEdges) {
+      const vNode = vEdge?.node || vEdge;
+      if (!vNode || !vNode.id) continue;
+
+      const variantGid = vNode.id;
+      const variantId = extractNumericId(variantGid);
+      const isDefault = !vNode.title || vNode.title.trim().toLowerCase() === 'default title';
+      const variantTitle = isDefault ? null : vNode.title.trim();
+      const displayTitle = variantTitle ? `${productTitle} - ${variantTitle}` : productTitle;
+      const amount = vNode.price?.amount || '0.00';
+      const currency = vNode.price?.currencyCode || 'USD';
+
+      variants.push({
+        id: variantGid,
+        variantId,
+        title: variantTitle,
+        displayTitle,
+        price: amount,
+        priceFormatted: formatPrice(amount, currency),
+        currency,
+        availableForSale: Boolean(vNode.availableForSale),
+        imageUrl: vNode.image?.url || featuredImageUrl,
+      });
+    }
+
+    products.push({
+      id: node.id,
+      productId,
+      title: productTitle,
+      handle,
+      imageUrl: featuredImageUrl,
+      variants,
+    });
+  }
+
+  return products;
+}
+
+/**
+ * Searches the catalog for sellable products matching the query.
+ *
+ * @param {string} shop
+ * @param {string} queryStr
+ * @param {Record<string, any>} [options]
+ * @returns {Promise<Array<any>>}
+ */
+export async function searchCatalogProducts(shop, queryStr, options = {}) {
+  const q = String(queryStr || '').trim();
+  if (!q) return [];
+
+  const first = Number.isInteger(options.first) && options.first >= 1 && options.first <= 50 ? options.first : 10;
+  const { query } = buildProductSearchQuery(options);
+  const variables = { query: q, first };
+  if (options.country) variables.country = options.country;
+  if (options.language) variables.language = options.language;
+
+  let data = null;
+  if (typeof options.graphqlExecutor === 'function') {
+    data = await options.graphqlExecutor(query, variables);
+  } else if (typeof options.fetchStorefront === 'function') {
+    data = await options.fetchStorefront(shop, query, variables);
+  }
+
+  const edges = data?.products?.edges || data?.data?.products?.edges || [];
+  return parseProductSearchNodes(edges);
+}
+
+/**
  * Test helper factory for creating a fake variant resolver.
  *
  * @param {Record<string, Partial<any>>} [fixtures={}] - Seed data keyed by variantGid
- * @returns {{ resolveVariants: (shop: string, variantGids: string[]) => Promise<Map<string, any>> }}
+ * @param {Array<any>} [productFixtures=[]] - Seed product search fixtures
+ * @returns {{
+ *   resolveVariants: (shop: string, variantGids: string[]) => Promise<Map<string, any>>,
+ *   searchProducts: (shop: string, query?: string) => Promise<Array<any>>
+ * }}
  */
-export function createFakeVariantResolver(fixtures = {}) {
+export function createFakeVariantResolver(fixtures = {}, productFixtures = []) {
   return {
     async resolveVariants(shop, variantGids = []) {
       const rawNodes = variantGids.map((gid) => {
@@ -347,6 +520,18 @@ export function createFakeVariantResolver(fixtures = {}) {
       });
 
       return parseCatalogNodes(variantGids, rawNodes);
+    },
+
+    async searchProducts(shop, query = '') {
+      const q = String(query || '').toLowerCase().trim();
+      if (!q) return [];
+      return productFixtures.filter((p) => {
+        const matchTitle = (p.title || '').toLowerCase().includes(q);
+        const matchVariants = (p.variants || []).some((v) =>
+          (v.displayTitle || v.title || '').toLowerCase().includes(q)
+        );
+        return matchTitle || matchVariants;
+      });
     },
   };
 }

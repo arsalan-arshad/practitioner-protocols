@@ -26,7 +26,7 @@ The idea grew out of a client request. The owner decided to build their **own, g
 - **D1 — Practitioner surface:** customer-account extension vs app-proxy portal. **Decided:** App-proxy portal is the universal baseline across all Shopify plans (Basic to Plus). Customer-account extension deferred as an optional Plus-specific enhancement.
 - **D2 — Data store:** Postgres via Prisma (simplest, atomic edits, easy reporting, matches existing hosting; schema and migrations verified in Session 9) vs metaobjects.
 - **D3 — Client page rendering:** App Proxy Liquid page (Liquid evaluation and delimiter neutralization confirmed in Session 12; `noindex` and `sitemap.xml` exclusion pending dev store verification) vs a metaobject theme template.
-- **D4 — Attribution carrier:** hidden line-item property (`_protocol_token`) vs cart attribute. **Verified on Live Orders:** Dev store orders #1016 (guest) and #1017 (signed-in B2B company contact) confirmed line-item properties (`_protocol_token`, `_protocol_id`, `_protocol_usage`) reached completed order, visible in Admin, and hidden on Cart, Drawer, Checkout, and Order Status. Raw `orders/paid` webhook JSON payload inspection remains open.
+- **D4 — Attribution carrier:** hidden line-item property (`_protocol_token`) vs cart attribute. **Verified on Live Orders:** Dev store orders #1016 (guest) and #1017 (signed-in B2B company contact) confirmed line-item properties (`_protocol_token`, `_protocol_id`, `_protocol_usage`) reached completed order, visible in Admin, and directly verified hidden from shoppers on Dawn cart, drawer, checkout, and customer account order details. Raw `orders/paid` webhook JSON payload inspection remains open; second theme unchecked.
 - **D5 — Public name** and listing category; avoid "Shopify" in the name.
 - **D6 — Practice naming control:** admin-set only (recommended) vs practitioner-set with approval.
 
@@ -577,12 +577,31 @@ Run the five spikes in a day or two on a dev store; write the answers into secti
      - **Over-stock Single Line:** Requesting 9999 units of "Oxygen" (22 units in stock) returns HTTP 422: `{"status":422,"message":"Only 22 items were added to your cart due to availability."}` and partially adds the available 22 units to cart.
      - **Over-stock with B2B Quantity Rule:** Requesting 9999 units of "Liquid" (min 2, increment 2, 36 units in stock) returns HTTP 422 and partially adds 36 units (exact multiple of 2).
   2. **Spike S3 — Signed-in B2B Company Contact Order #1017:**
-     - Contact `arsalanarshad.dev+b2b@gmail.com` under company "Snowdevil" checked out 2 units of Liquid with hidden attribution properties (`_protocol_token: "tok_test_b2b_s3"`, `_protocol_id: "proto_test_b2b_123"`, `_protocol_usage: "Take 2 daily"`).
-     - Bogus gateway checkout completed successfully: **Order #1017** (Confirmation `#WRU5LLI8Z`, Order ID `18962727993397`, CAD $1,469.00 total).
+     - A B2B contact under company "Snowdevil" checked out 2 units of Liquid with hidden attribution properties (`_protocol_token: "tok_test_b2b_s3"`, `_protocol_id: "proto_test_b2b_123"`, `_protocol_usage: "Take 2 daily"`).
+     - Bogus gateway checkout completed successfully: **Order #1017** (Confirmation `#WRU5LLI8Z`, CAD $1,469.00 total).
      - Line item properties survived intact into order without leakage.
-     - Hidden properties remained 100% hidden on Cart, Drawer, Checkout, and New Customer Accounts order details page (`/account/orders/18962727993397`).
+     - Hidden properties remained hidden on Cart, Drawer, Checkout, and New Customer Accounts order details page.
 - **Release Tagging:**
   - Annotated git tag `v0.1.0` created on `07c8d86` following completion of M8 release readiness.
 - **Verification Status:**
   - `npm test`: **337/337 pure unit tests passing** (88 suites, 0 failures, ~99ms).
   - Spikes S1, S4, and S5 fully resolved and closed; S3 verified across both guest and signed-in B2B orders.
+
+## 35. Session Log — 2026-10-29 (Session 25: Empirical Verification of Property Hiding across Storefront Surfaces)
+- **Context:** Owner directly verified shopper-facing visibility of the `_protocol_*` hidden line-item properties (`_protocol_token`, `_protocol_id`, `_protocol_usage`) across storefront surfaces for both guest and signed-in B2B contact (Order #1017) on dev store `ai-agent-app-h9qwnwd8.myshopify.com` using Dawn theme.
+- **Empirical Findings Recorded:**
+  1. **Shopper Surface Property Filtering:**
+     - **Cart page (guest):** Hidden (not displayed).
+     - **Cart drawer and add-to-cart popup (guest):** Hidden (not displayed).
+     - **Checkout order summary (guest):** Hidden (not displayed).
+     - **Customer-account order page for #1017 (B2B contact):** Hidden (not displayed; shows CA$713.00 unit price, CA$1,469.00 total, company and location).
+     - **`/cart.js` and Storefront AJAX API:** Present in JSON (expected behavior; accessible via browser DevTools).
+     - **Shopify Admin order page:** Present and visible to merchant/staff (expected).
+  2. **Control Property Check:**
+     - A standard visible property (`Note`) was included and successfully displayed on the cart page, cart drawer, and checkout order summary.
+     - Consistent with underscore-prefixed properties being hidden by Dawn and by checkout, rather than dropping custom line item properties altogether.
+  3. **Scope & Architectural Boundaries:**
+     - Verified specifically for guest and B2B contact on Dawn theme (`test-data`). A second theme remains unchecked.
+     - **Zero-PII Validation:** Because `/cart.js` exposes raw properties to browser DevTools, our architectural rule strictly forbidding customer PII or health diagnostic data in line-item properties is reaffirmed as critical.
+     - **Market Sticky Session:** Markets adhere to browser session/cookies (guest cart remained priced in CAD following B2B session). Reaffirms our attribution engine rule that revenue must strictly be read from the order's actual currency and line item amounts, never assumed from storefront display prices.
+- **Status:** Spike S3 property persistence and shopper hiding verified on Dawn theme for guest and B2B contact. S3 raw `orders/paid` webhook payload inspection remains the sole open item for S3.

@@ -150,10 +150,11 @@ Companion to `docs/SPEC.md` §4 and `docs/BUILD_PLAN.md` M0. Run these on a Part
 | Hidden in emails / order status | Hidden (Order #1016) | Open | Hidden (Order #1017) |
 | Visible in theme cart (theme 1 / 2) | Hidden in Dawn (theme 1) | Open | Hidden in Dawn (theme 1) |
 
-**Empirical check completed (2026-10-27 & 2026-10-28):**
-1. **Guest Order #1016** (Confirmation `#0MTYEIIHI`, Bogus gateway) on dev store `ai-agent-app-h9qwnwd8.myshopify.com`: Confirmed `_protocol_token`, `_protocol_id`, and `_protocol_usage` survived into order line items. In Shopify Admin order view, merchant visibly sees all properties. Properties are 100% hidden on Cart, Drawer, Checkout, and Order Status page. GraphQL order query verified `"visible": false` on line item properties.
-2. **Signed-in B2B Order #1017** (Confirmation `#WRU5LLI8Z`, Bogus gateway, 2026-10-28): Confirmed B2B contact order under company "Snowdevil" (CAD $1,469.00) carried hidden properties `_protocol_token`, `_protocol_id`, and `_protocol_usage` on Liquid line items without leakage. Properties remained 100% hidden on Cart, Checkout, and New Customer Accounts order details page (`/account/orders/18962727993397`).
-**Status:** S3 property persistence verified for both signed-out shoppers and signed-in B2B company contacts. **OPEN:** Capturing the raw `orders/paid` webhook JSON payload.
+**Empirical check completed (2026-10-27 through 2026-10-29):**
+1. **Guest Order #1016** (Confirmation `#0MTYEIIHI`, Bogus gateway) on dev store `ai-agent-app-h9qwnwd8.myshopify.com`: Confirmed `_protocol_token`, `_protocol_id`, and `_protocol_usage` survived into order line items. In Shopify Admin order view, merchant visibly sees all properties. Properties are hidden on Cart, Drawer, Checkout, and Order Status page. GraphQL order query verified `"visible": false` on line item properties.
+2. **Signed-in B2B Order #1017** (Confirmation `#WRU5LLI8Z`, Bogus gateway, 2026-10-28 & 2026-10-29): Confirmed B2B contact order under company "Snowdevil" (CAD $1,469.00) carried hidden properties `_protocol_token`, `_protocol_id`, and `_protocol_usage` on Liquid line items. Directly verified hidden from shoppers across Cart page, Cart Drawer, add-to-cart popup, Checkout order summary, and New Customer Accounts order details page. Control check confirmed visible property (`Note`) showed on cart and checkout, consistent with underscore-prefixed properties being hidden by Dawn and by checkout.
+3. **Observations:** Properties are readable via `/cart.js` AJAX API in browser DevTools (reaffirming zero-PII design). Markets stick to browser session (guest cart priced in CAD after B2B session, reaffirming revenue must strictly be read from order amounts, not display prices). Scope is verified on Dawn theme (theme 1); a second theme remains open.
+**Status:** S3 property persistence and shopper hiding verified on Dawn for signed-out shoppers and signed-in B2B company contacts. **OPEN:** Capturing the raw `orders/paid` webhook JSON payload.
 
 Also record: separate-line behaviour, cart-attribute comparison, and the currency/discount field findings.
 

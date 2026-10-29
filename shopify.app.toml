@@ -1,7 +1,7 @@
 # Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
 
 client_id = "156022e3dbfc32e0eeec20bff8c07349"
-application_url = "https://example.com"
+application_url = "https://practitioner-protocols-production.up.railway.app"
 embedded = true
 name = "Practitioner Protocols"
 
@@ -10,7 +10,7 @@ name = "Practitioner Protocols"
 scopes = "read_orders"
 
 [app_proxy]
-url = "https://example.com/api/proxy"
+url = "https://practitioner-protocols-production.up.railway.app/api/proxy"
 subpath = "protocols"
 prefix = "apps"
 
@@ -35,8 +35,8 @@ api_version = "2026-01"
 
 [auth]
 redirect_urls = [
-  "https://example.com/api/auth",
-  "https://example.com/api/auth/callback"
+  "https://practitioner-protocols-production.up.railway.app/api/auth",
+  "https://practitioner-protocols-production.up.railway.app/api/auth/callback"
 ]
 
 [build]

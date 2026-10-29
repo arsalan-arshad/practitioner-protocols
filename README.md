@@ -181,8 +181,29 @@ npm run test:db
 
 > **Database Tests & Migrations Note:** `npm test` runs 337 pure unit tests across 88 suites against deterministic mock database interfaces. Real PostgreSQL coverage exists when `npm run test:db` is run against PostgreSQL running on `localhost:5432` with database `practitioner_protocols` and migrations applied. The live integration test suite verifies 10/10 tests against real PostgreSQL, including row-level locking (`FOR UPDATE`), transaction rollbacks, multi-line replacement, webhook idempotency, and GDPR compliance.
 
+### Environment Variables & Production Configuration
+
+The server supports both in-memory demo mode and persistent PostgreSQL mode. Configure the following variables in production:
+
+| Variable | Description | Default / Example |
+|---|---|---|
+| `DATABASE_URL` | PostgreSQL connection string. | `postgres://user:pass@host:5432/db` |
+| `DATABASE_SSL` | PostgreSQL SSL/TLS mode: `require` (validates certificates) or `no-verify` (opt-in skip verification). | Unset (defaults to `false` for `localhost` and `*.railway.internal`) |
+| `SHOPIFY_API_KEY` | Client ID from Shopify Partner Dashboard. | `156022e3dbfc32e0eeec20bff8c07349` |
+| `SHOPIFY_API_SECRET` | Client Secret from Shopify Partner Dashboard. Required for HMAC verification. | `shpss_...` |
+| `PORT` | HTTP server port. | `3000` |
+| `TRUSTED_PROXY_HOPS` | Number of trusted reverse-proxy hops for IP extraction. | `1` |
+| `TRUST_CF_CONNECTING_IP` | Set to `true` only when the app is directly fronted by Cloudflare. | `false` |
+
 ### Applying Migrations (PostgreSQL)
-When running against a live PostgreSQL database, apply the versioned migrations in order:
+When running against a live PostgreSQL database, apply versioned DDL migrations with ledger tracking (`_pp_migrations`):
+```bash
+# Automated migration runner (runs with ledger tracking & transaction safety):
+npm run migrate
+```
+On Railway, migrations run automatically via `preDeployCommand: "npm run migrate"` in `railway.json`.
+
+Alternatively, apply raw SQL files directly:
 ```bash
 # 1. Initial schema:
 psql $DATABASE_URL -f prisma/migrations/20261021_init/migration.sql

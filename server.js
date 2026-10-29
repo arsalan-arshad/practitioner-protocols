@@ -11,6 +11,8 @@
 import http from 'node:http';
 import crypto from 'node:crypto';
 import { URL, URLSearchParams, fileURLToPath } from 'node:url';
+import pg from 'pg';
+import { getDatabaseSslConfig } from './scripts/migrate.js';
 import { renderAdminHtml } from './app/lib/protocols/admin.js';
 import { renderPortalLiquid } from './app/lib/protocols/portal.js';
 import { renderProtocolLiquid, verifyAppProxyHmac, verifyOAuthHmac } from './app/lib/protocols/proxy.js';
@@ -688,17 +690,45 @@ export function startServer(options = {}) {
     console.warn('[SECURITY WARNING] SHOPIFY_API_SECRET is unset. Proxy and webhook verification will fail closed (HTTP 500).');
   }
 
+  const databaseUrl = (env.DATABASE_URL || '').trim();
+  let pool = options.pool || null;
+  if (!pool && databaseUrl) {
+    const PgPool = pg.Pool || pg.default?.Pool;
+    pool = new PgPool({
+      connectionString: databaseUrl,
+      max: parseInt(env.PGMAX || '10', 10),
+      ssl: getDatabaseSslConfig(databaseUrl, env),
+    });
+    pool.on('error', (err) => {
+      console.error('Unexpected idle PostgreSQL client error:', err.message);
+    });
+  }
+
   const server = http.createServer(createRequestListener({
-    databaseUrl: '',
+    databaseUrl,
     shopifyApiSecret: env.SHOPIFY_API_SECRET || '',
+    shopifyApiKey: env.SHOPIFY_API_KEY || '',
+    pool,
   }));
 
+  server.on('close', async () => {
+    if (pool && typeof pool.end === 'function') {
+      try {
+        await pool.end();
+      } catch (err) {
+        console.error('Error closing database pool:', err.message);
+      }
+    }
+  });
+
   server.listen(port, host, () => {
-    console.log(`[Practitioner Protocols Demo Server] Running on http://${host}:${port}`);
-    console.log(`  - Merchant Admin (Demo): http://localhost:${port}/admin`);
-    console.log(`  - Practitioner Portal:   http://localhost:${port}/portal`);
-    console.log(`  - Client Protocol Page:  http://localhost:${port}/protocol/demo`);
-    console.log(`  - Printable Handout:     http://localhost:${port}/handout/demo`);
+    const mode = databaseUrl ? 'Production (Postgres)' : 'Demo (In-Memory)';
+    console.log(`[Practitioner Protocols Server] Running in ${mode} on http://${host}:${port}`);
+    console.log(`  - Healthcheck:           http://${host}:${port}/health`);
+    console.log(`  - Merchant Admin:        http://${host}:${port}/admin`);
+    console.log(`  - Practitioner Portal:   http://${host}:${port}/portal`);
+    console.log(`  - Client Protocol Page:  http://${host}:${port}/protocol/demo`);
+    console.log(`  - Printable Handout:     http://${host}:${port}/handout/demo`);
   });
 
   return server;

@@ -5,11 +5,13 @@ import { join } from 'node:path';
 import {
   validateServerConfig,
   createRequestListener,
+  startServer,
   SHOPIFY_DOMAIN_REGEX,
   DEMO_PROFILES,
   DEMO_SETTINGS,
   DEMO_PROTOCOL,
 } from '../server.js';
+import { runMigrations, getDatabaseSslConfig, MIGRATION_FILES } from '../scripts/migrate.js';
 import { calculateOAuthSignature } from '../app/lib/protocols/proxy.js';
 
 // Minimal mock request and response helpers for testing HTTP request listeners in-memory
@@ -404,6 +406,205 @@ describe('Server & Configuration Hardening (server.js, shopify.app.toml, README.
       assert.ok(tomlContent.includes('scopes = "read_orders"'));
       assert.equal(tomlContent.includes('write_products'), false);
       assert.equal(tomlContent.includes('write_metaobjects'), false);
+    });
+
+    it('registers both /api/auth and /api/auth/callback in redirect_urls', () => {
+      assert.ok(tomlContent.includes('redirect_urls = ['));
+      assert.ok(tomlContent.includes('/api/auth"'));
+      assert.ok(tomlContent.includes('/api/auth/callback"'));
+    });
+  });
+
+  describe('TLS & SSL Configuration (getDatabaseSslConfig)', () => {
+    it('returns false for empty or missing databaseUrl', () => {
+      assert.equal(getDatabaseSslConfig(''), false);
+      assert.equal(getDatabaseSslConfig(null), false);
+    });
+
+    it('returns false for localhost and 127.0.0.1 by parsing URL hostname', () => {
+      assert.equal(getDatabaseSslConfig('postgres://user:pass@localhost:5432/db'), false);
+      assert.equal(getDatabaseSslConfig('postgres://user:pass@127.0.0.1:5432/db'), false);
+    });
+
+    it('returns false for Railway private networking (*.railway.internal)', () => {
+      assert.equal(
+        getDatabaseSslConfig('postgres://postgres:secret@postgres.railway.internal:5432/railway'),
+        false
+      );
+      assert.equal(
+        getDatabaseSslConfig('postgres://user:pass@service.subdomain.railway.internal:5432/db'),
+        false
+      );
+    });
+
+    it('returns false for public host when DATABASE_SSL is not specified', () => {
+      assert.equal(
+        getDatabaseSslConfig('postgres://user:pass@containers-us-west-1.railway.app:5432/railway', {}),
+        false
+      );
+    });
+
+    it('returns rejectUnauthorized: true when DATABASE_SSL=require or true', () => {
+      const configReq = getDatabaseSslConfig(
+        'postgres://user:pass@containers-us-west-1.railway.app:5432/railway',
+        { DATABASE_SSL: 'require' }
+      );
+      assert.deepEqual(configReq, { rejectUnauthorized: true });
+
+      const configTrue = getDatabaseSslConfig(
+        'postgres://user:pass@containers-us-west-1.railway.app:5432/railway',
+        { DATABASE_SSL: 'true' }
+      );
+      assert.deepEqual(configTrue, { rejectUnauthorized: true });
+    });
+
+    it('returns rejectUnauthorized: false when DATABASE_SSL=no-verify (explicit opt-in)', () => {
+      const config = getDatabaseSslConfig(
+        'postgres://user:pass@containers-us-west-1.railway.app:5432/railway',
+        { DATABASE_SSL: 'no-verify' }
+      );
+      assert.deepEqual(config, { rejectUnauthorized: false });
+    });
+
+    it('does not falsely match localhost if password contains localhost', () => {
+      // Hostname parser should check parsed.hostname, not substring
+      const config = getDatabaseSslConfig(
+        'postgres://user:my_localhost_password@containers-us-west-1.railway.app:5432/railway',
+        { DATABASE_SSL: 'require' }
+      );
+      assert.deepEqual(config, { rejectUnauthorized: true });
+    });
+  });
+
+  describe('Database Migration Runner (scripts/migrate.js)', () => {
+    it('throws when DATABASE_URL is not set and no client is passed', async () => {
+      await assert.rejects(
+        () => runMigrations({ databaseUrl: '' }),
+        /DATABASE_URL is required to run database migrations/
+      );
+    });
+
+    it('creates _pp_migrations ledger table and applies migrations inside transactions', async () => {
+      const executedQueries = [];
+      const ledgerRows = [];
+
+      const mockClient = {
+        async query(sql, params) {
+          executedQueries.push({ sql, params });
+          if (typeof sql === 'string' && sql.includes('SELECT "id" FROM "_pp_migrations"')) {
+            return { rows: [...ledgerRows] };
+          }
+          if (typeof sql === 'string' && sql.includes('INSERT INTO "_pp_migrations"')) {
+            ledgerRows.push({ id: params[0] });
+            return { rows: [] };
+          }
+          return { rows: [] };
+        },
+      };
+
+      const result = await runMigrations({ client: mockClient });
+      assert.equal(result.applied, MIGRATION_FILES.length);
+      assert.equal(result.skipped, 0);
+
+      // Verify ledger table was created
+      assert.ok(executedQueries.some(q => q.sql.includes('CREATE TABLE IF NOT EXISTS "_pp_migrations"')));
+
+      // Verify BEGIN and COMMIT were executed for each migration
+      const begins = executedQueries.filter(q => q.sql === 'BEGIN');
+      const commits = executedQueries.filter(q => q.sql === 'COMMIT');
+      assert.equal(begins.length, MIGRATION_FILES.length);
+      assert.equal(commits.length, MIGRATION_FILES.length);
+    });
+
+    it('skips already applied migrations on second run (ledger idempotency)', async () => {
+      const ledgerRows = [];
+      const executedMigrations = [];
+
+      const statefulClient = {
+        async query(sql, params) {
+          if (typeof sql === 'string' && sql.includes('SELECT "id" FROM "_pp_migrations"')) {
+            return { rows: [...ledgerRows] };
+          }
+          if (typeof sql === 'string' && sql.includes('INSERT INTO "_pp_migrations"')) {
+            ledgerRows.push({ id: params[0] });
+            return { rows: [] };
+          }
+          if (typeof sql === 'string' && (sql.includes('CREATE TABLE "Protocol"') || sql.includes('ProcessedWebhook'))) {
+            executedMigrations.push(sql);
+          }
+          return { rows: [] };
+        },
+      };
+
+      // Run 1: applies all migrations
+      const run1 = await runMigrations({ client: statefulClient });
+      assert.equal(run1.applied, MIGRATION_FILES.length);
+      assert.equal(run1.skipped, 0);
+      assert.equal(executedMigrations.length, MIGRATION_FILES.length);
+
+      // Run 2: skips all previously applied migrations
+      const run2 = await runMigrations({ client: statefulClient });
+      assert.equal(run2.applied, 0, 'Second run should apply 0 migrations');
+      assert.equal(run2.skipped, MIGRATION_FILES.length, 'Second run should skip all migrations');
+      assert.equal(executedMigrations.length, MIGRATION_FILES.length, 'No new SQL should be executed on second run');
+    });
+
+    it('rolls back transaction on SQL execution error', async () => {
+      const executedQueries = [];
+      const failingClient = {
+        async query(sql) {
+          executedQueries.push(sql);
+          if (typeof sql === 'string' && sql.includes('SELECT "id" FROM "_pp_migrations"')) {
+            return { rows: [] };
+          }
+          if (typeof sql === 'string' && sql.includes('CREATE TABLE "Protocol"')) {
+            throw new Error('Simulated DDL syntax error');
+          }
+          return { rows: [] };
+        },
+      };
+
+      await assert.rejects(
+        () => runMigrations({ client: failingClient }),
+        /Simulated DDL syntax error/
+      );
+
+      assert.ok(executedQueries.includes('BEGIN'));
+      assert.ok(executedQueries.includes('ROLLBACK'));
+    });
+  });
+
+  describe('railway.json Configuration', () => {
+    it('configures preDeployCommand to run npm run migrate', () => {
+      const railwayContent = readFileSync(join(process.cwd(), 'railway.json'), 'utf-8');
+      const config = JSON.parse(railwayContent);
+      assert.equal(config.deploy?.preDeployCommand, 'npm run migrate');
+      assert.equal(config.deploy?.startCommand, 'node server.js');
+      assert.equal(config.deploy?.healthcheckPath, '/health');
+    });
+  });
+
+  describe('startServer Database Pool Wiring', () => {
+    it('instantiates and closes database pool with graceful shutdown', async () => {
+      let poolClosed = false;
+      const mockPool = {
+        async query() { return { rows: [] }; },
+        async end() { poolClosed = true; },
+      };
+
+      const server = startServer({
+        port: 0,
+        host: '127.0.0.1',
+        pool: mockPool,
+        env: {
+          DATABASE_URL: 'postgres://test:test@localhost:5432/testdb',
+          SHOPIFY_API_SECRET: 'test_secret_123',
+        },
+      });
+
+      assert.ok(server);
+      await new Promise((resolve) => server.close(resolve));
+      assert.equal(poolClosed, true, 'Pool should be closed when server closes');
     });
   });
 

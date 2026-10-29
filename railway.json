@@ -5,6 +5,7 @@
   },
   "deploy": {
     "startCommand": "node server.js",
+    "preDeployCommand": "npm run migrate",
     "healthcheckPath": "/health",
     "healthcheckTimeout": 100,
     "restartPolicyType": "ON_FAILURE",

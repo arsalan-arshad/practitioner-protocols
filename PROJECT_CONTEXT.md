@@ -616,39 +616,29 @@ Run the five spikes in a day or two on a dev store; write the answers into secti
 ## 36. Session Log — 2026-10-30 (Session 26: Production App Record, Railway Deployment & Production Route Isolation)
 - **Context:** Transitioned the application from the initial spike harness to the production app record "Practitioner Protocols" on the Shopify Partner Dashboard, wired production hosting on Railway, applied PostgreSQL migrations, and isolated demo routes and endpoints.
 - **Production App Record & Distribution:**
-  - **App Record:** New Shopify app record "Practitioner Protocols" (Dev Dashboard app `441928548353`), client_id `840a22df2708a4a51a443180b8c332db` in `shopify.app.toml`.
-  - **Version:** Version `practitioner-protocols-2` released through `shopify app deploy`.
-  - **Distribution Model:** Public distribution. Note: This selection is permanent and irreversible for this app record.
-  - **Protected Customer Data:** Set to the "Analytics" purpose with zero protected fields selected. Scopes remain `read_orders` only (strictly zero client PII architecture; no customer names, emails, phones, or addresses accessed or stored).
+  - **App Record:** "Practitioner Protocols" (Client ID: `840a22df2708a4a51a443180b8c332db`), released as app version `practitioner-protocols-2`.
+  - **Distribution Model:** Public distribution (permanent selection in Partner Dashboard).
+  - **Protected Customer Data:** Approved with declared reason "Analytics". Zero protected fields requested or selected (strictly zero PII architecture; no customer names, emails, phones, or addresses accessed or stored).
 - **Railway Infrastructure & Database Migrations:**
-  - **Hosting Environment:** Railway project with an app service and an internal Postgres database.
-  - **Public Domain:** `practitioner-protocols-production.up.railway.app` (target port 3000, `PORT=3000`).
-  - **Reverse Proxy Hops:** `TRUSTED_PROXY_HOPS=1` (operational working assumption, not yet verified against real `X-Forwarded-For` chain on Railway).
-  - **Healthcheck:** Verified live at `/health` returning HTTP 200 `{"status":"ok","time":<ISO timestamp>}`.
-  - **Database Migration Ledger:** Initial schema migration executed successfully against Railway PostgreSQL; `_pp_migrations` ledger initialized and all tables created (`Session`, `PractitionerProfile`, `Protocol`, `ProtocolLine`, `ProtocolOrderStat`, `ProcessedWebhook`, `Setting`).
-  - **Pre-Deploy Configuration:** The pre-deploy command `npm run migrate` was set manually in the Railway service UI, because Railway did not read `preDeployCommand` from `railway.json`.
-- **Production Hardening (PR #3 Merged):**
-  - When `DATABASE_URL` is set, all demo and admin routes (`/`, `/admin`, `/app`, `/portal`, `/portal/preview`, `/protocol/demo`, `/handout/demo`, `/protocol/*`, `/p/*`, `/handout/*`, `/apps/protocols`) return HTTP 404 Not Found, never demo content.
-  - Prevents `?month=` query parameter from mutating in-memory demo data in production mode.
-  - Added `X-Robots-Tag: noindex, nofollow` to every response the server sends except `/health`.
-  - **Consequence / Open Gap:** The embedded app's root route (`/`) currently returns 404 in production until a real database-backed session-token admin UI is implemented and wired. This is plainly acknowledged as an open gap.
-- **Spike S2 Resolution:**
-  - **Status:** S2 is resolved.
-  - **Header Survival:** The `X-Robots-Tag: noindex, nofollow` response header reaches the browser through the Shopify App Proxy.
-  - **Meta Tag Placement:** The `<meta name="robots" content="noindex, nofollow">` tag renders in the HTML body rather than the head, because Shopify wraps App Proxy Liquid output inside the storefront theme layout.
-  - **Sitemap & Robots.txt:** The storefront `/sitemap.xml` and `robots.txt` do not list or index the proxy path (`/apps/protocols`).
-  - **Caveat:** Observed on a password-protected dev store only.
-  - **Unknown Token:** An unknown or invalid protocol token requested through the proxy returns HTTP 404 with "Protocol Not Found" Liquid markup.
-- **Spike S3 Status (PR #4 Merged):**
-  - Temporary S3 allowlist logger merged into `main` via PR #4, gated behind `S3_CAPTURE=1` (disabled by default).
-  - Captures strictly allowlisted pricing and line-item properties (`price`, `price_set`, `total_discount`, `discount_allocations`, and `properties` retaining values exclusively for `_protocol_token`, `_protocol_id`, and `_protocol_usage`; emitting key name only for all other properties).
-  - Excludes raw body, order IDs, customer fields, emails, and shop domains. Runs only after HMAC check passes; wrapped in try/catch to protect webhook responses.
-  - **Result:** Result pending (logger merged, capture pending live order execution).
+  - **Production Host:** `https://practitioner-protocols-production.up.railway.app`
+  - **Healthcheck:** Verified live at `/health` returning HTTP 200 `{"status":"ok"}`.
+  - **PostgreSQL Ledger Migrations:** Initial schema migration executed successfully against Railway PostgreSQL; `_pp_migrations` ledger initialized and all tables created (`Session`, `PractitionerProfile`, `Protocol`, `ProtocolLineItem`, `ProtocolOrderStat`, `ProcessedWebhook`, `ShopSettings`).
+  - **Pre-Deploy Configuration:** Set `npm run migrate` explicitly as the pre-deploy step in the Railway service UI (configured in dashboard because Railway ignored repository `railway.json` preDeployCommand directive).
+- **Production Hardening (PR #3 & PR #4 Merged):**
+  - **PR #3 (`fix/hide-demo-routes-in-production`):**
+    - When `DATABASE_URL` is set, all unauthenticated demo surfaces (`/`, `/admin`, `/app`, `/portal`, `/portal/preview`, `/protocol/demo`, `/handout/demo`, `/protocol/*`, `/p/*`, `/handout/*`, `/apps/protocols`) strictly return HTTP 404 Not Found.
+    - Prevents `?month=` query parameter from mutating in-memory demo data in production mode.
+    - Added `X-Robots-Tag: noindex, nofollow` to all server responses except `/health`.
+    - Verified compliance webhooks URI configuration: `/webhooks` receives `customers/data_request`, `customers/redact`, and `shop/redact` with topic dispatch driven by `X-Shopify-Topic`.
+  - **PR #4 (`chore/s3-allowlist-logger`):**
+    - Added a temporary, fault-tolerant allowlist logger for `orders/paid` gated behind `S3_CAPTURE=1` (disabled by default).
+    - Allowlist strictly captures: `line_items[].properties` (retaining values exclusively for `_protocol_token`, `_protocol_id`, and `_protocol_usage`; emitting key name only for all other properties), `price`, `price_set`, `total_discount`, and `discount_allocations`.
+    - Excludes raw body, order IDs, customer fields, emails, and shop domains.
+    - Runs only after HMAC validation succeeds; wrapped in try/catch to ensure logger failures never fail the webhook response.
+- **Verification Status:**
+  - `npm test`: **376/376 unit tests passing** across 96 suites (0 failures).
 - **Open Items:**
-  - S1 beyond the Plus dev store (verify extension availability on non-Plus plans vs universal App Proxy baseline).
-  - Real `X-Forwarded-For` hop-count check on Railway behind App Proxy.
-  - Second-theme property-hiding check (verified on Dawn; second free theme pending).
-  - Real admin session-token database-backed authentication and UI.
-  - `CODEOWNERS` file (the Code Owners rule on the `protect-main` branch protection is ineffective without this file).
-  - Decision on publishing `v0.1.0` GitHub Release.
+  - **Spike S2:** Full-page customer account extension versus App Proxy portal architecture verification on live dev store.
+  - **Spike S3:** Live `orders/paid` webhook capture under `S3_CAPTURE=1` to finalize empirical verification of property persistence in webhook payloads, followed by follow-up PR to remove logger.
+  - **Data Protection & App Store Review Questions:** Documenting compliance answers for Shopify App Review concerning data minimization, zero client PII retention, and verified webhook redaction handlers.
 

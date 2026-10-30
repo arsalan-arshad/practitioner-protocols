@@ -605,3 +605,33 @@ Run the five spikes in a day or two on a dev store; write the answers into secti
      - **Zero-PII Validation:** Because `/cart.js` exposes raw properties to browser DevTools, our architectural rule strictly forbidding customer PII or health diagnostic data in line-item properties is reaffirmed as critical.
      - **Market Sticky Session:** Markets adhere to browser session/cookies (guest cart remained priced in CAD following B2B session). Reaffirms our attribution engine rule that revenue must strictly be read from the order's actual currency and line item amounts, never assumed from storefront display prices.
 - **Status:** Spike S3 property persistence and shopper hiding verified on Dawn theme for guest and B2B contact. S3 raw `orders/paid` webhook payload inspection remains the sole open item for S3.
+
+## 36. Session Log — 2026-10-30 (Session 26: Production App Record, Railway Deployment & Production Route Isolation)
+- **Context:** Transitioned the application from the initial spike harness to the production app record "Practitioner Protocols" on the Shopify Partner Dashboard, wired production hosting on Railway, applied PostgreSQL migrations, and isolated demo routes and endpoints.
+- **Production App Record & Distribution:**
+  - **App Record:** "Practitioner Protocols" (Client ID: `840a22df2708a4a51a443180b8c332db`), released as app version `practitioner-protocols-2`.
+  - **Distribution Model:** Public distribution (permanent selection in Partner Dashboard).
+  - **Protected Customer Data:** Approved with declared reason "Analytics". Zero protected fields requested or selected (strictly zero PII architecture; no customer names, emails, phones, or addresses accessed or stored).
+- **Railway Infrastructure & Database Migrations:**
+  - **Production Host:** `https://practitioner-protocols-production.up.railway.app`
+  - **Healthcheck:** Verified live at `/health` returning HTTP 200 `{"status":"ok"}`.
+  - **PostgreSQL Ledger Migrations:** Initial schema migration executed successfully against Railway PostgreSQL; `_pp_migrations` ledger initialized and all tables created (`Session`, `PractitionerProfile`, `Protocol`, `ProtocolLineItem`, `ProtocolOrderStat`, `ProcessedWebhook`, `ShopSettings`).
+  - **Pre-Deploy Configuration:** Set `npm run migrate` explicitly as the pre-deploy step in the Railway service UI (configured in dashboard because Railway ignored repository `railway.json` preDeployCommand directive).
+- **Production Hardening (PR #3 & PR #4 Merged):**
+  - **PR #3 (`fix/hide-demo-routes-in-production`):**
+    - When `DATABASE_URL` is set, all unauthenticated demo surfaces (`/`, `/admin`, `/app`, `/portal`, `/portal/preview`, `/protocol/demo`, `/handout/demo`, `/protocol/*`, `/p/*`, `/handout/*`, `/apps/protocols`) strictly return HTTP 404 Not Found.
+    - Prevents `?month=` query parameter from mutating in-memory demo data in production mode.
+    - Added `X-Robots-Tag: noindex, nofollow` to all server responses except `/health`.
+    - Verified compliance webhooks URI configuration: `/webhooks` receives `customers/data_request`, `customers/redact`, and `shop/redact` with topic dispatch driven by `X-Shopify-Topic`.
+  - **PR #4 (`chore/s3-allowlist-logger`):**
+    - Added a temporary, fault-tolerant allowlist logger for `orders/paid` gated behind `S3_CAPTURE=1` (disabled by default).
+    - Allowlist strictly captures: `line_items[].properties` (retaining values exclusively for `_protocol_token`, `_protocol_id`, and `_protocol_usage`; emitting key name only for all other properties), `price`, `price_set`, `total_discount`, and `discount_allocations`.
+    - Excludes raw body, order IDs, customer fields, emails, and shop domains.
+    - Runs only after HMAC validation succeeds; wrapped in try/catch to ensure logger failures never fail the webhook response.
+- **Verification Status:**
+  - `npm test`: **376/376 unit tests passing** across 96 suites (0 failures).
+- **Open Items:**
+  - **Spike S2:** Full-page customer account extension versus App Proxy portal architecture verification on live dev store.
+  - **Spike S3:** Live `orders/paid` webhook capture under `S3_CAPTURE=1` to finalize empirical verification of property persistence in webhook payloads, followed by follow-up PR to remove logger.
+  - **Data Protection & App Store Review Questions:** Documenting compliance answers for Shopify App Review concerning data minimization, zero client PII retention, and verified webhook redaction handlers.
+

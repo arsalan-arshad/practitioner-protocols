@@ -257,9 +257,10 @@ function generateDemoAttributionCsv(month = DEMO_REPORT.month) {
  * @returns {(req: http.IncomingMessage, res: http.ServerResponse) => Promise<void>}
  */
 export function createRequestListener(options = {}) {
-  const databaseUrl = (options.databaseUrl || process.env.DATABASE_URL || '').trim();
-  const apiSecret = options.shopifyApiSecret ?? (process.env.SHOPIFY_API_SECRET || '');
-  const apiKey = options.shopifyApiKey || (process.env.SHOPIFY_API_KEY || '');
+  const env = options.env || process.env;
+  const databaseUrl = (options.databaseUrl || env.DATABASE_URL || '').trim();
+  const apiSecret = options.shopifyApiSecret ?? (env.SHOPIFY_API_SECRET || '');
+  const apiKey = options.shopifyApiKey || (env.SHOPIFY_API_KEY || '');
   const pool = options.pool || null;
   const tokenExchanger = options.tokenExchanger || null;
 
@@ -680,6 +681,7 @@ export function createRequestListener(options = {}) {
         const webReq = await toWebRequest(req);
         const webRes = await handleWebhookRequest(pool, webReq, {
           apiSecret,
+          env,
         });
 
         res.writeHead(webRes.status, Object.fromEntries(webRes.headers.entries()));

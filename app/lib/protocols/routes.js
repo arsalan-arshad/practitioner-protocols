@@ -23,7 +23,9 @@ import {
   handleCustomersRedact,
   handleShopRedact,
   handleAppUninstalled,
-  handleOrdersPaid
+  handleOrdersPaid,
+  logS3AllowlistCapture,
+  extractS3Allowlist
 } from './webhooks.js';
 import {
   createRateLimiter,
@@ -921,7 +923,7 @@ export async function handleRestoreProtocolRequest(db, user, protocolId, { shop 
  * @param {{ apiSecret: string }} options
  * @returns {Promise<Response>}
  */
-export async function handleWebhookRequest(db, request, { apiSecret } = {}) {
+export async function handleWebhookRequest(db, request, { apiSecret, env, logger } = {}) {
   if (!apiSecret) {
     return Response.json({ error: 'Webhook API secret is required' }, { status: 500 });
   }
@@ -1004,6 +1006,13 @@ export async function handleWebhookRequest(db, request, { apiSecret } = {}) {
         result = await handleAppUninstalled(db, payload);
         break;
       case 'orders/paid':
+        // TEMPORARY S3 CAPTURE LOGGER (Gated by S3_CAPTURE=1, runs only after HMAC verification)
+        try {
+          logS3AllowlistCapture(payload, { env, logger });
+        } catch {
+          // Non-fatal: Logging errors must never affect webhook processing or response status
+        }
+
         result = await handleOrdersPaid(db, payload, {
           shop: shopHeader || undefined,
           webhookId: webhookIdHeader
@@ -1364,3 +1373,6 @@ export async function handleAdminAttributionCsvRequest(db, request, options = {}
     return handleErrorResponse(err);
   }
 }
+
+export { logS3AllowlistCapture, extractS3Allowlist };
+

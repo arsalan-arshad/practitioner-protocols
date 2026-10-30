@@ -1,8 +1,18 @@
+<p align="center">
+  <img src="assets/listing/app-icon-1200.png" alt="Practitioner Protocols app icon" width="120">
+</p>
+
 # Practitioner Protocols — Share Product Recommendations by Link or QR, Buy in One Tap
 
 > **Open-Source (MIT)** | Built for the Shopify Merchant & Developer Community | Open for PRs & Discussions
 >
-> ⚙️ **Status: Complete Engine, Admin & Storefront Modules Verified (337/337 Unit Tests Passing across 88 Suites)** | **Live PostgreSQL Integration (10/10 Integration Tests Passing; test:db skips with a notice when no DB is reachable)** | **Dev Store Spikes Verified (S1, S2, S4, S5 Answered; S3 Property Persistence Verified on Order #1016)**
+> ⚙️ **Status: Complete Engine, Admin & Storefront Modules Verified (368/368 Unit Tests Passing across 95 Suites)** | **Live PostgreSQL Integration (10/10 Integration Tests Passing; test:db skips with a notice when no DB is reachable)** | **Live Railway Hosting with Postgres** | **Dev Store Spikes Verified (S2, S3, S4, S5 Answered; S1 Answered on Plus Dev Store Only)**
+
+<p align="center">
+  <img src="assets/listing/feature-image-1600x900.png" alt="A curated list of generic unbranded wellness products converging into a single shopping bag." width="720">
+</p>
+
+<sub>Artwork is AI-generated. Details in [assets/listing/README.md](assets/listing/README.md).</sub>
 
 ---
 
@@ -14,7 +24,7 @@
 
 **Privacy by design:** Protocols never accept or store client/patient information. The validator strictly enforces a zero-PII barrier (`PII_NOT_ALLOWED`) both on top-level keys and within nested line items. Attribution is tracked solely via aggregate monthly counters.
 
-**Current build stage:** The pure engine logic, security controls, cryptographic primitives, Liquid renderers, catalog resolver, rate limiters, validation barriers, and PostgreSQL database queries are fully built and covered by 337 automated unit tests across 88 suites using mock database interfaces. Real PostgreSQL query execution, transaction behavior, constraints, row-level locking (`FOR UPDATE`), and migrations are verified against a live PostgreSQL instance via `npm run test:db` (10 integration tests passing). Spikes S1, S2 (sitemap exclusion & Liquid compilation), S4 (20 lines in single cart add), and S5 (retail vs B2B pricing) are verified on live Shopify Plus dev store `ai-agent-app-h9qwnwd8.myshopify.com`. Hidden attribution property persistence is confirmed through live test order #1016 (S3).
+**Current build stage:** The pure engine logic, security controls, cryptographic primitives, Liquid renderers, catalog resolver, rate limiters, validation barriers, and PostgreSQL database queries are fully built and covered by 368 automated unit tests across 95 suites using mock database interfaces. Real PostgreSQL query execution, transaction behavior, constraints, row-level locking (`FOR UPDATE`), and migrations are verified against a live PostgreSQL instance via `npm run test:db` (10 integration tests passing). The app is deployed live on Railway (`practitioner-protocols-production.up.railway.app`) with internal PostgreSQL and automated migration tracking. Spikes S2 (sitemap exclusion, `noindex`, and proxy header), S3 (hidden line property attribution persistence in storefront checkout and `orders/paid` webhook payload), S4 (20 lines in a single cart batch add), and S5 (retail vs B2B pricing) are verified on live dev store `ai-agent-app-h9qwnwd8.myshopify.com`; Spike S1 is verified on the Plus dev store only. In production mode with `DATABASE_URL` configured, merchant admin and practitioner portal routes return HTTP 404 until a persistent database-backed session-token admin UI is built; protocols cannot yet be authored directly in production.
 
 ---
 
@@ -235,6 +245,8 @@ psql $DATABASE_URL -f prisma/migrations/20261022_add_currency_to_stat_unique_and
 │           ├── webhooks.js      # Shopify compliance & order attribution webhooks
 │           ├── service.js       # Transactional PostgreSQL service layer (withTransaction)
 │           └── routes.js        # HTTP request controllers & webhook router
+├── assets/
+│   └── listing/                 # App Store icon and feature image (AI-generated)
 ├── docs/
 │   ├── BUILD_PLAN.md            # Milestones and progress tracker
 │   ├── M1_CONTRACT.md           # Runtime contract specification

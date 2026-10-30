@@ -189,7 +189,7 @@ The server supports both in-memory demo mode and persistent PostgreSQL mode. Con
 |---|---|---|
 | `DATABASE_URL` | PostgreSQL connection string. | `postgres://user:pass@host:5432/db` |
 | `DATABASE_SSL` | PostgreSQL SSL/TLS mode: `require` (validates certificates) or `no-verify` (opt-in skip verification). | Unset (defaults to `false` for `localhost` and `*.railway.internal`) |
-| `SHOPIFY_API_KEY` | Client ID from Shopify Partner Dashboard. | `156022e3dbfc32e0eeec20bff8c07349` |
+| `SHOPIFY_API_KEY` | Client ID from Shopify Partner Dashboard. | `840a22df2708a4a51a443180b8c332db` |
 | `SHOPIFY_API_SECRET` | Client Secret from Shopify Partner Dashboard. Required for HMAC verification. | `shpss_...` |
 | `PORT` | HTTP server port. | `3000` |
 | `TRUSTED_PROXY_HOPS` | Number of trusted reverse-proxy hops for IP extraction. | `1` |

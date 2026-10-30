@@ -9,6 +9,7 @@ import {
   SHOPIFY_DOMAIN_REGEX,
   DEMO_PROFILES,
   DEMO_SETTINGS,
+  DEMO_REPORT,
   DEMO_PROTOCOL,
 } from '../server.js';
 import { runMigrations, getDatabaseSslConfig, MIGRATION_FILES } from '../scripts/migrate.js';
@@ -32,9 +33,19 @@ function createMockRes() {
     statusCode: 200,
     headers: {},
     body: '',
+    setHeader(name, val) {
+      res.headers[name] = val;
+      res.headers[name.toLowerCase()] = val;
+    },
+    getHeader(name) {
+      return res.headers[name] || res.headers[name.toLowerCase()];
+    },
     writeHead(status, headers = {}) {
       res.statusCode = status;
-      Object.assign(res.headers, headers);
+      for (const [k, v] of Object.entries(headers)) {
+        res.headers[k] = v;
+        res.headers[k.toLowerCase()] = v;
+      }
       return res;
     },
     end(data) {
@@ -386,6 +397,11 @@ describe('Server & Configuration Hardening (server.js, shopify.app.toml, README.
   describe('shopify.app.toml Configuration Integrity', () => {
     const tomlContent = readFileSync(join(process.cwd(), 'shopify.app.toml'), 'utf-8');
 
+    it('sets client_id to the production Practitioner Protocols app record', () => {
+      assert.ok(tomlContent.includes('client_id = "840a22df2708a4a51a443180b8c332db"'));
+      assert.ok(tomlContent.includes('application_url = "https://practitioner-protocols-production.up.railway.app"'));
+    });
+
     it('declares compliance_topics array for mandatory GDPR webhooks', () => {
       assert.ok(tomlContent.includes('compliance_topics = ['));
       assert.ok(tomlContent.includes('"customers/data_request"'));
@@ -605,6 +621,110 @@ describe('Server & Configuration Hardening (server.js, shopify.app.toml, README.
       assert.ok(server);
       await new Promise((resolve) => server.close(resolve));
       assert.equal(poolClosed, true, 'Pool should be closed when server closes');
+    });
+  });
+
+  describe('Production Mode: Demo Route Hiding & Mutation Protection (DATABASE_URL configured)', () => {
+    const prodListener = createRequestListener({
+      databaseUrl: 'postgres://production.host:5432/db',
+      shopifyApiSecret: 'prod_secret_123',
+    });
+
+    const hiddenRoutes = [
+      '/',
+      '/admin',
+      '/app',
+      '/portal',
+      '/portal/preview',
+      '/protocol/demo',
+      '/handout/demo',
+      '/protocol/pr_any123',
+      '/p/pr_any123',
+      '/handout/pr_any123',
+      '/apps/protocols',
+    ];
+
+    for (const route of hiddenRoutes) {
+      it(`returns 404 for ${route} in production mode`, async () => {
+        const req = createMockReq({ method: 'GET', url: route });
+        const res = createMockRes();
+        await prodListener(req, res);
+        assert.equal(res.statusCode, 404);
+        assert.equal(res.body, 'Not Found');
+      });
+    }
+
+    it('does not mutate DEMO_REPORT.month when ?month= is supplied in production mode', async () => {
+      const initialMonth = DEMO_REPORT.month;
+      const targetMonth = '2030-12';
+      assert.notEqual(initialMonth, targetMonth);
+
+      const req = createMockReq({
+        method: 'GET',
+        url: `/admin?month=${targetMonth}`,
+      });
+      const res = createMockRes();
+      await prodListener(req, res);
+
+      assert.equal(res.statusCode, 404);
+      assert.equal(DEMO_REPORT.month, initialMonth, 'DEMO_REPORT.month must remain unmutated in production mode');
+    });
+  });
+
+  describe('Demo Mode: Unrestricted Demo Pages & Month Mutation (DATABASE_URL unset/empty)', () => {
+    const demoListener = createRequestListener({
+      databaseUrl: '', // Unset / demo mode
+    });
+
+    it('returns 200 for demo routes in demo mode', async () => {
+      for (const route of ['/', '/admin', '/portal', '/protocol/demo', '/handout/demo']) {
+        const req = createMockReq({ method: 'GET', url: route });
+        const res = createMockRes();
+        await demoListener(req, res);
+        assert.equal(res.statusCode, 200, `Expected 200 for ${route} in demo mode`);
+      }
+    });
+
+    it('allows ?month= query parameter to update DEMO_REPORT.month in demo mode', async () => {
+      const targetMonth = '2026-11';
+      const req = createMockReq({
+        method: 'GET',
+        url: `/admin?month=${targetMonth}`,
+      });
+      const res = createMockRes();
+      await demoListener(req, res);
+
+      assert.equal(res.statusCode, 200);
+      assert.equal(DEMO_REPORT.month, targetMonth, 'DEMO_REPORT.month should update in demo mode');
+    });
+  });
+
+  describe('X-Robots-Tag Search Engine Isolation Header', () => {
+    const listener = createRequestListener({
+      databaseUrl: 'postgres://production.host:5432/db',
+    });
+
+    it('does NOT include X-Robots-Tag on /health endpoint', async () => {
+      const req = createMockReq({ method: 'GET', url: '/health' });
+      const res = createMockRes();
+      await listener(req, res);
+
+      assert.equal(res.statusCode, 200);
+      assert.equal(res.getHeader('X-Robots-Tag'), undefined);
+    });
+
+    it('includes X-Robots-Tag: noindex, nofollow on all other responses', async () => {
+      const testPaths = ['/', '/admin', '/api/auth', '/non-existent-path'];
+      for (const path of testPaths) {
+        const req = createMockReq({ method: 'GET', url: path });
+        const res = createMockRes();
+        await listener(req, res);
+        assert.equal(
+          res.getHeader('X-Robots-Tag'),
+          'noindex, nofollow',
+          `Expected X-Robots-Tag header on ${path}`
+        );
+      }
     });
   });
 

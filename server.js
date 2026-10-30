@@ -276,6 +276,11 @@ export function createRequestListener(options = {}) {
         return;
       }
 
+      // Security: Add X-Robots-Tag: noindex, nofollow to every response except /health
+      if (typeof res.setHeader === 'function') {
+        res.setHeader('X-Robots-Tag', 'noindex, nofollow');
+      }
+
       // OAuth Install Initiation: /api/auth or /auth
       if (pathname === '/api/auth' || pathname === '/auth') {
         const shop = (url.searchParams.get('shop') || '').toLowerCase().trim();
@@ -492,6 +497,27 @@ export function createRequestListener(options = {}) {
         }
       }
 
+      // In production mode (DATABASE_URL configured), demo routes return 404, never demo content
+      if (databaseUrl) {
+        if (
+          pathname === '/' ||
+          pathname === '/admin' ||
+          pathname === '/app' ||
+          pathname === '/portal' ||
+          pathname === '/portal/preview' ||
+          pathname === '/protocol/demo' ||
+          pathname === '/handout/demo' ||
+          pathname.startsWith('/protocol') ||
+          pathname.startsWith('/p/') ||
+          pathname.startsWith('/handout') ||
+          pathname === '/apps/protocols'
+        ) {
+          res.writeHead(404, { 'Content-Type': 'text/plain' });
+          res.end('Not Found');
+          return;
+        }
+      }
+
       // 1. Merchant Admin UI (Shopify Polaris embedded admin - Demo Preview)
       if (pathname === '/' || pathname === '/admin' || pathname === '/app') {
         const shopParam = url.searchParams.get('shop') || DEMO_SHOP;
@@ -669,6 +695,9 @@ export function createRequestListener(options = {}) {
       res.end('Not Found');
     } catch (err) {
       console.error('Server error:', err);
+      if (typeof res.setHeader === 'function') {
+        res.setHeader('X-Robots-Tag', 'noindex, nofollow');
+      }
       res.writeHead(500, { 'Content-Type': 'text/plain' });
       res.end('Internal Server Error');
     }

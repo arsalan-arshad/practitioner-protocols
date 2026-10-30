@@ -1,6 +1,6 @@
 # Practitioner Protocols — Project Context (for Claude)
 
-_Snapshot: 2026-10-31 · Live Railway deployment active (`practitioner-protocols-production.up.railway.app`) with internal Postgres & ledger migrations · Production app record "Practitioner Protocols" released (v2, Public distribution) · Production hardening complete (demo routes 404 in production mode, X-Robots-Tag on all responses except /health) · S2, S4, S5 resolved; S1 resolved on the Plus dev store only; S3 capture pending · 376 tests passing across 96 suites._
+_Snapshot: 2026-10-31 · Live Railway deployment active (`practitioner-protocols-production.up.railway.app`) with internal Postgres & ledger migrations · Production app record "Practitioner Protocols" released (v2, Public distribution) · Production hardening complete (demo routes 404 in production mode, X-Robots-Tag on all responses except /health) · Spikes S2, S3, S4, S5 resolved; S1 resolved on the Plus dev store only; discount_allocations observation pending · App Store listing artwork added (AI-generated) · 368 tests passing across 95 suites._
 _Contains NO secrets. Never paste `.env` values or tokens into chat or docs._
 
 ## 1. What this is
@@ -42,13 +42,15 @@ The idea grew out of a client request. The owner decided to build their **own, g
 
 ## 8. Punch list
 **Open:**
-- S3 raw `orders/paid` webhook JSON payload capture (logger merged in PR #4, capture pending with `S3_CAPTURE=1`).
+- Observation of populated `discount_allocations` in `orders/paid` webhook payload (unobserved in initial test order as no discount code was applied).
 - S1 beyond the Plus dev store (verify extension availability on non-Plus plans vs universal App Proxy baseline).
 - Real `X-Forwarded-For` hop-count check on Railway behind Shopify App Proxy (`TRUSTED_PROXY_HOPS=1` currently assumed).
 - Second-theme property-hiding check (verified on Dawn; second free theme pending).
 - Real database-backed admin session-token authentication and UI (embedded app `/` returns 404 in production until wired).
+- No way to create a protocol in production yet (storefront editor and admin routes return 404 in production; session-token auth UI needed).
 - Add `CODEOWNERS` file (required for the Code Owners rule on `protect-main` branch protection to take effect).
 - Decision on publishing `v0.1.0` GitHub Release.
+- App Store listing screenshots (must be real captures of the finished UI, Shopify rule 4.4.4/4.4.5).
 - Answer Q1 (First brand reference store).
 
 **Resolved:**
@@ -64,12 +66,12 @@ The idea grew out of a client request. The owner decided to build their **own, g
 - Cleaned `shopify.app.toml`: minimal scopes (`read_orders`), subscribed compliance topics and `orders/paid`, dropped unhandled `app/scopes_update` (Session 17).
 - Moved `pg` to `dependencies` in `package.json` (Session 17).
 - Spike S4 (Cart batch add): Verified 20 lines added in 971ms, 21 lines in 824ms; sold-out variant causes all-or-nothing 422; overstock returns 422 with partial add.
-- Spike S3 (Guest order): Verified guest order #1016 on dev store; `_protocol_token`, `_protocol_id`, `_protocol_usage` persist into order line items, visible in Admin, hidden in Cart/Checkout/Order Status.
-- Spike S5 (B2B price check & banner rule): Verified 4 shopper states on live Plus dev store; confirmed `practitioner` tag has zero price effect; B2B company prices CAD 714 / 999 / 571 applied consistently; `/cart/add.js` quantity rule enforcement is all-or-nothing; banner rule decided based on `logged_in_customer_id` presence (Session 18).
+- Spike S3 (Attribution carrier & webhook payload): Verified on live dev store; `_protocol_token`, `_protocol_id`, `_protocol_usage` persist into order line items, visible in Admin, hidden in Cart/Checkout/Order Status. Webhook payload arrives as array of `{name, value}`; protocol carrier properties present with values; `gift_note` present (value redacted by the logger, not observed); line `price` in shop currency (`USD`), shopper amount in presentment currency (`CAD`); pricing is line-item level; order.currency is the shop currency per Shopify's REST docs (consistent with price_set.shop_money in the capture); it was not part of the logged allowlist, so not directly observed. Temporary logger removed; `S3_CAPTURE` deleted from Railway (Session 24 & Session 27).
+- Spike S5 (B2B price check & banner rule): Verified 4 shopper states on live Plus dev store; confirmed `practitioner` tag has zero price effect; B2B company prices CAD 714 / 999 / 571 applied consistently; `/cart/add.js` quantity rule enforcement is all-or-nothing; banner rule decided based on `logged_in_customer_id` presence (Session 18 & Session 24).
 - Spike S2 (Sitemap exclusion, noindex & proxy header): Verified on live dev store that Shopify parent sitemap strictly excludes `/apps/*`. Verified `X-Robots-Tag: noindex, nofollow` header reaches browser through Shopify App Proxy. Verified `<meta name="robots">` renders in body not head because Shopify wraps proxy Liquid in theme layout. Verified unknown token returns 404 (Session 19 & Session 26).
 - Production hosting provisioned on Railway with PostgreSQL and ledger migration tracking (`_pp_migrations`) (Session 26).
 - Production route hardening (PR #3): demo routes return 404 when `DATABASE_URL` is configured, preventing unauthorized demo access and `?month=` mutation (Session 26).
-- Temporary S3 allowlist logger (PR #4): fault-tolerant, gated by `S3_CAPTURE=1`, capturing strictly allowlisted properties with values only for `_protocol_token`, `_protocol_id`, `_protocol_usage` (Session 26).
+- App Store listing artwork created and documented in `assets/listing/` (app icon 1200x1200px, feature banner 1600x900px, AI-generated, no screenshots; icon uploaded to Dev Dashboard app record (Settings -> App icon)) (Session 27).
 - Interactive Protocol Editor UI with product search built into Practitioner Portal (Milestone M3, Session 19).
 - Merchant Admin Interactive Wiring & Embedded Polaris UI completed (Milestone M6, Session 20): App Bridge HS256 session token verification, practice name controls, starter template modal builder, month-filtered RFC 4180 CSV export, emergency shutdown controls, and live Web route handlers.
 - Shopify App Store Review Self-Audit & Hardening completed (Milestone M7, Session 21): Automated OAuth 2.0 flow, OAuth query HMAC verification, Session table integration, and Content Security Policy frame-ancestors headers.
@@ -621,8 +623,8 @@ Run the five spikes in a day or two on a dev store; write the answers into secti
   - **Protected Customer Data:** Approved with declared reason "Analytics". Zero protected fields requested or selected (strictly zero PII architecture; no customer names, emails, phones, or addresses accessed or stored).
 - **Railway Infrastructure & Database Migrations:**
   - **Production Host:** `https://practitioner-protocols-production.up.railway.app`
-  - **Healthcheck:** Verified live at `/health` returning HTTP 200 `{"status":"ok"}`.
-  - **PostgreSQL Ledger Migrations:** Initial schema migration executed successfully against Railway PostgreSQL; `_pp_migrations` ledger initialized and all tables created (`Session`, `PractitionerProfile`, `Protocol`, `ProtocolLineItem`, `ProtocolOrderStat`, `ProcessedWebhook`, `ShopSettings`).
+  - **Healthcheck:** Verified live at `/health` returning HTTP 200 `{"status":"ok","time":<ISO timestamp>}`.
+  - **PostgreSQL Ledger Migrations:** Initial schema migration executed successfully against Railway PostgreSQL; `_pp_migrations` ledger initialized and all tables created (`Session`, `PractitionerProfile`, `Protocol`, `ProtocolLine`, `ProtocolOrderStat`, `ProcessedWebhook`, `Setting`).
   - **Pre-Deploy Configuration:** Set `npm run migrate` explicitly as the pre-deploy step in the Railway service UI (configured in dashboard because Railway ignored repository `railway.json` preDeployCommand directive).
 - **Production Hardening (PR #3 & PR #4 Merged):**
   - **PR #3 (`fix/hide-demo-routes-in-production`):**
@@ -638,7 +640,39 @@ Run the five spikes in a day or two on a dev store; write the answers into secti
 - **Verification Status:**
   - `npm test`: **376/376 unit tests passing** across 96 suites (0 failures).
 - **Open Items:**
-  - **Spike S2:** Full-page customer account extension versus App Proxy portal architecture verification on live dev store.
-  - **Spike S3:** Live `orders/paid` webhook capture under `S3_CAPTURE=1` to finalize empirical verification of property persistence in webhook payloads, followed by follow-up PR to remove logger.
+  - **Spike S2:** Full-page customer account extension versus App Proxy portal architecture verification on live dev store (resolved, see section 37).
+  - **Spike S3:** Live `orders/paid` webhook capture under `S3_CAPTURE=1` to finalize empirical verification of property persistence in webhook payloads, followed by follow-up PR to remove logger (resolved, see section 37).
   - **Data Protection & App Store Review Questions:** Documenting compliance answers for Shopify App Review concerning data minimization, zero client PII retention, and verified webhook redaction handlers.
+
+## 37. Session Log — 2026-10-31 (Session 27: Spike S3 Webhook Empirical Verification, S3 Logger Removal & Listing Artwork)
+- **Context:** Executed empirical verification of Spike S3 on live dev store and Railway deployment, removed the temporary S3 capture logger, created App Store listing artwork, and updated documentation.
+- **Spike S3 Resolved for `orders/paid` Webhook Payload:**
+  - **Empirical Test:** Placed a storefront test order on the dev store carrying line item properties `_protocol_token`, `_protocol_id`, `_protocol_usage`, and non-protocol `gift_note` through test checkout with `S3_CAPTURE=1` active on Railway. (Clean-room rule: zero order IDs or numbers cited).
+  - **Webhook Payload Structure & Findings:**
+    - Line-item properties arrive as an array of objects `{ name, value }`.
+    - All three protocol carrier properties (`_protocol_token`, `_protocol_id`, `_protocol_usage`) are present with their values completely intact.
+    - Non-protocol property (`gift_note`) is present (key name preserved, value stripped by allowlist logger).
+    - At checkout a non-underscore property (`gift_note`) is visible under the line item, while underscore-prefixed properties are hidden, confirming the hiding rule.
+    - Line `price` is reported in shop currency (`price_set.shop_money.amount` in USD).
+    - Shopper's presentment amount is reported in `price_set.presentment_money.amount` (CAD).
+    - There are no order-level price fields in the payload; all pricing is strictly at line-item level.
+    - `order.currency` is the shop currency per Shopify's REST docs and is consistent with `price_set.shop_money` in the capture; `order.currency` itself was not part of the logged allowlist, so it was not directly observed.
+  - **Boundary & Open Observation:** A populated `discount_allocations` entry was not observed because the test order did not use a discount code. Retained as an open observation item.
+- **Temporary S3 Logger Removal:**
+  - Verified allowlist log entry in Railway deploy logs with zero customer PII or order IDs.
+  - Removed `S3_CAPTURE` environment variable from Railway service and redeployed cleanly (5 service variables remaining).
+  - PR #8 opened for `chore/remove-s3-logger`: removed `logS3AllowlistCapture`, `extractS3Allowlist`, `sanitizeLineItemProperties` from `webhooks.js`, removed route call and try/catch from `routes.js`, removed `env` options pass-through in `server.js`, and deleted the 8 temporary S3 tests from `test/webhooks.test.js` and `test/routes.test.js`.
+  - Confirmed via `grep` that `S3_CAPTURE` no longer appears in code or tests.
+  - Test suite: **368 tests passing** across 95 suites (0 failures).
+- **Listing Artwork (PR #7 Merged):**
+  - Generated and verified production App Store listing artwork saved to `assets/listing/`:
+    - `app-icon-1200.png`: 1200x1200px square PNG, 24-bit RGB (no alpha), deep teal and warm off-white, 3 rounded checklist rows converging into a clean shopping bag shape.
+    - `feature-image-1600x900.png`: 1600x900px (16:9) banner PNG, 24-bit RGB (no alpha), deep teal background, checklist cards converging into bag silhouette with abstract unbranded product silhouettes (bottles/jars).
+    - `assets/listing/README.md`: Documents generation prompts, model (`Imagen 3`), dimensions, alt text, and explicit disclosure that images are AI-generated (honesty rule).
+    - Zero client names, zero real brands, zero Shopify marks, zero fake UI/screenshots, and zero text baked into image pixels.
+  - App icon uploaded to Dev Dashboard app record (Settings -> App icon).
+- **Status & Punch List Alignment:**
+  - Spikes S2, S3, S4, S5 fully resolved. S1 resolved on Plus dev store only.
+  - Open items: populated `discount_allocations` check, `X-Forwarded-For` hop-count verification on Railway, second-theme property-hiding check, S1 beyond Plus, persistent session-token admin UI, production protocol authoring, `CODEOWNERS` file, `v0.1.0` release decision, and real UI screenshots for App Store review.
+
 

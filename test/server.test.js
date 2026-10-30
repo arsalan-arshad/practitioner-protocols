@@ -731,12 +731,12 @@ describe('Server & Configuration Hardening (server.js, shopify.app.toml, README.
   describe('README.md Status & Scope Integrity', () => {
     const readmeContent = readFileSync(join(process.cwd(), 'README.md'), 'utf-8');
 
-    it('states dev store spikes are verified (S1, S2, S4, S5 answered, S3 property persistence)', () => {
+    it('states dev store spikes are verified (S2, S3, S4, S5 answered, S1 on Plus only)', () => {
       assert.ok(
         readmeContent.includes('Dev Store Spikes Verified')
       );
       assert.ok(
-        readmeContent.includes('S1, S2, S4, S5 Answered; S3 Property Persistence Verified on Order #1016')
+        readmeContent.includes('S2, S3, S4, S5 Answered; S1 Answered on Plus Dev Store Only')
       );
     });
 

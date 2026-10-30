@@ -1,6 +1,6 @@
 # Practitioner Protocols — Project Context (for Claude)
 
-_Snapshot: 2026-10-28 · Complete app & engine verified (337 pure unit tests passing across 88 suites) · Spikes S1, S4, S5 fully answered & closed; S3 property persistence verified across guest order #1016 and signed-in B2B order #1017; S2 sitemap exclusion confirmed on dev store · v0.1.0 tagged on main._
+_Snapshot: 2026-10-31 · Live Railway deployment active (`practitioner-protocols-production.up.railway.app`) with internal Postgres & ledger migrations · Production app record "Practitioner Protocols" released (v2, Public distribution) · Production hardening complete (demo routes 404 in production mode, X-Robots-Tag on all responses except /health) · S2, S4, S5 resolved; S1 resolved on the Plus dev store only; S3 capture pending · 376 tests passing across 96 suites._
 _Contains NO secrets. Never paste `.env` values or tokens into chat or docs._
 
 ## 1. What this is
@@ -42,9 +42,13 @@ The idea grew out of a client request. The owner decided to build their **own, g
 
 ## 8. Punch list
 **Open:**
-- Verify raw `orders/paid` webhook JSON payload for S3.
-- Verify `noindex` for S2 on live dev store (`sitemap.xml` exclusion confirmed on dev store in Session 19).
-- Re-measure `X-Forwarded-For` chain and configure `TRUSTED_PROXY_HOPS` on production deployed host.
+- S3 raw `orders/paid` webhook JSON payload capture (logger merged in PR #4, capture pending with `S3_CAPTURE=1`).
+- S1 beyond the Plus dev store (verify extension availability on non-Plus plans vs universal App Proxy baseline).
+- Real `X-Forwarded-For` hop-count check on Railway behind Shopify App Proxy (`TRUSTED_PROXY_HOPS=1` currently assumed).
+- Second-theme property-hiding check (verified on Dawn; second free theme pending).
+- Real database-backed admin session-token authentication and UI (embedded app `/` returns 404 in production until wired).
+- Add `CODEOWNERS` file (required for the Code Owners rule on `protect-main` branch protection to take effect).
+- Decision on publishing `v0.1.0` GitHub Release.
 - Answer Q1 (First brand reference store).
 
 **Resolved:**
@@ -62,7 +66,10 @@ The idea grew out of a client request. The owner decided to build their **own, g
 - Spike S4 (Cart batch add): Verified 20 lines added in 971ms, 21 lines in 824ms; sold-out variant causes all-or-nothing 422; overstock returns 422 with partial add.
 - Spike S3 (Guest order): Verified guest order #1016 on dev store; `_protocol_token`, `_protocol_id`, `_protocol_usage` persist into order line items, visible in Admin, hidden in Cart/Checkout/Order Status.
 - Spike S5 (B2B price check & banner rule): Verified 4 shopper states on live Plus dev store; confirmed `practitioner` tag has zero price effect; B2B company prices CAD 714 / 999 / 571 applied consistently; `/cart/add.js` quantity rule enforcement is all-or-nothing; banner rule decided based on `logged_in_customer_id` presence (Session 18).
-- Spike S2 (Sitemap exclusion): Verified on live dev store that Shopify parent sitemap strictly excludes `/apps/*` (Session 19).
+- Spike S2 (Sitemap exclusion, noindex & proxy header): Verified on live dev store that Shopify parent sitemap strictly excludes `/apps/*`. Verified `X-Robots-Tag: noindex, nofollow` header reaches browser through Shopify App Proxy. Verified `<meta name="robots">` renders in body not head because Shopify wraps proxy Liquid in theme layout. Verified unknown token returns 404 (Session 19 & Session 26).
+- Production hosting provisioned on Railway with PostgreSQL and ledger migration tracking (`_pp_migrations`) (Session 26).
+- Production route hardening (PR #3): demo routes return 404 when `DATABASE_URL` is configured, preventing unauthorized demo access and `?month=` mutation (Session 26).
+- Temporary S3 allowlist logger (PR #4): fault-tolerant, gated by `S3_CAPTURE=1`, capturing strictly allowlisted properties with values only for `_protocol_token`, `_protocol_id`, `_protocol_usage` (Session 26).
 - Interactive Protocol Editor UI with product search built into Practitioner Portal (Milestone M3, Session 19).
 - Merchant Admin Interactive Wiring & Embedded Polaris UI completed (Milestone M6, Session 20): App Bridge HS256 session token verification, practice name controls, starter template modal builder, month-filtered RFC 4180 CSV export, emergency shutdown controls, and live Web route handlers.
 - Shopify App Store Review Self-Audit & Hardening completed (Milestone M7, Session 21): Automated OAuth 2.0 flow, OAuth query HMAC verification, Session table integration, and Content Security Policy frame-ancestors headers.

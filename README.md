@@ -72,7 +72,7 @@
 - **RFC 4180 CSV Export:** Exports monthly attribution reports with proper escaping, quotes, and CRLF line terminators (strictly aggregate counters; zero client PII).
 
 ### H. Merchant Admin Management ([`app/lib/protocols/admin.js`](app/lib/protocols/admin.js))
-- **Embedded Polaris Admin UI (Milestone M6):** Embedded Polaris admin with responsive tab navigation: *Practitioners*, *Starter Templates*, *Attribution & Reports*, and *Settings*.
+- **Embedded Polaris Admin UI (Milestone M6):** Embedded Polaris admin with responsive tab navigation: *Practitioners*, *Starter Templates*, *Attribution & Reports*, and *Settings*. *(Note: Operates in local standalone demo mode when `DATABASE_URL` is unset; in production mode with `DATABASE_URL` configured, demo and admin routes return HTTP 404 until a persistent database-backed session-token UI is wired).*
 - **App Bridge HS256 Session Token Verification:** Pure `node:crypto` HMAC-SHA256 signature verification (`verifyAdminSessionToken`, `extractAdminSession`) using `crypto.timingSafeEqual` with zero external dependencies, validating expiration, clock skew, destination shop, and client ID audience.
 - **Practitioner Approvals & Anti-Impersonation:** Merchant controls practice names (`PractitionerProfile`) via inline editing to prevent unauthorized clinic representation alongside approve and revoke actions.
 - **Starter Templates Builder:** Accessible modal (`#create-starter-modal`) allowing brand administrators to author and publish multi-line starter templates (`isStarter = true`).

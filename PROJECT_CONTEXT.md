@@ -1,6 +1,6 @@
 # Practitioner Protocols — Project Context (for Claude)
 
-_Snapshot: 2026-10-28 · Complete app & engine verified (337 pure unit tests passing across 88 suites) · Spikes S1, S4, S5 fully answered & closed; S3 property persistence verified across guest order #1016 and signed-in B2B order #1017; S2 sitemap exclusion confirmed on dev store · v0.1.0 tagged on main._
+_Snapshot: 2026-10-31 · Live Railway deployment active (`practitioner-protocols-production.up.railway.app`) with internal Postgres & ledger migrations · Production app record "Practitioner Protocols" released (v2, Public distribution) · Production hardening complete (demo routes 404 in production mode, X-Robots-Tag on all responses except /health) · S2, S4, S5 resolved; S1 resolved on the Plus dev store only; S3 capture pending · 376 tests passing across 96 suites._
 _Contains NO secrets. Never paste `.env` values or tokens into chat or docs._
 
 ## 1. What this is
@@ -42,9 +42,13 @@ The idea grew out of a client request. The owner decided to build their **own, g
 
 ## 8. Punch list
 **Open:**
-- Verify raw `orders/paid` webhook JSON payload for S3.
-- Verify `noindex` for S2 on live dev store (`sitemap.xml` exclusion confirmed on dev store in Session 19).
-- Re-measure `X-Forwarded-For` chain and configure `TRUSTED_PROXY_HOPS` on production deployed host.
+- S3 raw `orders/paid` webhook JSON payload capture (logger merged in PR #4, capture pending with `S3_CAPTURE=1`).
+- S1 beyond the Plus dev store (verify extension availability on non-Plus plans vs universal App Proxy baseline).
+- Real `X-Forwarded-For` hop-count check on Railway behind Shopify App Proxy (`TRUSTED_PROXY_HOPS=1` currently assumed).
+- Second-theme property-hiding check (verified on Dawn; second free theme pending).
+- Real database-backed admin session-token authentication and UI (embedded app `/` returns 404 in production until wired).
+- Add `CODEOWNERS` file (required for the Code Owners rule on `protect-main` branch protection to take effect).
+- Decision on publishing `v0.1.0` GitHub Release.
 - Answer Q1 (First brand reference store).
 
 **Resolved:**
@@ -62,7 +66,10 @@ The idea grew out of a client request. The owner decided to build their **own, g
 - Spike S4 (Cart batch add): Verified 20 lines added in 971ms, 21 lines in 824ms; sold-out variant causes all-or-nothing 422; overstock returns 422 with partial add.
 - Spike S3 (Guest order): Verified guest order #1016 on dev store; `_protocol_token`, `_protocol_id`, `_protocol_usage` persist into order line items, visible in Admin, hidden in Cart/Checkout/Order Status.
 - Spike S5 (B2B price check & banner rule): Verified 4 shopper states on live Plus dev store; confirmed `practitioner` tag has zero price effect; B2B company prices CAD 714 / 999 / 571 applied consistently; `/cart/add.js` quantity rule enforcement is all-or-nothing; banner rule decided based on `logged_in_customer_id` presence (Session 18).
-- Spike S2 (Sitemap exclusion): Verified on live dev store that Shopify parent sitemap strictly excludes `/apps/*` (Session 19).
+- Spike S2 (Sitemap exclusion, noindex & proxy header): Verified on live dev store that Shopify parent sitemap strictly excludes `/apps/*`. Verified `X-Robots-Tag: noindex, nofollow` header reaches browser through Shopify App Proxy. Verified `<meta name="robots">` renders in body not head because Shopify wraps proxy Liquid in theme layout. Verified unknown token returns 404 (Session 19 & Session 26).
+- Production hosting provisioned on Railway with PostgreSQL and ledger migration tracking (`_pp_migrations`) (Session 26).
+- Production route hardening (PR #3): demo routes return 404 when `DATABASE_URL` is configured, preventing unauthorized demo access and `?month=` mutation (Session 26).
+- Temporary S3 allowlist logger (PR #4): fault-tolerant, gated by `S3_CAPTURE=1`, capturing strictly allowlisted properties with values only for `_protocol_token`, `_protocol_id`, `_protocol_usage` (Session 26).
 - Interactive Protocol Editor UI with product search built into Practitioner Portal (Milestone M3, Session 19).
 - Merchant Admin Interactive Wiring & Embedded Polaris UI completed (Milestone M6, Session 20): App Bridge HS256 session token verification, practice name controls, starter template modal builder, month-filtered RFC 4180 CSV export, emergency shutdown controls, and live Web route handlers.
 - Shopify App Store Review Self-Audit & Hardening completed (Milestone M7, Session 21): Automated OAuth 2.0 flow, OAuth query HMAC verification, Session table integration, and Content Security Policy frame-ancestors headers.
@@ -605,3 +612,43 @@ Run the five spikes in a day or two on a dev store; write the answers into secti
      - **Zero-PII Validation:** Because `/cart.js` exposes raw properties to browser DevTools, our architectural rule strictly forbidding customer PII or health diagnostic data in line-item properties is reaffirmed as critical.
      - **Market Sticky Session:** Markets adhere to browser session/cookies (guest cart remained priced in CAD following B2B session). Reaffirms our attribution engine rule that revenue must strictly be read from the order's actual currency and line item amounts, never assumed from storefront display prices.
 - **Status:** Spike S3 property persistence and shopper hiding verified on Dawn theme for guest and B2B contact. S3 raw `orders/paid` webhook payload inspection remains the sole open item for S3.
+
+## 36. Session Log — 2026-10-30 (Session 26: Production App Record, Railway Deployment & Production Route Isolation)
+- **Context:** Transitioned the application from the initial spike harness to the production app record "Practitioner Protocols" on the Shopify Partner Dashboard, wired production hosting on Railway, applied PostgreSQL migrations, and isolated demo routes and endpoints.
+- **Production App Record & Distribution:**
+  - **App Record:** New Shopify app record "Practitioner Protocols" (Dev Dashboard app `441928548353`), client_id `840a22df2708a4a51a443180b8c332db` in `shopify.app.toml`.
+  - **Version:** Version `practitioner-protocols-2` released through `shopify app deploy`.
+  - **Distribution Model:** Public distribution. Note: This selection is permanent and irreversible for this app record.
+  - **Protected Customer Data:** Set to the "Analytics" purpose with zero protected fields selected. Scopes remain `read_orders` only (strictly zero client PII architecture; no customer names, emails, phones, or addresses accessed or stored).
+- **Railway Infrastructure & Database Migrations:**
+  - **Hosting Environment:** Railway project with an app service and an internal Postgres database.
+  - **Public Domain:** `practitioner-protocols-production.up.railway.app` (target port 3000, `PORT=3000`).
+  - **Reverse Proxy Hops:** `TRUSTED_PROXY_HOPS=1` (operational working assumption, not yet verified against real `X-Forwarded-For` chain on Railway).
+  - **Healthcheck:** Verified live at `/health` returning HTTP 200 `{"status":"ok","time":<ISO timestamp>}`.
+  - **Database Migration Ledger:** Initial schema migration executed successfully against Railway PostgreSQL; `_pp_migrations` ledger initialized and all tables created (`Session`, `PractitionerProfile`, `Protocol`, `ProtocolLine`, `ProtocolOrderStat`, `ProcessedWebhook`, `Setting`).
+  - **Pre-Deploy Configuration:** The pre-deploy command `npm run migrate` was set manually in the Railway service UI, because Railway did not read `preDeployCommand` from `railway.json`.
+- **Production Hardening (PR #3 Merged):**
+  - When `DATABASE_URL` is set, all demo and admin routes (`/`, `/admin`, `/app`, `/portal`, `/portal/preview`, `/protocol/demo`, `/handout/demo`, `/protocol/*`, `/p/*`, `/handout/*`, `/apps/protocols`) return HTTP 404 Not Found, never demo content.
+  - Prevents `?month=` query parameter from mutating in-memory demo data in production mode.
+  - Added `X-Robots-Tag: noindex, nofollow` to every response the server sends except `/health`.
+  - **Consequence / Open Gap:** The embedded app's root route (`/`) currently returns 404 in production until a real database-backed session-token admin UI is implemented and wired. This is plainly acknowledged as an open gap.
+- **Spike S2 Resolution:**
+  - **Status:** S2 is resolved.
+  - **Header Survival:** The `X-Robots-Tag: noindex, nofollow` response header reaches the browser through the Shopify App Proxy.
+  - **Meta Tag Placement:** The `<meta name="robots" content="noindex, nofollow">` tag renders in the HTML body rather than the head, because Shopify wraps App Proxy Liquid output inside the storefront theme layout.
+  - **Sitemap & Robots.txt:** The storefront `/sitemap.xml` and `robots.txt` do not list or index the proxy path (`/apps/protocols`).
+  - **Caveat:** Observed on a password-protected dev store only.
+  - **Unknown Token:** An unknown or invalid protocol token requested through the proxy returns HTTP 404 with "Protocol Not Found" Liquid markup.
+- **Spike S3 Status (PR #4 Merged):**
+  - Temporary S3 allowlist logger merged into `main` via PR #4, gated behind `S3_CAPTURE=1` (disabled by default).
+  - Captures strictly allowlisted pricing and line-item properties (`price`, `price_set`, `total_discount`, `discount_allocations`, and `properties` retaining values exclusively for `_protocol_token`, `_protocol_id`, and `_protocol_usage`; emitting key name only for all other properties).
+  - Excludes raw body, order IDs, customer fields, emails, and shop domains. Runs only after HMAC check passes; wrapped in try/catch to protect webhook responses.
+  - **Result:** Result pending (logger merged, capture pending live order execution).
+- **Open Items:**
+  - S1 beyond the Plus dev store (verify extension availability on non-Plus plans vs universal App Proxy baseline).
+  - Real `X-Forwarded-For` hop-count check on Railway behind App Proxy.
+  - Second-theme property-hiding check (verified on Dawn; second free theme pending).
+  - Real admin session-token database-backed authentication and UI.
+  - `CODEOWNERS` file (the Code Owners rule on the `protect-main` branch protection is ineffective without this file).
+  - Decision on publishing `v0.1.0` GitHub Release.
+

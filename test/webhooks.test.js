@@ -11,7 +11,9 @@ import {
   handleShopRedact,
   handleAppUninstalled,
   handleOrdersPaid,
-  pruneProcessedWebhooks
+  pruneProcessedWebhooks,
+  extractS3Allowlist,
+  logS3AllowlistCapture
 } from '../app/lib/protocols/webhooks.js';
 
 describe('Shopify Compliance & Attribution Webhooks (app/lib/protocols/webhooks.js)', () => {
@@ -590,6 +592,163 @@ describe('Shopify Compliance & Attribution Webhooks (app/lib/protocols/webhooks.
       assert.equal(upsertParams.length, 2);
       assert.equal(upsertParams[0][6], 'USD');
       assert.equal(upsertParams[1][6], 'EUR');
+    });
+  });
+
+  describe('Temporary S3 Capture Allowlist Logger (Spike S3 Verification)', () => {
+    const fullOrderPayload = {
+      id: 9918273645,
+      order_number: 1018,
+      name: '#1018',
+      email: 'sensitive-client@example.com',
+      contact_email: 'sensitive-client@example.com',
+      phone: '+15551234567',
+      shop_domain: 'brand-store.myshopify.com',
+      total_price: '125.00',
+      price: '125.00',
+      price_set: {
+        shop_money: { amount: '125.00', currency_code: 'USD' },
+        presentment_money: { amount: '125.00', currency_code: 'USD' }
+      },
+      total_discount: '15.00',
+      discount_allocations: [
+        { amount: '15.00', discount_application_index: 0 }
+      ],
+      customer: {
+        id: 88776655,
+        email: 'customer@example.com',
+        first_name: 'John',
+        last_name: 'Doe',
+        phone: '+15559876543'
+      },
+      shipping_address: {
+        address1: '123 Privacy Blvd',
+        city: 'Metropolis',
+        zip: '10001'
+      },
+      billing_address: {
+        address1: '123 Privacy Blvd',
+        city: 'Metropolis'
+      },
+      line_items: [
+        {
+          id: 445566,
+          title: 'Daily Protocol Formula',
+          variant_id: 112233,
+          product_id: 998877,
+          name: 'Daily Protocol Formula - 60 Caps',
+          vendor: 'Wellness Lab',
+          price: '45.00',
+          price_set: {
+            shop_money: { amount: '45.00', currency_code: 'USD' },
+            presentment_money: { amount: '45.00', currency_code: 'USD' }
+          },
+          total_discount: '5.00',
+          discount_allocations: [
+            { amount: '5.00', discount_application_index: 0 }
+          ],
+          properties: [
+            { name: '_protocol_token', value: 'tok_spike_s3_test' },
+            { name: '_protocol_id', value: 'proto_abc_999' },
+            { name: '_protocol_usage', value: 'Take 1 daily with food' },
+            { name: 'gift_note', value: 'Happy birthday, confidential client note!' },
+            { name: '_protocol_practice', value: 'Apex Wellness' }
+          ]
+        }
+      ]
+    };
+
+    it('extractS3Allowlist strictly retains only allowlisted fields and excludes sensitive data', () => {
+      const extracted = extractS3Allowlist(fullOrderPayload);
+
+      // Verify allowed top-level keys
+      const allowedTopKeys = new Set(['line_items', 'price', 'price_set', 'total_discount', 'discount_allocations']);
+      for (const key of Object.keys(extracted)) {
+        assert.ok(allowedTopKeys.has(key), `Disallowed top-level key found: ${key}`);
+      }
+
+      // Verify forbidden fields are NOT present
+      assert.equal(extracted.id, undefined);
+      assert.equal(extracted.order_number, undefined);
+      assert.equal(extracted.name, undefined);
+      assert.equal(extracted.email, undefined);
+      assert.equal(extracted.contact_email, undefined);
+      assert.equal(extracted.customer, undefined);
+      assert.equal(extracted.shipping_address, undefined);
+      assert.equal(extracted.billing_address, undefined);
+      assert.equal(extracted.shop_domain, undefined);
+
+      // Verify line_items contains strictly allowlisted keys
+      assert.equal(extracted.line_items.length, 1);
+      const lineItem = extracted.line_items[0];
+      const allowedLineKeys = new Set(['properties', 'price', 'price_set', 'total_discount', 'discount_allocations']);
+      for (const key of Object.keys(lineItem)) {
+        assert.ok(allowedLineKeys.has(key), `Disallowed line_item key found: ${key}`);
+      }
+
+      assert.equal(lineItem.id, undefined);
+      assert.equal(lineItem.title, undefined);
+      assert.equal(lineItem.variant_id, undefined);
+      assert.equal(lineItem.product_id, undefined);
+      assert.equal(lineItem.vendor, undefined);
+
+      // Verify content of allowlisted fields
+      assert.equal(lineItem.price, '45.00');
+      assert.equal(lineItem.total_discount, '5.00');
+      assert.equal(lineItem.properties.length, 5);
+
+      // Value retained for allowlisted protocol property keys:
+      assert.deepEqual(lineItem.properties[0], { name: '_protocol_token', value: 'tok_spike_s3_test' });
+      assert.deepEqual(lineItem.properties[1], { name: '_protocol_id', value: 'proto_abc_999' });
+      assert.deepEqual(lineItem.properties[2], { name: '_protocol_usage', value: 'Take 1 daily with food' });
+
+      // Non-allowlisted properties emit key name only with no value:
+      assert.deepEqual(lineItem.properties[3], { name: 'gift_note' });
+      assert.equal('value' in lineItem.properties[3], false);
+      assert.deepEqual(lineItem.properties[4], { name: '_protocol_practice' });
+      assert.equal('value' in lineItem.properties[4], false);
+    });
+
+    it('logS3AllowlistCapture is disabled by default when S3_CAPTURE is unset', () => {
+      const logs = [];
+      const logged = logS3AllowlistCapture(fullOrderPayload, {
+        logger: (prefix, data) => logs.push({ prefix, data }),
+        env: {}
+      });
+
+      assert.equal(logged, false);
+      assert.equal(logs.length, 0);
+    });
+
+    it('logS3AllowlistCapture is disabled when S3_CAPTURE is not 1', () => {
+      const logs = [];
+      const logged = logS3AllowlistCapture(fullOrderPayload, {
+        logger: (prefix, data) => logs.push({ prefix, data }),
+        env: { S3_CAPTURE: '0' }
+      });
+
+      assert.equal(logged, false);
+      assert.equal(logs.length, 0);
+    });
+
+    it('logS3AllowlistCapture logs exclusively allowlist data when S3_CAPTURE=1', () => {
+      const logs = [];
+      const logged = logS3AllowlistCapture(fullOrderPayload, {
+        logger: (prefix, data) => logs.push({ prefix, data }),
+        env: { S3_CAPTURE: '1' }
+      });
+
+      assert.equal(logged, true);
+      assert.equal(logs.length, 1);
+      assert.equal(logs[0].prefix, '[TEMPORARY S3_CAPTURE orders/paid]');
+
+      const parsed = JSON.parse(logs[0].data);
+      assert.equal(parsed.id, undefined);
+      assert.equal(parsed.email, undefined);
+      assert.equal(parsed.customer, undefined);
+      assert.equal(parsed.line_items[0].id, undefined);
+      assert.equal(parsed.line_items[0].title, undefined);
+      assert.equal(parsed.line_items[0].properties[0].name, '_protocol_token');
     });
   });
 });

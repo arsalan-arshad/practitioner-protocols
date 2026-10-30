@@ -638,3 +638,107 @@ export async function handleOrdersPaid(db, payload, options = {}) {
     updatedCount: result.updatedCount
   };
 }
+
+const ALLOWED_PROPERTY_VALUE_KEYS = new Set([
+  '_protocol_token',
+  '_protocol_id',
+  '_protocol_usage'
+]);
+
+/**
+ * Sanitizes line item properties for S3 capture.
+ * Retains values ONLY for _protocol_token, _protocol_id, and _protocol_usage.
+ * For every other property, emits the key name only, with no value.
+ *
+ * @param {any} properties
+ * @returns {Array<{ name: string, value?: string }>}
+ */
+export function sanitizeLineItemProperties(properties) {
+  if (Array.isArray(properties)) {
+    return properties.map((prop) => {
+      if (!prop || typeof prop !== 'object') return prop;
+      const keyName = prop.name ?? prop.key;
+      const keyStr = typeof keyName === 'string' ? keyName : String(keyName ?? '');
+      if (ALLOWED_PROPERTY_VALUE_KEYS.has(keyStr)) {
+        return {
+          name: keyStr,
+          value: prop.value !== undefined ? String(prop.value) : ''
+        };
+      }
+      return {
+        name: keyStr
+      };
+    });
+  }
+  if (properties && typeof properties === 'object') {
+    return Object.entries(properties).map(([k, v]) => {
+      if (ALLOWED_PROPERTY_VALUE_KEYS.has(k)) {
+        return { name: k, value: v !== undefined ? String(v) : '' };
+      }
+      return { name: k };
+    });
+  }
+  return [];
+}
+
+/**
+ * TEMPORARY S3 CAPTURE ALLOWLIST EXTRACTOR
+ * Extracts exclusively allowlisted pricing and line-item properties for Spike S3 verification.
+ * Strictly guarantees that nothing outside the allowlist is returned.
+ * Keeps line_items[].properties values only for _protocol_token, _protocol_id, _protocol_usage.
+ * For every other property emits the key name only, with no value.
+ * Never includes raw body, order IDs, customer fields, shop domain, or email.
+ *
+ * @param {any} payload Webhook payload
+ * @returns {{ line_items: Array<{ properties?: any[], price?: string, price_set?: any, total_discount?: string, discount_allocations?: any[] }>, price?: string, price_set?: any, total_discount?: string, discount_allocations?: any[] }}
+ */
+export function extractS3Allowlist(payload) {
+  const order = payload?.order || payload || {};
+  const rawLineItems = Array.isArray(order.line_items) ? order.line_items : [];
+
+  const line_items = rawLineItems.map((item) => {
+    const safeItem = {};
+    if (item?.properties !== undefined) {
+      safeItem.properties = sanitizeLineItemProperties(item.properties);
+    }
+    if (item?.price !== undefined) safeItem.price = item.price;
+    if (item?.price_set !== undefined) safeItem.price_set = item.price_set;
+    if (item?.total_discount !== undefined) safeItem.total_discount = item.total_discount;
+    if (item?.discount_allocations !== undefined) safeItem.discount_allocations = item.discount_allocations;
+    return safeItem;
+  });
+
+  const captured = { line_items };
+
+  if (order.price !== undefined) captured.price = order.price;
+  if (order.price_set !== undefined) captured.price_set = order.price_set;
+  if (order.total_discount !== undefined) captured.total_discount = order.total_discount;
+  if (order.discount_allocations !== undefined) captured.discount_allocations = order.discount_allocations;
+
+  return captured;
+}
+
+/**
+ * TEMPORARY S3 CAPTURE LOGGER
+ * Active ONLY when S3_CAPTURE=1
+ * Runs only after HMAC check passes.
+ * Writes exclusively the allowlist: line_items[].properties, price, price_set, total_discount, discount_allocations.
+ * Never logs raw body, order IDs, customer fields, shop domain, or email.
+ * Scheduled for removal in follow-up PR immediately after data capture.
+ *
+ * @param {any} payload Webhook payload
+ * @param {{ logger?: Function, env?: Record<string, string | undefined> }} [options]
+ * @returns {boolean} Whether capture was logged
+ */
+export function logS3AllowlistCapture(payload, { logger = console.log, env = process.env } = {}) {
+  const activeEnv = env || process.env;
+  if (activeEnv?.S3_CAPTURE !== '1') {
+    return false;
+  }
+
+  const allowlistData = extractS3Allowlist(payload);
+  const activeLogger = typeof logger === 'function' ? logger : console.log;
+  activeLogger('[TEMPORARY S3_CAPTURE orders/paid]', JSON.stringify(allowlistData));
+  return true;
+}
+

@@ -1165,6 +1165,167 @@ describe('HTTP Routes & Request Handlers (app/lib/protocols/routes.js)', () => {
       assert.equal(data.topic, 'orders/paid');
     });
 
+    it('S3_CAPTURE logger does NOT run when HMAC verification fails on orders/paid', async () => {
+      const logs = [];
+      const payload = {
+        id: 998877,
+        shop_domain: testShop,
+        email: 'attacker@evil.com',
+        line_items: [{ price: '10.00', properties: [] }]
+      };
+
+      const rawBody = JSON.stringify(payload);
+      const req = new Request('https://test/webhooks', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Shopify-Topic': 'orders/paid',
+          'X-Shopify-Hmac-Sha256': 'invalid_tampered_hmac_signature',
+          'X-Shopify-Webhook-Id': 'webhook_test_fail_hmac'
+        },
+        body: rawBody
+      });
+
+      const res = await handleWebhookRequest(db, req, {
+        apiSecret,
+        env: { S3_CAPTURE: '1' },
+        logger: (prefix, data) => logs.push({ prefix, data })
+      });
+
+      assert.equal(res.status, 401);
+      assert.equal(logs.length, 0, 'Logger must never execute when HMAC verification fails');
+    });
+
+    it('S3_CAPTURE logger runs only after HMAC verification passes and logs only allowlisted fields', async () => {
+      const logs = [];
+      const payload = {
+        id: 778899,
+        order_number: 1019,
+        email: 'patient@clinic.com',
+        customer: { id: 1234, email: 'patient@clinic.com' },
+        shop_domain: testShop,
+        price: '89.00',
+        total_discount: '10.00',
+        line_items: [
+          {
+            id: 111,
+            title: 'Probiotic Complex',
+            price: '89.00',
+            total_discount: '10.00',
+            properties: [
+              { name: '_protocol_token', value: 'tok_guthealth123456' },
+              { name: '_protocol_id', value: 'proto_gut_01' },
+              { name: '_protocol_usage', value: '2 capsules before meal' },
+              { name: 'gift_note', value: 'Confidential patient gift message' },
+              { name: '_protocol_practice', value: 'Functional Wellness' }
+            ]
+          }
+        ]
+      };
+
+      const req = createSignedWebhookRequest('orders/paid', payload, {
+        webhookId: 'webhook_s3_allowlist_pass'
+      });
+
+      const res = await handleWebhookRequest(db, req, {
+        apiSecret,
+        env: { S3_CAPTURE: '1' },
+        logger: (prefix, data) => logs.push({ prefix, data })
+      });
+
+      assert.equal(res.status, 200);
+      assert.equal(logs.length, 1);
+      assert.equal(logs[0].prefix, '[TEMPORARY S3_CAPTURE orders/paid]');
+
+      const parsed = JSON.parse(logs[0].data);
+      // Verify allowlisted data is present
+      assert.equal(parsed.total_discount, '10.00');
+      assert.equal(parsed.price, '89.00');
+      assert.equal(parsed.line_items.length, 1);
+      assert.equal(parsed.line_items[0].price, '89.00');
+      assert.equal(parsed.line_items[0].total_discount, '10.00');
+
+      // Allowed protocol properties retain their values
+      assert.deepEqual(parsed.line_items[0].properties[0], { name: '_protocol_token', value: 'tok_guthealth123456' });
+      assert.deepEqual(parsed.line_items[0].properties[1], { name: '_protocol_id', value: 'proto_gut_01' });
+      assert.deepEqual(parsed.line_items[0].properties[2], { name: '_protocol_usage', value: '2 capsules before meal' });
+
+      // Non-allowlisted properties like gift_note log key name only, with no value
+      assert.deepEqual(parsed.line_items[0].properties[3], { name: 'gift_note' });
+      assert.equal('value' in parsed.line_items[0].properties[3], false);
+      assert.deepEqual(parsed.line_items[0].properties[4], { name: '_protocol_practice' });
+      assert.equal('value' in parsed.line_items[0].properties[4], false);
+
+      // Verify confidential string is strictly absent from the serialized log output
+      assert.equal(logs[0].data.includes('Confidential patient gift message'), false);
+
+      // Verify non-allowlisted / sensitive fields are absent
+      assert.equal(parsed.id, undefined);
+      assert.equal(parsed.order_number, undefined);
+      assert.equal(parsed.email, undefined);
+      assert.equal(parsed.customer, undefined);
+      assert.equal(parsed.shop_domain, undefined);
+      assert.equal(parsed.line_items[0].id, undefined);
+      assert.equal(parsed.line_items[0].title, undefined);
+    });
+
+    it('returns 200 even when S3_CAPTURE logger throws an error', async () => {
+      const payload = {
+        id: 778899,
+        shop_domain: testShop,
+        line_items: [
+          {
+            price: '89.00',
+            properties: [{ name: '_protocol_token', value: 'tok_guthealth123456' }]
+          }
+        ]
+      };
+
+      const req = createSignedWebhookRequest('orders/paid', payload, {
+        webhookId: 'webhook_s3_throwing_logger'
+      });
+
+      const res = await handleWebhookRequest(db, req, {
+        apiSecret,
+        env: { S3_CAPTURE: '1' },
+        logger: () => {
+          throw new Error('Simulated logging failure (e.g. disk full or stream closed)');
+        }
+      });
+
+      assert.equal(res.status, 200);
+      const data = await res.json();
+      assert.equal(data.success, true);
+      assert.equal(data.topic, 'orders/paid');
+    });
+
+    it('S3_CAPTURE logger is inactive when S3_CAPTURE is unset on valid orders/paid', async () => {
+      const logs = [];
+      const payload = {
+        id: 778899,
+        shop_domain: testShop,
+        line_items: [
+          {
+            price: '89.00',
+            properties: [{ name: '_protocol_token', value: 'tok_guthealth123456' }]
+          }
+        ]
+      };
+
+      const req = createSignedWebhookRequest('orders/paid', payload, {
+        webhookId: 'webhook_s3_inactive'
+      });
+
+      const res = await handleWebhookRequest(db, req, {
+        apiSecret,
+        env: {}, // unset
+        logger: (prefix, data) => logs.push({ prefix, data })
+      });
+
+      assert.equal(res.status, 200);
+      assert.equal(logs.length, 0, 'Logger must not run when S3_CAPTURE is unset');
+    });
+
     it('dispatches customers/data_request webhook', async () => {
       const payload = {
         shop_domain: testShop,

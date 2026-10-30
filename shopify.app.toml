@@ -1,6 +1,6 @@
 # Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
 
-client_id = "156022e3dbfc32e0eeec20bff8c07349"
+client_id = "840a22df2708a4a51a443180b8c332db"
 application_url = "https://practitioner-protocols-production.up.railway.app"
 embedded = true
 name = "Practitioner Protocols"
@@ -40,5 +40,4 @@ redirect_urls = [
 ]
 
 [build]
-include_config_on_deploy = true
 automatically_update_urls_on_dev = true

@@ -1,6 +1,6 @@
 # Practitioner Protocols — Project Context (for Claude)
 
-_Snapshot: 2026-10-31 · Live Railway deployment active (`practitioner-protocols-production.up.railway.app`) with internal Postgres & ledger migrations · Production app record "Practitioner Protocols" released (v2, Public distribution) · Production hardening complete (demo routes 404 in production mode, X-Robots-Tag on all responses except /health) · Spikes S2, S3, S4, S5 resolved; S1 resolved on the Plus dev store only; discount_allocations observation pending · App Store listing artwork added (AI-generated) · 368 tests passing across 95 suites._
+_Snapshot: 2026-10-31 · Live Railway deployment active (`practitioner-protocols-production.up.railway.app`) with internal Postgres & ledger migrations · Production app record "Practitioner Protocols" released (v2, Public distribution) · Production hardening complete · Milestone M9a (Embedded Merchant Admin in Production Mode) implemented, pending live dev store verification · Spikes S2, S3, S4, S5 resolved; S1 resolved on the Plus dev store only; discount_allocations observation pending · App Store listing artwork added (AI-generated) · 384 tests passing across 96 suites._
 _Contains NO secrets. Never paste `.env` values or tokens into chat or docs._
 
 ## 1. What this is
@@ -46,8 +46,8 @@ The idea grew out of a client request. The owner decided to build their **own, g
 - S1 beyond the Plus dev store (verify extension availability on non-Plus plans vs universal App Proxy baseline).
 - Real `X-Forwarded-For` hop-count check on Railway behind Shopify App Proxy (`TRUSTED_PROXY_HOPS=1` currently assumed).
 - Second-theme property-hiding check (verified on Dawn; second free theme pending).
-- Real database-backed admin session-token authentication and UI (embedded app `/` returns 404 in production until wired).
-- No way to create a protocol in production yet (storefront editor and admin routes return 404 in production; session-token auth UI needed).
+- Real database-backed admin session-token authentication and UI: Milestone M9a implemented (embedded `/`, `/admin`, `/app` served with App Bridge session tokens, bootstrap reload, and cross-shop 403 protection; pending live dev store verification).
+- No way to create a protocol in production yet: Milestone M9b queued as design doc (practitioner self-enrolment toggle in Settings, pending profile creation via signed App Proxy customer ID, merchant practice name approval, and production portal route wiring).
 - Add `CODEOWNERS` file (required for the Code Owners rule on `protect-main` branch protection to take effect).
 - Decision on publishing `v0.1.0` GitHub Release.
 - App Store listing screenshots (must be real captures of the finished UI, Shopify rule 4.4.4/4.4.5).
@@ -674,5 +674,39 @@ Run the five spikes in a day or two on a dev store; write the answers into secti
 - **Status & Punch List Alignment:**
   - Spikes S2, S3, S4, S5 fully resolved. S1 resolved on Plus dev store only.
   - Open items: populated `discount_allocations` check, `X-Forwarded-For` hop-count verification on Railway, second-theme property-hiding check, S1 beyond Plus, persistent session-token admin UI, production protocol authoring, `CODEOWNERS` file, `v0.1.0` release decision, and real UI screenshots for App Store review.
+
+## 38. Session Log — 2026-10-31 (Session 28: Milestone M9a — Embedded Merchant Admin Production Wiring & App Bridge Session Token Authentication)
+- **Context:** Implemented Milestone M9a on branch `feat/m9a-production-admin`, connecting the embedded Merchant Admin (`GET /`, `GET /admin`, `GET /app`) to live database queries with pure App Bridge session-token authentication and strict multi-tenant isolation, without expanding app scopes (`read_orders` only).
+- **Embedded Admin Iframe Bootstrap Pattern:**
+  - Adhered to official Shopify documentation for token exchange and embedded apps (`https://shopify.dev/docs/apps/build/authentication-authorization/implement-token-exchange?lang=node`).
+  - When an unauthenticated request arrives inside the Shopify Admin embedded iframe (indicated by `embedded=1` or `host` query parameters), the server does NOT redirect to `/api/auth` (Shopify Admin login denies being framed, causing iframe breakage).
+  - Instead, the server renders a lightweight App Bridge bootstrap document (`renderAdminBootstrapHtml`) with `<meta name="shopify-api-key" content="...">` and `<script src="https://cdn.shopify.com/shopifycloud/app-bridge.js"></script>`.
+  - The bootstrap script invokes `await window.shopify.idToken()`, appends the received token as `?id_token=<token>`, and replaces the location (`window.location.replace`), allowing the app to reload with full session credentials seamlessly.
+- **Top-Level Direct Navigation vs Iframe Isolation:**
+  - Direct browser navigations outside an embedded iframe carrying a valid RFC 1034 `?shop=` parameter are issued a 302 redirect to `/api/auth?shop=...` to initiate OAuth.
+  - Direct navigations without a valid `shop` parameter return HTTP 401 Unauthorized (`Authentication required`). Standalone demo content is never returned in production mode.
+- **Session Token Verification & Destination Shop Security:**
+  - Eliminated `expectedShop: url.searchParams.get('shop') || DEMO_SHOP` across all `/api/admin/*` endpoints in `server.js`.
+  - The connected store is derived strictly from the verified session token's `dest` claim (`session.shop`).
+  - If a `?shop=` query parameter is supplied in the request URL, the server strictly validates that `normQuery === normToken`. Any cross-shop mismatch throws `ADMIN_ERROR_CODES.FORBIDDEN` and immediately returns HTTP 403 Forbidden across `GET /` and all `/api/admin/*` routes (`/status`, `/practice-name`, `/starters/create`, `/settings`, `/emergency/disable-all`, `/attribution.csv`).
+  - Missing session tokens on `/api/admin/*` return HTTP 401 Unauthorized with the `X-Shopify-Retry-Invalid-Session-Request: 1` header, instructing App Bridge to refresh the ID token and retry.
+  - The `id_token` travels in the URL query parameter for up to ~60s and may appear in host request logs; no application code logs it.
+- **Live Database Queries & Clean Empty States:**
+  - In production mode, `handleAdminDashboardRequest` queries live tables: `listPractitionerProfiles(pool, { shop })`, `listStarterTemplates(pool, { shop })`, `getAttributionReport(pool, { shop, month })`, and `getSettings(pool, { shop })`.
+  - When tables contain no rows for a store, clean Polaris empty states are rendered (empty directory notice, blank starter list, $0.00 attribution metrics), never throwing 500 errors.
+- **Frontend App Bridge Integration:**
+  - `renderAdminHtml` includes `<meta name="shopify-api-key">` and the App Bridge CDN script tag in `<head>`.
+  - Injects client-side JavaScript before `</body>` to intercept Polaris tab links (preserving `shop`, `host`, `embedded`, and attaching `id_token`), form submissions (dispatching `POST /api/admin/*` with `Authorization: Bearer <token>`), and RFC 4180 CSV export downloads.
+  - Retains security headers on all admin responses: `Content-Security-Policy: frame-ancestors https://${shop} https://admin.shopify.com;`, `X-Content-Type-Options: nosniff`, and `Referrer-Policy: strict-origin-when-cross-origin`.
+- **Demo Route Protection Maintained:**
+  - Unauthenticated demo and portal routes (`/portal`, `/portal/preview`, `/protocol/demo`, `/handout/demo`, `/protocol/*`, `/p/*`, `/handout/*`, `/apps/protocols`) remain strictly 404 in production mode.
+- **Config & Scope Invariance:**
+  - Verified `shopify.app.toml`: `application_url = "https://practitioner-protocols-production.up.railway.app"`, `embedded = true`, and scopes remain strictly `read_orders`. No app config deploy required.
+- **Test Suite:**
+  - Full suite: **384 tests passing** across 96 suites (0 failures).
+- **Status & Next Steps:**
+  - Milestone M9a is complete and verified in code and automated tests (status: implemented, pending live dev store verification).
+  - Milestone M9b queued as design doc only for a follow-up branch (`docs/m9b-design`).
+
 
 

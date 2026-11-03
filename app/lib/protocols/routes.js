@@ -41,6 +41,7 @@ import { renderPortalLiquid } from './portal.js';
 import {
   ProtocolAdminError,
   ADMIN_ERROR_CODES,
+  SHOPIFY_DOMAIN_REGEX,
   assertNoPii,
   validatePracticeName,
   listPractitionerProfiles,
@@ -58,6 +59,7 @@ import {
   getAttributionReport,
   exportAttributionCsv,
   renderAdminHtml,
+  renderAdminBootstrapHtml,
   extractAdminSession,
   verifyAdminSessionToken,
   createAdminSessionToken
@@ -68,7 +70,9 @@ export {
   verifyAdminSessionToken,
   createAdminSessionToken,
   extractAdminSession,
-  renderAdminHtml
+  renderAdminHtml,
+  renderAdminBootstrapHtml,
+  SHOPIFY_DOMAIN_REGEX
 };
 
 /**
@@ -160,15 +164,22 @@ export function handleErrorResponse(err) {
 
   if (err instanceof ProtocolAdminError || err?.name === 'ProtocolAdminError') {
     let status = 400;
-    if (err.code === ADMIN_ERROR_CODES.UNAUTHORIZED) status = 401;
-    else if (err.code === ADMIN_ERROR_CODES.NOT_FOUND) status = 404;
+    const headers = {};
+    if (err.code === ADMIN_ERROR_CODES.UNAUTHORIZED) {
+      status = 401;
+      headers['X-Shopify-Retry-Invalid-Session-Request'] = '1';
+    } else if (err.code === ADMIN_ERROR_CODES.FORBIDDEN) {
+      status = 403;
+    } else if (err.code === ADMIN_ERROR_CODES.NOT_FOUND) {
+      status = 404;
+    }
     return Response.json(
       {
         error: err.message,
         code: err.code,
         field: err.field || null
       },
-      { status }
+      { status, headers }
     );
   }
 
@@ -1083,6 +1094,7 @@ export async function handleAdminDashboardRequest(db, request, options = {}) {
 
     const html = renderAdminHtml({
       shop,
+      apiKey: options.apiKey,
       profiles,
       starters,
       report,
@@ -1090,9 +1102,18 @@ export async function handleAdminDashboardRequest(db, request, options = {}) {
       activeTab
     });
 
+    const frameAncestors = shop && SHOPIFY_DOMAIN_REGEX.test(shop)
+      ? `https://${shop} https://admin.shopify.com`
+      : `https://*.myshopify.com https://admin.shopify.com`;
+
     return new Response(html, {
       status: 200,
-      headers: { 'Content-Type': 'text/html; charset=utf-8' }
+      headers: {
+        'Content-Type': 'text/html; charset=utf-8',
+        'Content-Security-Policy': `frame-ancestors ${frameAncestors};`,
+        'X-Content-Type-Options': 'nosniff',
+        'Referrer-Policy': 'strict-origin-when-cross-origin'
+      }
     });
   } catch (err) {
     return handleErrorResponse(err);

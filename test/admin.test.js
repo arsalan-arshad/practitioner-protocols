@@ -26,6 +26,7 @@ import {
   formatAttributionCsv,
   exportAttributionCsv,
   renderAdminHtml,
+  renderAdminBootstrapHtml,
   createAdminSessionToken,
   verifyAdminSessionToken,
   extractAdminSession
@@ -1078,6 +1079,53 @@ describe('Merchant Admin Layer (app/lib/protocols/admin.js)', () => {
         }
       );
     });
+
+    it('injects App Bridge CDN script, meta tag, and session interceptor script when apiKey is provided', () => {
+      const html = renderAdminHtml({
+        shop: testShop,
+        apiKey: 'test-client-key-abc',
+        profiles: mockProfiles,
+        starters: mockStarters,
+        report: mockReport,
+        settings: mockSettings,
+        activeTab: 'practitioners'
+      });
+
+      assert.ok(html.includes('<meta name="shopify-api-key" content="test-client-key-abc">'));
+      assert.ok(html.includes('<script src="https://cdn.shopify.com/shopifycloud/app-bridge.js"></script>'));
+      assert.ok(html.includes('window.shopify.idToken'));
+      assert.ok(html.includes('Authorization'));
+    });
+
+    it('renders App Bridge bootstrap page via renderAdminBootstrapHtml', () => {
+      const html = renderAdminBootstrapHtml({
+        apiKey: 'bootstrap-key-123',
+        shop: testShop
+      });
+
+      assert.ok(html.includes('<meta name="shopify-api-key" content="bootstrap-key-123">'));
+      assert.ok(html.includes('<script src="https://cdn.shopify.com/shopifycloud/app-bridge.js"></script>'));
+      assert.ok(html.includes('Loading Practitioner Protocols...'));
+      assert.ok(html.includes('id="bootstrap-message"'));
+      assert.ok(html.includes('Unable to start the app session. Please reopen the app from your Shopify admin.'));
+      assert.ok(html.includes('window.shopify.idToken'));
+      assert.ok(html.includes('window.location.replace'));
+    });
+
+    it('includes loop-protection guard in renderAdminBootstrapHtml preventing infinite redirect when id_token is already in URL', () => {
+      const html = renderAdminBootstrapHtml({
+        apiKey: 'bootstrap-key-123',
+        shop: testShop
+      });
+
+      assert.ok(html.includes("params.has('id_token')"));
+      assert.ok(html.includes('Unable to start the app session. Please reopen the app from your Shopify admin.'));
+      const guardIndex = html.indexOf("params.has('id_token')");
+      const replaceIndex = html.indexOf('window.location.replace');
+      assert.ok(guardIndex !== -1, 'Guard for id_token must be present');
+      assert.ok(replaceIndex !== -1, 'window.location.replace must be present');
+      assert.ok(guardIndex < replaceIndex, 'id_token guard must appear before window.location.replace');
+    });
   });
 
   describe('Admin Session Token Verification', () => {
@@ -1167,6 +1215,14 @@ describe('Merchant Admin Layer (app/lib/protocols/admin.js)', () => {
       const token = createAdminSessionToken({ shop: 'other-store.myshopify.com' }, apiSecret);
       assert.throws(
         () => verifyAdminSessionToken(token, { apiSecret, expectedShop: shop }),
+        { code: ADMIN_ERROR_CODES.FORBIDDEN }
+      );
+    });
+
+    it('rejects token with missing audience when apiKey is configured', () => {
+      const token = createAdminSessionToken({ shop, aud: '' }, apiSecret);
+      assert.throws(
+        () => verifyAdminSessionToken(token, { apiSecret, apiKey }),
         { code: ADMIN_ERROR_CODES.UNAUTHORIZED }
       );
     });
@@ -1175,6 +1231,14 @@ describe('Merchant Admin Layer (app/lib/protocols/admin.js)', () => {
       const token = createAdminSessionToken({ shop, apiKey: 'wrong_api_key' }, apiSecret);
       assert.throws(
         () => verifyAdminSessionToken(token, { apiSecret, apiKey }),
+        { code: ADMIN_ERROR_CODES.UNAUTHORIZED }
+      );
+    });
+
+    it('rejects token with mismatched issuer host', () => {
+      const token = createAdminSessionToken({ shop, iss: 'https://evil.myshopify.com/admin' }, apiSecret);
+      assert.throws(
+        () => verifyAdminSessionToken(token, { apiSecret }),
         { code: ADMIN_ERROR_CODES.UNAUTHORIZED }
       );
     });

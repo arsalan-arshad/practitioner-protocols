@@ -1674,5 +1674,177 @@ describe('HTTP Routes & Request Handlers (app/lib/protocols/routes.js)', () => {
       const csv = await res.text();
       assert.ok(csv.startsWith('Month,Practice Name,Owner GID,Protocol ID,Protocol Name,Is Starter,Orders,Units,Revenue,Currency'));
     });
+
+    it('handleAdminDashboardRequest sets CSP frame-ancestors, nosniff, and strict-origin headers', async () => {
+      const req = new Request(`https://${testShop}/admin?tab=practitioners`, {
+        headers: { Authorization: `Bearer ${adminToken}` }
+      });
+
+      const res = await handleAdminDashboardRequest(db, req, { apiSecret, apiKey: 'test_api_key', expectedShop: testShop });
+      assert.equal(res.status, 200);
+      assert.equal(res.headers.get('content-security-policy'), `frame-ancestors https://${testShop} https://admin.shopify.com;`);
+      assert.equal(res.headers.get('x-content-type-options'), 'nosniff');
+      assert.equal(res.headers.get('referrer-policy'), 'strict-origin-when-cross-origin');
+    });
+
+    it('rejects cross-shop mismatch with 403 Forbidden across all admin routes', async () => {
+      const mismatchedShop = 'attacker-store.myshopify.com';
+      const mismatchOpts = { apiSecret, expectedShop: mismatchedShop };
+
+      // GET /admin
+      const dashReq = new Request(`https://${testShop}/admin`, {
+        headers: { Authorization: `Bearer ${adminToken}` }
+      });
+      const dashRes = await handleAdminDashboardRequest(db, dashReq, mismatchOpts);
+      assert.equal(dashRes.status, 403);
+      const dashJson = await dashRes.json();
+      assert.equal(dashJson.code, 'FORBIDDEN');
+
+      // GET /api/admin/practitioners
+      const pracListReq = new Request(`https://${testShop}/api/admin/practitioners`, {
+        headers: { Authorization: `Bearer ${adminToken}` }
+      });
+      const pracListRes = await handleAdminPractitionersListRequest(db, pracListReq, mismatchOpts);
+      assert.equal(pracListRes.status, 403);
+
+      // POST /api/admin/practitioners/status
+      const pracStatusReq = new Request(`https://${testShop}/api/admin/practitioners/status`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${adminToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ownerGid: 'gid://shopify/Customer/112233', action: 'approve' })
+      });
+      const pracStatusRes = await handleAdminPractitionerStatusRequest(db, pracStatusReq, mismatchOpts);
+      assert.equal(pracStatusRes.status, 403);
+
+      // POST /api/admin/practitioners/practice-name
+      const nameReq = new Request(`https://${testShop}/api/admin/practitioners/practice-name`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${adminToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ownerGid: 'gid://shopify/Customer/112233', practiceName: 'New Name' })
+      });
+      const nameRes = await handleAdminPracticeNameRequest(db, nameReq, mismatchOpts);
+      assert.equal(nameRes.status, 403);
+
+      // GET /api/admin/starters
+      const startersReq = new Request(`https://${testShop}/api/admin/starters`, {
+        headers: { Authorization: `Bearer ${adminToken}` }
+      });
+      const startersRes = await handleAdminStartersListRequest(db, startersReq, mismatchOpts);
+      assert.equal(startersRes.status, 403);
+
+      // POST /api/admin/starters/create
+      const createStarterReq = new Request(`https://${testShop}/api/admin/starters/create`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${adminToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: 'Starter A', lines: [{ variantGid: 'gid://shopify/ProductVariant/1', quantity: 1 }] })
+      });
+      const createStarterRes = await handleAdminCreateStarterRequest(db, createStarterReq, mismatchOpts);
+      assert.equal(createStarterRes.status, 403);
+
+      // POST /api/admin/settings
+      const settingsReq = new Request(`https://${testShop}/api/admin/settings`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${adminToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode: 'company', disclaimer: 'Test' })
+      });
+      const settingsRes = await handleAdminUpdateSettingsRequest(db, settingsReq, mismatchOpts);
+      assert.equal(settingsRes.status, 403);
+
+      // POST /api/admin/emergency/disable-all
+      const emergencyReq = new Request(`https://${testShop}/api/admin/emergency/disable-all`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${adminToken}` }
+      });
+      const emergencyRes = await handleAdminEmergencyDisableAllRequest(db, emergencyReq, mismatchOpts);
+      assert.equal(emergencyRes.status, 403);
+
+      // GET /api/admin/attribution.csv
+      const csvReq = new Request(`https://${testShop}/api/admin/attribution.csv`, {
+        headers: { Authorization: `Bearer ${adminToken}` }
+      });
+      const csvRes = await handleAdminAttributionCsvRequest(db, csvReq, mismatchOpts);
+      assert.equal(csvRes.status, 403);
+    });
+
+    it('handleAdminDashboardRequest queries live tables strictly using shop derived from token (tenant isolation)', async () => {
+      const shopA = 'store-a.myshopify.com';
+      const shopB = 'store-b.myshopify.com';
+      const tokenA = createAdminSessionToken({ shop: shopA, apiKey: 'test_api_key' }, apiSecret);
+
+      const executedQueries = [];
+      const spyDb = {
+        async query(sql, params = []) {
+          executedQueries.push({ sql, params });
+          if (sql.includes('COUNT(*) as total FROM') && sql.includes('"PractitionerProfile"')) {
+            return { rows: [{ total: 1 }] };
+          }
+          if (sql.includes('FROM "PractitionerProfile"')) {
+            return {
+              rows: [{
+                ownerGid: 'gid://shopify/Customer/100',
+                shop: params[0],
+                practiceName: params[0] === shopA ? 'Shop A Clinic' : 'Shop B Clinic',
+                isApproved: true,
+                createdAt: new Date(),
+                updatedAt: new Date()
+              }]
+            };
+          }
+          if (sql.includes('FROM "Protocol"') && sql.includes('"isStarter" = true')) {
+            return {
+              rows: [{
+                id: 'starter_1',
+                shop: params[0],
+                name: params[0] === shopA ? 'Shop A Protocol' : 'Shop B Protocol',
+                status: 'active',
+                isStarter: true,
+                lines: []
+              }]
+            };
+          }
+          if (sql.includes('FROM "Setting"')) {
+            return {
+              rows: [{
+                shop: params[0],
+                identityMode: 'tag',
+                footerDisclaimer: null,
+                handoutText: null
+              }]
+            };
+          }
+          if (sql.includes('FROM "ProtocolOrderStat"')) {
+            return { rows: [] };
+          }
+          return { rows: [] };
+        }
+      };
+
+      const req = new Request(`https://${shopA}/admin`, {
+        headers: { Authorization: `Bearer ${tokenA}` }
+      });
+
+      const res = await handleAdminDashboardRequest(spyDb, req, { apiSecret, apiKey: 'test_api_key' });
+      assert.equal(res.status, 200);
+
+      assert.ok(executedQueries.length >= 4, `Expected at least 4 queries, got ${executedQueries.length}`);
+      for (const q of executedQueries) {
+        assert.equal(q.params[0], shopA, `Query must use shopA as first parameter: ${q.sql}`);
+        assert.ok(!q.params.includes(shopB), `Query parameters must never reference shopB`);
+      }
+
+      const html = await res.text();
+      assert.ok(html.includes('Shop A Clinic'));
+      assert.ok(!html.includes('Shop B Clinic'));
+
+      // Also verify tab=starters renders Shop A starter template and never Shop B
+      const startersReq = new Request(`https://${shopA}/admin?tab=starters`, {
+        headers: { Authorization: `Bearer ${tokenA}` }
+      });
+      const startersRes = await handleAdminDashboardRequest(spyDb, startersReq, { apiSecret, apiKey: 'test_api_key' });
+      assert.equal(startersRes.status, 200);
+      const startersHtml = await startersRes.text();
+      assert.ok(startersHtml.includes('Shop A Protocol'));
+      assert.ok(!startersHtml.includes('Shop B Protocol'));
+    });
   });
 });

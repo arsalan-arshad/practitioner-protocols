@@ -14,6 +14,7 @@ import {
 } from '../server.js';
 import { runMigrations, getDatabaseSslConfig, MIGRATION_FILES } from '../scripts/migrate.js';
 import { calculateOAuthSignature } from '../app/lib/protocols/proxy.js';
+import { createAdminSessionToken } from '../app/lib/protocols/admin.js';
 
 // Minimal mock request and response helpers for testing HTTP request listeners in-memory
 function createMockReq({ method = 'GET', url = '/', headers = {}, body = '' } = {}) {
@@ -90,7 +91,7 @@ describe('Server & Configuration Hardening (server.js, shopify.app.toml, README.
       databaseUrl: 'postgres://production.host:5432/practitioner_db',
     });
 
-    it('returns 501 on POST /api/admin/practitioners/status without hardcoded adminUser', async () => {
+    it('returns 401 with retry header on POST /api/admin/practitioners/status without session token', async () => {
       const req = createMockReq({
         method: 'POST',
         url: '/api/admin/practitioners/status',
@@ -99,13 +100,14 @@ describe('Server & Configuration Hardening (server.js, shopify.app.toml, README.
       const res = createMockRes();
       await listener(req, res);
 
-      assert.equal(res.statusCode, 501);
+      assert.equal(res.statusCode, 401);
+      assert.equal(res.headers['X-Shopify-Retry-Invalid-Session-Request'], '1');
       const data = JSON.parse(res.body);
-      assert.equal(data.error, 'Not Implemented');
+      assert.equal(data.error, 'Unauthorized');
       assert.ok(data.message.includes('session-token verification'));
     });
 
-    it('returns 501 on POST /api/admin/settings without hardcoded adminUser', async () => {
+    it('returns 401 with retry header on POST /api/admin/settings without session token', async () => {
       const req = createMockReq({
         method: 'POST',
         url: '/api/admin/settings',
@@ -114,13 +116,14 @@ describe('Server & Configuration Hardening (server.js, shopify.app.toml, README.
       const res = createMockRes();
       await listener(req, res);
 
-      assert.equal(res.statusCode, 501);
+      assert.equal(res.statusCode, 401);
+      assert.equal(res.headers['X-Shopify-Retry-Invalid-Session-Request'], '1');
       const data = JSON.parse(res.body);
-      assert.equal(data.error, 'Not Implemented');
+      assert.equal(data.error, 'Unauthorized');
       assert.ok(data.message.includes('session-token verification'));
     });
 
-    it('returns 501 on POST /api/admin/emergency/disable-all without hardcoded adminUser', async () => {
+    it('returns 401 with retry header on POST /api/admin/emergency/disable-all without session token', async () => {
       const req = createMockReq({
         method: 'POST',
         url: '/api/admin/emergency/disable-all',
@@ -128,13 +131,14 @@ describe('Server & Configuration Hardening (server.js, shopify.app.toml, README.
       const res = createMockRes();
       await listener(req, res);
 
-      assert.equal(res.statusCode, 501);
+      assert.equal(res.statusCode, 401);
+      assert.equal(res.headers['X-Shopify-Retry-Invalid-Session-Request'], '1');
       const data = JSON.parse(res.body);
-      assert.equal(data.error, 'Not Implemented');
+      assert.equal(data.error, 'Unauthorized');
       assert.ok(data.message.includes('session-token verification'));
     });
 
-    it('returns 501 on GET /api/admin/attribution.csv when database is configured', async () => {
+    it('returns 401 with retry header on GET /api/admin/attribution.csv without session token', async () => {
       const req = createMockReq({
         method: 'GET',
         url: '/api/admin/attribution.csv',
@@ -142,9 +146,10 @@ describe('Server & Configuration Hardening (server.js, shopify.app.toml, README.
       const res = createMockRes();
       await listener(req, res);
 
-      assert.equal(res.statusCode, 501);
+      assert.equal(res.statusCode, 401);
+      assert.equal(res.headers['X-Shopify-Retry-Invalid-Session-Request'], '1');
       const data = JSON.parse(res.body);
-      assert.equal(data.error, 'Not Implemented');
+      assert.equal(data.error, 'Unauthorized');
       assert.ok(data.message.includes('session-token verification'));
     });
   });
@@ -631,9 +636,6 @@ describe('Server & Configuration Hardening (server.js, shopify.app.toml, README.
     });
 
     const hiddenRoutes = [
-      '/',
-      '/admin',
-      '/app',
       '/portal',
       '/portal/preview',
       '/protocol/demo',
@@ -661,13 +663,236 @@ describe('Server & Configuration Hardening (server.js, shopify.app.toml, README.
 
       const req = createMockReq({
         method: 'GET',
-        url: `/admin?month=${targetMonth}`,
+        url: `/portal?month=${targetMonth}`,
       });
       const res = createMockRes();
       await prodListener(req, res);
 
       assert.equal(res.statusCode, 404);
       assert.equal(DEMO_REPORT.month, initialMonth, 'DEMO_REPORT.month must remain unmutated in production mode');
+    });
+  });
+
+  describe('Production Embedded Merchant Admin (DATABASE_URL configured & App Bridge Session Auth)', () => {
+    const apiSecret = 'test_secret_for_prod_admin_123';
+    const apiKey = 'test_api_key_prod_456';
+    const prodShop = 'wellness-store.myshopify.com';
+
+    const mockPool = {
+      async query(sql, params) {
+        if (typeof sql === 'string' && sql.includes('"Settings"')) {
+          return { rows: [{ shop: prodShop, mode: 'tag', disclaimer: 'Test disclaimer', handoutText: 'Test handout' }] };
+        }
+        return { rows: [], rowCount: 0 };
+      },
+    };
+
+    const prodListener = createRequestListener({
+      databaseUrl: 'postgres://production.host:5432/db',
+      shopifyApiSecret: apiSecret,
+      shopifyApiKey: apiKey,
+      pool: mockPool,
+    });
+
+    const validToken = createAdminSessionToken({
+      userId: 'gid://shopify/User/admin_1',
+      shop: prodShop,
+      apiKey,
+      expiresInSec: 3600,
+    }, apiSecret);
+
+    it('GET / serves App Bridge bootstrap page when embedded iframe has no token (embedded=1)', async () => {
+      const req = createMockReq({
+        method: 'GET',
+        url: `/?shop=${prodShop}&embedded=1`,
+      });
+      const res = createMockRes();
+      await prodListener(req, res);
+
+      assert.equal(res.statusCode, 200);
+      assert.ok(res.getHeader('content-type').includes('text/html'));
+      assert.ok(res.getHeader('content-security-policy').includes(`frame-ancestors https://${prodShop} https://admin.shopify.com;`));
+      assert.equal(res.headers['X-Content-Type-Options'], 'nosniff');
+      assert.equal(res.headers['Referrer-Policy'], 'strict-origin-when-cross-origin');
+      assert.ok(res.body.includes('<meta name="shopify-api-key" content="test_api_key_prod_456">'));
+      assert.ok(res.body.includes('<script src="https://cdn.shopify.com/shopifycloud/app-bridge.js"></script>'));
+      assert.ok(res.body.includes('window.shopify.idToken'));
+      assert.ok(res.body.includes('window.location.replace'));
+    });
+
+    it('GET / serves App Bridge bootstrap page when host parameter is present', async () => {
+      const req = createMockReq({
+        method: 'GET',
+        url: `/admin?shop=${prodShop}&host=YWRtaW4uc2hvcGlmeS5jb20vc3RvcmU=`,
+      });
+      const res = createMockRes();
+      await prodListener(req, res);
+
+      assert.equal(res.statusCode, 200);
+      assert.ok(res.body.includes('window.shopify.idToken'));
+    });
+
+    it('GET / redirects 302 to /api/auth on top-level direct navigation with valid ?shop=', async () => {
+      const req = createMockReq({
+        method: 'GET',
+        url: `/?shop=${prodShop}`,
+      });
+      const res = createMockRes();
+      await prodListener(req, res);
+
+      assert.equal(res.statusCode, 302);
+      assert.ok(res.headers.Location.startsWith('/api/auth?shop='));
+      assert.ok(res.headers.Location.includes(prodShop));
+    });
+
+    it('GET / returns 401 on top-level direct navigation with no shop and no session', async () => {
+      const req = createMockReq({
+        method: 'GET',
+        url: '/',
+      });
+      const res = createMockRes();
+      await prodListener(req, res);
+
+      assert.equal(res.statusCode, 401);
+      assert.ok(res.body.includes('Authentication required'));
+    });
+
+    it('GET / serves embedded Polaris admin HTML when valid id_token query param is provided', async () => {
+      const req = createMockReq({
+        method: 'GET',
+        url: `/?shop=${prodShop}&id_token=${validToken}`,
+      });
+      const res = createMockRes();
+      await prodListener(req, res);
+
+      assert.equal(res.statusCode, 200);
+      assert.ok(res.getHeader('content-type').includes('text/html'));
+      assert.ok(res.getHeader('content-security-policy').includes(`frame-ancestors https://${prodShop} https://admin.shopify.com;`));
+      assert.ok(res.body.includes('<meta name="shopify-api-key" content="test_api_key_prod_456">'));
+      assert.ok(res.body.includes('<script src="https://cdn.shopify.com/shopifycloud/app-bridge.js"></script>'));
+      assert.ok(res.body.includes('Practitioner Protocols'));
+      assert.ok(res.body.includes('Connected Store: wellness-store.myshopify.com'));
+    });
+
+    it('GET / serves embedded Polaris admin HTML when valid Authorization Bearer header is provided', async () => {
+      const req = createMockReq({
+        method: 'GET',
+        url: '/app',
+        headers: { Authorization: `Bearer ${validToken}` },
+      });
+      const res = createMockRes();
+      await prodListener(req, res);
+
+      assert.equal(res.statusCode, 200);
+      assert.ok(res.body.includes('Practitioner Protocols'));
+    });
+
+    it('rejects cross-shop mismatch on GET / with 403 Forbidden even when embedded', async () => {
+      const mismatchedShop = 'attacker-shop.myshopify.com';
+      const req = createMockReq({
+        method: 'GET',
+        url: `/?shop=${mismatchedShop}&id_token=${validToken}&embedded=1`,
+      });
+      const res = createMockRes();
+      await prodListener(req, res);
+
+      assert.equal(res.statusCode, 403);
+      const data = JSON.parse(res.body);
+      assert.equal(data.code, 'FORBIDDEN');
+    });
+
+    it('rejects cross-shop mismatch across all /api/admin/* endpoints with 403 Forbidden', async () => {
+      const mismatchedShop = 'attacker-shop.myshopify.com';
+      const headers = {
+        Authorization: `Bearer ${validToken}`,
+        'Content-Type': 'application/json',
+      };
+
+      const endpoints = [
+        { method: 'POST', url: `/api/admin/practitioners/status?shop=${mismatchedShop}`, body: '{"ownerGid":"gid://shopify/Customer/1","action":"approve"}' },
+        { method: 'POST', url: `/api/admin/practitioners/practice-name?shop=${mismatchedShop}`, body: '{"ownerGid":"gid://shopify/Customer/1","practiceName":"Test"}' },
+        { method: 'POST', url: `/api/admin/starters/create?shop=${mismatchedShop}`, body: '{"name":"Template","lines":[{"variantGid":"gid://shopify/ProductVariant/1","quantity":1}]}' },
+        { method: 'POST', url: `/api/admin/settings?shop=${mismatchedShop}`, body: '{"mode":"company","disclaimer":"Discl"}' },
+        { method: 'POST', url: `/api/admin/emergency/disable-all?shop=${mismatchedShop}`, body: '{}' },
+        { method: 'GET', url: `/api/admin/attribution.csv?shop=${mismatchedShop}` },
+      ];
+
+      for (const ep of endpoints) {
+        const req = createMockReq({
+          method: ep.method,
+          url: ep.url,
+          headers,
+          body: ep.body || '',
+        });
+        const res = createMockRes();
+        await prodListener(req, res);
+
+        assert.equal(res.statusCode, 403, `Expected 403 for ${ep.method} ${ep.url}, got ${res.statusCode}`);
+        const data = JSON.parse(res.body);
+        assert.equal(data.code, 'FORBIDDEN');
+      }
+    });
+
+    it('returns 401 with retry header on expired session token in non-embedded request', async () => {
+      const expiredToken = createAdminSessionToken({
+        userId: 'gid://shopify/User/admin_1',
+        shop: prodShop,
+        apiKey,
+        expiresInSec: -300, // expired 5 mins ago
+      }, apiSecret);
+
+      const req = createMockReq({
+        method: 'GET',
+        url: `/?shop=${prodShop}&id_token=${expiredToken}`,
+      });
+      const res = createMockRes();
+      await prodListener(req, res);
+
+      assert.equal(res.statusCode, 401);
+      assert.equal(res.getHeader('X-Shopify-Retry-Invalid-Session-Request'), '1');
+    });
+
+    it('serves App Bridge bootstrap HTML (200) on expired session token in embedded request', async () => {
+      const expiredToken = createAdminSessionToken({
+        userId: 'gid://shopify/User/admin_1',
+        shop: prodShop,
+        apiKey,
+        expiresInSec: -300, // expired 5 mins ago
+      }, apiSecret);
+
+      const req = createMockReq({
+        method: 'GET',
+        url: `/?shop=${prodShop}&id_token=${expiredToken}&embedded=1`,
+      });
+      const res = createMockRes();
+      await prodListener(req, res);
+
+      assert.equal(res.statusCode, 200);
+      assert.ok(res.getHeader('content-type').includes('text/html'));
+      assert.ok(res.getHeader('content-security-policy').includes(`frame-ancestors https://${prodShop} https://admin.shopify.com;`));
+      assert.ok(res.body.includes('<meta name="shopify-api-key" content="test_api_key_prod_456">'));
+      assert.ok(res.body.includes('<script src="https://cdn.shopify.com/shopifycloud/app-bridge.js"></script>'));
+      assert.ok(res.body.includes('window.shopify.idToken'));
+    });
+
+    it('returns 401 with retry header on forged token signature', async () => {
+      const forgedToken = createAdminSessionToken({
+        userId: 'gid://shopify/User/admin_1',
+        shop: prodShop,
+        apiKey,
+      }, 'wrong_signature_secret_999');
+
+      const req = createMockReq({
+        method: 'POST',
+        url: '/api/admin/settings',
+        headers: { Authorization: `Bearer ${forgedToken}`, 'Content-Type': 'application/json' },
+        body: '{"mode":"tag"}',
+      });
+      const res = createMockRes();
+      await prodListener(req, res);
+
+      assert.equal(res.statusCode, 401);
+      assert.equal(res.getHeader('X-Shopify-Retry-Invalid-Session-Request'), '1');
     });
   });
 

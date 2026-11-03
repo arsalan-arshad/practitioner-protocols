@@ -1,6 +1,10 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { validateProtocolInput } from '../app/lib/protocols/validation.js';
+import {
+  validateProtocolInput,
+  PRODUCT_HANDLE_PATTERN,
+  isValidProductHandle
+} from '../app/lib/protocols/validation.js';
 
 describe('Protocol Validation (app/lib/protocols/validation.js)', () => {
   const validLine = {
@@ -187,6 +191,106 @@ describe('Protocol Validation (app/lib/protocols/validation.js)', () => {
         assert.equal(res.isValid, false, `Expected ${badGid} to be rejected as invalid GID format`);
         assert.ok(res.errors.some(e => e.field === 'lines[0].variantGid' && e.code === 'INVALID_GID_FORMAT'));
       }
+    });
+
+    describe('Product Handle Validation (M9b-3a)', () => {
+      it('validates product handles using isValidProductHandle and PRODUCT_HANDLE_PATTERN', () => {
+        const validHandles = [
+          'daily-cleanser',
+          'hydrating-serum-30ml',
+          'product-1',
+          'a',
+          '1',
+          '100-percent-pure',
+          'abc-123-xyz'
+        ];
+        for (const h of validHandles) {
+          assert.equal(isValidProductHandle(h), true, `Expected valid handle: ${h}`);
+          assert.equal(PRODUCT_HANDLE_PATTERN.test(h), true);
+        }
+
+        const invalidHandles = [
+          '../x',
+          '..',
+          'a/b',
+          '/product/cleanser',
+          'A',
+          'Daily-Cleanser',
+          'daily_cleanser',
+          'daily cleanser',
+          'daily-cleanser ',
+          ' https://store.myshopify.com',
+          'javascript:alert(1)',
+          '-starts-with-hyphen',
+          'has.dot',
+          'has@symbol',
+          '',
+          null,
+          undefined,
+          123,
+          'a'.repeat(256)
+        ];
+        for (const bad of invalidHandles) {
+          assert.equal(isValidProductHandle(bad), false, `Expected invalid handle: ${String(bad)}`);
+        }
+      });
+
+      it('accepts valid productHandle in protocol line and sanitizes cleanly', () => {
+        const payload = {
+          ...validProtocol,
+          lines: [{
+            variantGid: 'gid://shopify/ProductVariant/1001',
+            productHandle: 'daily-cleanser',
+            quantity: 1
+          }]
+        };
+        const res = validateProtocolInput(payload);
+        assert.equal(res.isValid, true);
+        assert.equal(res.sanitized.lines[0].productHandle, 'daily-cleanser');
+      });
+
+      it('accepts null or omitted productHandle for backward compatibility', () => {
+        const payload1 = {
+          ...validProtocol,
+          lines: [{
+            variantGid: 'gid://shopify/ProductVariant/1001',
+            quantity: 1
+          }]
+        };
+        const res1 = validateProtocolInput(payload1);
+        assert.equal(res1.isValid, true);
+        assert.equal(res1.sanitized.lines[0].productHandle, null);
+
+        const payload2 = {
+          ...validProtocol,
+          lines: [{
+            variantGid: 'gid://shopify/ProductVariant/1001',
+            productHandle: null,
+            quantity: 1
+          }]
+        };
+        const res2 = validateProtocolInput(payload2);
+        assert.equal(res2.isValid, true);
+        assert.equal(res2.sanitized.lines[0].productHandle, null);
+      });
+
+      it('rejects invalid productHandle format (uppercase, slashes, double dots, spaces, url schemes)', () => {
+        const badHandles = ['../x', 'A', 'a/b', 'daily cleanser', 'https://example.com', 'cleanser_oil'];
+        for (const bad of badHandles) {
+          const payload = {
+            ...validProtocol,
+            lines: [{
+              variantGid: 'gid://shopify/ProductVariant/1001',
+              productHandle: bad,
+              quantity: 1
+            }]
+          };
+          const res = validateProtocolInput(payload);
+          assert.equal(res.isValid, false, `Expected handle '${bad}' to be rejected`);
+          const err = res.errors.find(e => e.field === 'lines[0].productHandle' && e.code === 'INVALID_PRODUCT_HANDLE');
+          assert.ok(err, `Expected INVALID_PRODUCT_HANDLE for '${bad}'`);
+        }
+      });
     });
   });
 

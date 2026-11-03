@@ -240,6 +240,93 @@ describe('Shopify App Proxy & Storefront (app/lib/protocols/proxy.js)', () => {
       assert.ok(notFound.includes('Protocol Not Found'));
     });
 
+    it('renders null/missing productHandle safely with "Product no longer available" (M9b-3a)', () => {
+      const protocolWithNullHandle = {
+        id: 'proto_null_handle',
+        token: 'tok_null_handle_123',
+        name: 'Legacy Protocol',
+        status: 'active',
+        lines: [
+          {
+            variantGid: 'gid://shopify/ProductVariant/9991',
+            quantity: 1,
+            productHandle: null
+          }
+        ]
+      };
+
+      const liquid = renderProtocolLiquid({ protocol: protocolWithNullHandle });
+      assert.ok(liquid.includes('Product no longer available'));
+      assert.ok(liquid.includes('protocol-line-unavailable'));
+      assert.ok(liquid.includes('protocol-btn-disabled'));
+      assert.ok(liquid.includes('disabled aria-disabled="true"'));
+
+      // In data payload, item.available is false
+      const jsonMatch = liquid.match(/<script type="application\/json" id="protocol-data-payload">\s*([\s\S]*?)\s*<\/script>/);
+      const parsed = JSON.parse(jsonMatch[1]);
+      assert.equal(parsed.items[0].available, false);
+    });
+
+    it('renders valid productHandle with client-side hydration markup and attributes (M9b-3a)', () => {
+      const protocolWithHandle = {
+        id: 'proto_with_handle',
+        token: 'tok_with_handle_123',
+        name: 'Modern Hydrated Protocol',
+        status: 'active',
+        lines: [
+          {
+            variantGid: 'gid://shopify/ProductVariant/8881',
+            productHandle: 'daily-barrier-cream',
+            quantity: 2,
+            usageNote: 'Apply AM and PM'
+          }
+        ]
+      };
+
+      const liquid = renderProtocolLiquid({ protocol: protocolWithHandle });
+      assert.ok(liquid.includes('data-product-handle="daily-barrier-cream"'));
+      assert.ok(liquid.includes('data-variant-id="8881"'));
+      assert.ok(liquid.includes('data-variant-gid="gid://shopify/ProductVariant/8881"'));
+      assert.ok(liquid.includes('/products/'));
+      assert.ok(liquid.includes('.js'));
+
+      // Check payload includes productHandle and variantGid
+      const jsonMatch = liquid.match(/<script type="application\/json" id="protocol-data-payload">\s*([\s\S]*?)\s*<\/script>/);
+      const parsed = JSON.parse(jsonMatch[1]);
+      assert.equal(parsed.items[0].productHandle, 'daily-barrier-cream');
+      assert.equal(parsed.items[0].variantGid, 'gid://shopify/ProductVariant/8881');
+    });
+
+    it('neutralizes XSS and Liquid injection in product titles, handles, and line notes (M9b-3a)', () => {
+      const xssProtocol = {
+        id: 'proto_xss',
+        token: 'tok_xss',
+        name: '<script>alert(1)</script>"><img src=x>',
+        status: 'active',
+        lines: [
+          {
+            variantGid: 'gid://shopify/ProductVariant/7771',
+            productHandle: 'valid-handle',
+            title: '<script>alert("xss")</script><img src=x onerror=alert(2)>',
+            variantTitle: '"><script>alert(3)</script>',
+            usageNote: '<script>alert(4)</script>{{ shop.name }}',
+            quantity: 1
+          }
+        ]
+      };
+
+      const liquid = renderProtocolLiquid({ protocol: xssProtocol });
+      // Assert raw unescaped script and img tags are not present in markup
+      assert.ok(!liquid.includes('<script>alert("xss")</script>'));
+      assert.ok(!liquid.includes('<script>alert(1)</script>'));
+      assert.ok(!liquid.includes('<script>alert(3)</script>'));
+      assert.ok(!liquid.includes('<script>alert(4)</script>'));
+      assert.ok(!liquid.includes('<img src=x onerror=alert(2)>'));
+      assert.ok(liquid.includes('&lt;img src=x onerror=alert(2)&gt;'));
+      assert.ok(liquid.includes('&lt;script&gt;alert(&quot;xss&quot;)&lt;/script&gt;'));
+      assert.ok(!liquid.includes('{{ shop.name }}'));
+    });
+
     it('neutralizes Liquid syntax across all user outputs including data-* attributes and JSON payloads', () => {
       const injectionProtocol = {
         id: 'proto_inject',

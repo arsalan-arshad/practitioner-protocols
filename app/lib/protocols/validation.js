@@ -16,9 +16,19 @@ export class ProtocolValidationError extends Error {
 }
 
 const PII_FORBIDDEN_KEY_PATTERN = /(?:patient|client|ssn|health|medical|diagnosis|condition)/i;
-const SHOPIFY_VARIANT_GID_PATTERN = /^gid:\/\/shopify\/ProductVariant\/\d+$/;
-const MAX_VARIANT_GID_LENGTH = 100;
+export const SHOPIFY_VARIANT_GID_PATTERN = /^gid:\/\/shopify\/ProductVariant\/\d+$/;
+export const MAX_VARIANT_GID_LENGTH = 100;
+export const PRODUCT_HANDLE_PATTERN = /^[a-z0-9][a-z0-9-]{0,254}$/;
 const ALLOWED_STATUSES = new Set(['active', 'archived', 'disabled']);
+
+/**
+ * Validates a Shopify product handle format (lowercase alphanumeric and hyphens, 1-255 chars).
+ * @param {any} handle
+ * @returns {boolean}
+ */
+export function isValidProductHandle(handle) {
+  return typeof handle === 'string' && PRODUCT_HANDLE_PATTERN.test(handle);
+}
 
 /**
  * Validates protocol input for creation or updates.
@@ -201,6 +211,20 @@ export function validateProtocolInput(input, { isUpdate = false, isAdmin = false
           }
         }
 
+        // Product Handle (optional, but if provided must match ^[a-z0-9][a-z0-9-]{0,254}$)
+        let productHandle = null;
+        if (line.productHandle !== undefined && line.productHandle !== null) {
+          if (typeof line.productHandle !== 'string' || !isValidProductHandle(line.productHandle)) {
+            errors.push({
+              field: `${lineFieldPrefix}.productHandle`,
+              code: 'INVALID_PRODUCT_HANDLE',
+              message: `Product handle '${line.productHandle}' is invalid. Must match ^[a-z0-9][a-z0-9-]{0,254}$ (lowercase alphanumeric and hyphens).`
+            });
+          } else {
+            productHandle = line.productHandle;
+          }
+        }
+
         // Quantity (1 to 10 integer)
         const qty = line.quantity;
         if (typeof qty !== 'number' || !Number.isInteger(qty) || qty < 1 || qty > 10) {
@@ -237,6 +261,7 @@ export function validateProtocolInput(input, { isUpdate = false, isAdmin = false
         if (errors.length === 0 || errors.every(e => !e.field.startsWith(lineFieldPrefix))) {
           parsedLines.push({
             variantGid: line.variantGid ? line.variantGid.trim() : '',
+            productHandle,
             quantity: typeof qty === 'number' ? qty : 1,
             usageNote
           });

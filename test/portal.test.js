@@ -743,6 +743,86 @@ describe('Practitioner Portal (app/lib/protocols/portal.js)', () => {
       assert.ok(liquid.includes('&#123;% assign x = 1 %&#125;'));
     });
 
+    describe('Protocol Editor & Client-Side Search (M9b-3a)', () => {
+      it('preserves productHandle in prepareProtocolEditorPayload', () => {
+        const payload = prepareProtocolEditorPayload({
+          name: 'Handled Protocol',
+          lines: [
+            {
+              variantGid: 'gid://shopify/ProductVariant/101',
+              productHandle: 'acme-cleanser',
+              quantity: 2,
+              usageNote: '1 pump daily'
+            }
+          ]
+        });
+
+        assert.equal(payload.isValid, true);
+        assert.equal(payload.payload.lines[0].productHandle, 'acme-cleanser');
+        assert.equal(payload.payload.lines[0].variantGid, 'gid://shopify/ProductVariant/101');
+      });
+
+      it('renders approved portal with search/suggest.json, debouncing, and /products/<handle>.js hydration script', () => {
+        const liquid = renderPortalLiquid({
+          isLoggedIn: true,
+          isApproved: true,
+          hasProfile: true,
+          practiceName: 'Elite Naturopathic Clinic',
+          activeProtocols: [
+            {
+              id: 'proto_1',
+              token: 'tok_active_123',
+              name: 'Digestive Regimen',
+              lines: [
+                {
+                  variantGid: 'gid://shopify/ProductVariant/202',
+                  productHandle: 'digest-enzymes',
+                  quantity: 1,
+                  usageNote: 'Take with meal'
+                }
+              ]
+            }
+          ]
+        });
+
+        assert.ok(liquid.includes('Practitioner Protocols'));
+        assert.ok(liquid.includes('id="protocol-editor-modal"'));
+        assert.ok(liquid.includes('/search/suggest.json'));
+        assert.ok(liquid.includes('resources[type]=product'));
+        assert.ok(liquid.includes('resources[limit]=10'));
+        assert.ok(liquid.includes('resources[options][unavailable_products]=show'));
+        assert.ok(liquid.includes('/products/'));
+        assert.ok(liquid.includes('.js'));
+        assert.ok(liquid.includes('action=create'));
+        assert.ok(liquid.includes('action=update'));
+        assert.ok(liquid.includes('300')); // 300ms debounce
+        assert.ok(liquid.includes('q.length < 2')); // min 2 chars
+      });
+
+      it('safely neutralizes dangerous XSS payloads in protocol titles and search inputs', () => {
+        const dangerousTitle = '<script>alert("hack")</script>"><img src=x onerror=alert(1)>';
+        const liquid = renderPortalLiquid({
+          isLoggedIn: true,
+          isApproved: true,
+          hasProfile: true,
+          practiceName: 'Elite Clinic',
+          activeProtocols: [
+            {
+              id: 'proto_danger',
+              token: 'tok_danger_1',
+              name: dangerousTitle,
+              lines: []
+            }
+          ]
+        });
+
+        assert.ok(!liquid.includes('<script>alert("hack")</script>'));
+        assert.ok(!liquid.includes('<img src=x onerror=alert(1)>'));
+        assert.ok(liquid.includes('&lt;script&gt;alert(&quot;hack&quot;)&lt;/script&gt;'));
+        assert.ok(liquid.includes('&lt;img src=x onerror=alert(1)&gt;'));
+      });
+    });
+
     describe('Portal States & Self-Enrolment UI (Milestone M9b-2)', () => {
       it('renders Request Practitioner Access form when customer is logged in, has no profile, allowSelfEnrol is true in Tag mode', () => {
         const liquid = renderPortalLiquid({

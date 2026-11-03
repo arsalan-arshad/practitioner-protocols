@@ -28,7 +28,9 @@ import {
   validateAppProxyCsrf,
   handleEnrolRequest,
   setDefaultEnrolRateLimiter,
-  getDefaultEnrolRateLimiter
+  getDefaultEnrolRateLimiter,
+  setDefaultProxyRateLimiter,
+  getDefaultProxyRateLimiter
 } from '../app/lib/protocols/routes.js';
 import { calculateAppProxySignature } from '../app/lib/protocols/proxy.js';
 import { ProtocolValidationError } from '../app/lib/protocols/validation.js';
@@ -184,13 +186,15 @@ describe('HTTP Routes & Request Handlers (app/lib/protocols/routes.js)', () => {
 
         // 5. INSERT INTO "ProtocolLine"
         if (sql.includes('INSERT INTO "ProtocolLine"')) {
+          const hasHandleCol = sql.includes('productHandle');
           const newLine = {
             id: `line_${state.lines.length + 1}`,
             protocolId: params[0],
             position: params[1],
             variantGid: params[2],
-            quantity: params[3],
-            usageNote: params[4],
+            productHandle: hasHandleCol ? (params[3] || null) : null,
+            quantity: hasHandleCol ? params[4] : params[3],
+            usageNote: hasHandleCol ? params[5] : params[4],
             createdAt: new Date(),
             updatedAt: new Date()
           };
@@ -966,6 +970,27 @@ describe('HTTP Routes & Request Handlers (app/lib/protocols/routes.js)', () => {
       const data = await res.json();
       assert.equal(data.code, 'NOT_FOUND');
     });
+
+    it('persists and returns productHandle in created protocol lines (M9b-3a)', async () => {
+      const payload = {
+        name: 'Protocol with Product Handles',
+        lines: [
+          {
+            variantGid: 'gid://shopify/ProductVariant/5050',
+            productHandle: 'hydrating-daily-cleanser',
+            quantity: 2,
+            usageNote: '1 pump AM/PM'
+          }
+        ]
+      };
+
+      const res = await handleCreateProtocolRequest(db, practitionerUser, payload);
+      assert.equal(res.status, 201);
+      const data = await res.json();
+      assert.equal(data.lines.length, 1);
+      assert.equal(data.lines[0].productHandle, 'hydrating-daily-cleanser');
+      assert.equal(data.lines[0].variantGid, 'gid://shopify/ProductVariant/5050');
+    });
   });
 
   describe('handleGetProtocolRequest', () => {
@@ -1049,6 +1074,26 @@ describe('HTTP Routes & Request Handlers (app/lib/protocols/routes.js)', () => {
       assert.equal(data.introNote, 'Updated notes');
       assert.equal(data.lines.length, 1);
       assert.equal(data.lines[0].variantGid, 'gid://shopify/ProductVariant/2');
+    });
+
+    it('persists and returns productHandle in updated protocol lines (M9b-3a)', async () => {
+      const updatePayload = {
+        name: 'Updated with Handles',
+        lines: [
+          {
+            variantGid: 'gid://shopify/ProductVariant/777',
+            productHandle: 'gentle-gel-cleanser',
+            quantity: 1,
+            usageNote: 'Morning only'
+          }
+        ]
+      };
+
+      const res = await handleUpdateProtocolRequest(db, practitionerUser, existingProto.id, updatePayload);
+      assert.equal(res.status, 200);
+      const data = await res.json();
+      assert.equal(data.lines[0].productHandle, 'gentle-gel-cleanser');
+      assert.equal(data.lines[0].variantGid, 'gid://shopify/ProductVariant/777');
     });
 
     it('prevents non-owner from updating someone else protocol (404 Not Found to prevent enumeration)', async () => {
@@ -1915,7 +1960,8 @@ describe('HTTP Routes & Request Handlers (app/lib/protocols/routes.js)', () => {
           handoutText: null
         }]
       });
-      // Reset default enrol limiter
+      // Reset default limiters
+      setDefaultProxyRateLimiter(createRateLimiter({ windowMs: 60000, maxRequests: 60 }));
       setDefaultEnrolRateLimiter(createRateLimiter({ windowMs: 3600000, maxRequests: 5 }));
     });
 
@@ -2453,6 +2499,162 @@ describe('HTTP Routes & Request Handlers (app/lib/protocols/routes.js)', () => {
       assert.equal(res.status, 403);
       const data = await res.json();
       assert.ok(data.error.includes('pending approval'));
+    });
+
+    describe('App Proxy Protocol Authoring & Rule-4 Isolation (M9b-3a)', () => {
+      beforeEach(() => {
+        db.state.profiles.push({
+          id: 'prof_author',
+          shop: testShop,
+          ownerGid: customerGid,
+          practiceName: 'Approved Author Practice',
+          isApproved: true
+        });
+      });
+
+      it('creates new protocol with productHandle via POST /apps/protocols?action=create', async () => {
+        const url = makeSignedProxyUrl({ action: 'create', logged_in_customer_id: testCustomerId });
+        const req = new Request(url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+          },
+          body: JSON.stringify({
+            name: 'Client Evening Protocol',
+            introNote: 'Follow instructions nightly.',
+            lines: [
+              {
+                variantGid: 'gid://shopify/ProductVariant/6001',
+                productHandle: 'night-repair-cream',
+                quantity: 1,
+                usageNote: 'Apply thin layer'
+              }
+            ]
+          })
+        });
+
+        const res = await handleAppProxyRequest(db, req, { apiSecret });
+        assert.equal(res.status, 201);
+        const data = await res.json();
+        assert.equal(data.name, 'Client Evening Protocol');
+        assert.equal(data.lines.length, 1);
+        assert.equal(data.lines[0].productHandle, 'night-repair-cream');
+        assert.equal(data.lines[0].variantGid, 'gid://shopify/ProductVariant/6001');
+      });
+
+      it('updates existing protocol with productHandle via POST /apps/protocols?action=update&id=...', async () => {
+        const proto = {
+          id: 'proto_my_editable',
+          shop: testShop,
+          token: 'tok_editable_123',
+          name: 'Original Routine',
+          ownerType: 'customer',
+          ownerId: customerGid,
+          createdBy: customerGid,
+          status: 'active'
+        };
+        db.state.protocols.push(proto);
+        db.state.lines.push({
+          id: 'line_init',
+          protocolId: proto.id,
+          position: 0,
+          variantGid: 'gid://shopify/ProductVariant/1111',
+          productHandle: 'old-product',
+          quantity: 1
+        });
+
+        const url = makeSignedProxyUrl({ action: 'update', id: proto.id, logged_in_customer_id: testCustomerId });
+        const req = new Request(url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+          },
+          body: JSON.stringify({
+            name: 'Updated Routine Name',
+            lines: [
+              {
+                variantGid: 'gid://shopify/ProductVariant/2222',
+                productHandle: 'new-product-handle',
+                quantity: 2,
+                usageNote: 'Twice daily'
+              }
+            ]
+          })
+        });
+
+        const res = await handleAppProxyRequest(db, req, { apiSecret });
+        assert.equal(res.status, 200);
+        const data = await res.json();
+        assert.equal(data.name, 'Updated Routine Name');
+        assert.equal(data.lines[0].productHandle, 'new-product-handle');
+        assert.equal(data.lines[0].variantGid, 'gid://shopify/ProductVariant/2222');
+      });
+
+      it('Rule-4: rejects cross-owner protocol update via App Proxy with 404 Not Found', async () => {
+        const otherProto = {
+          id: 'proto_other_practitioner',
+          shop: testShop,
+          token: 'tok_other_123',
+          name: 'Other Doctor Routine',
+          ownerType: 'customer',
+          ownerId: 'gid://shopify/Customer/someone_else',
+          createdBy: 'gid://shopify/Customer/someone_else',
+          status: 'active'
+        };
+        db.state.protocols.push(otherProto);
+
+        const url = makeSignedProxyUrl({ action: 'update', id: otherProto.id, logged_in_customer_id: testCustomerId });
+        const req = new Request(url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+          },
+          body: JSON.stringify({
+            name: 'Hijacked Protocol',
+            lines: [{ variantGid: 'gid://shopify/ProductVariant/3333', quantity: 1 }]
+          })
+        });
+
+        const res = await handleAppProxyRequest(db, req, { apiSecret });
+        assert.equal(res.status, 404);
+        const data = await res.json();
+        assert.equal(data.code, 'NOT_FOUND');
+      });
+
+      it('Rule-4: enforces cross-shop isolation (Shop A practitioner cannot access Shop B)', async () => {
+        const shopB = 'different-store.myshopify.com';
+        const shopBProto = {
+          id: 'proto_shop_b',
+          shop: shopB,
+          token: 'tok_shop_b_123',
+          name: 'Shop B Routine',
+          ownerType: 'customer',
+          ownerId: customerGid,
+          createdBy: customerGid,
+          status: 'active'
+        };
+        db.state.protocols.push(shopBProto);
+
+        // Attempt to update Shop B protocol via Shop A URL
+        const url = makeSignedProxyUrl({ action: 'update', id: shopBProto.id, logged_in_customer_id: testCustomerId });
+        const req = new Request(url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+          },
+          body: JSON.stringify({
+            name: 'Cross Shop Update',
+            lines: [{ variantGid: 'gid://shopify/ProductVariant/4444', quantity: 1 }]
+          })
+        });
+
+        const res = await handleAppProxyRequest(db, req, { apiSecret });
+        assert.equal(res.status, 404);
+      });
     });
   });
 });

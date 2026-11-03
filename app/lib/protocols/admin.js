@@ -615,67 +615,92 @@ export async function updateSettings(db, { shop, settings, adminUser }) {
 
   assertNoPii(settings);
 
-  let identityMode = settings.identityMode !== undefined ? settings.identityMode : settings.mode;
-  if (identityMode !== undefined) {
-    if (!ALLOWED_IDENTITY_MODES.has(identityMode)) {
+  // 1. identityMode
+  const rawMode = settings.identityMode !== undefined ? settings.identityMode : settings.mode;
+  const hasMode = rawMode !== undefined;
+  let modeVal = null;
+  if (hasMode) {
+    if (!ALLOWED_IDENTITY_MODES.has(rawMode)) {
       throw new ProtocolAdminError(
-        `Invalid identityMode '${identityMode}'. Must be 'tag' or 'company'.`,
+        `Invalid identityMode '${rawMode}'. Must be 'tag' or 'company'.`,
         ADMIN_ERROR_CODES.INVALID_INPUT,
         'identityMode'
       );
     }
-  } else {
-    identityMode = 'tag';
+    modeVal = rawMode;
   }
 
-  let allowSelfEnrol = undefined;
-  if (settings.allowSelfEnrol !== undefined) {
+  // 2. allowSelfEnrol
+  const hasAllowSelfEnrol = settings.allowSelfEnrol !== undefined;
+  let selfEnrolVal = null;
+  if (hasAllowSelfEnrol) {
     if (typeof settings.allowSelfEnrol === 'boolean') {
-      allowSelfEnrol = settings.allowSelfEnrol;
+      selfEnrolVal = settings.allowSelfEnrol;
     } else if (Array.isArray(settings.allowSelfEnrol)) {
       const lastVal = settings.allowSelfEnrol[settings.allowSelfEnrol.length - 1];
       const lower = String(lastVal).trim().toLowerCase();
-      allowSelfEnrol = ['true', '1', 'on'].includes(lower);
+      selfEnrolVal = ['true', '1', 'on'].includes(lower);
     } else {
       const lower = String(settings.allowSelfEnrol).trim().toLowerCase();
-      allowSelfEnrol = ['true', '1', 'on'].includes(lower);
+      selfEnrolVal = ['true', '1', 'on'].includes(lower);
     }
   }
 
+  // 3. footerDisclaimer
   const rawFooter = settings.footerDisclaimer !== undefined ? settings.footerDisclaimer : settings.disclaimer;
-  const footerDisclaimer = rawFooter !== undefined
-    ? (rawFooter ? String(rawFooter).trim() : null)
-    : null;
-  if (footerDisclaimer && footerDisclaimer.length > 1000) {
-    throw new ProtocolAdminError('Footer disclaimer cannot exceed 1000 characters', ADMIN_ERROR_CODES.INVALID_INPUT, 'footerDisclaimer');
+  const hasFooter = rawFooter !== undefined;
+  let footerVal = null;
+  if (hasFooter) {
+    footerVal = rawFooter ? String(rawFooter).trim() : null;
+    if (footerVal && footerVal.length > 1000) {
+      throw new ProtocolAdminError('Footer disclaimer cannot exceed 1000 characters', ADMIN_ERROR_CODES.INVALID_INPUT, 'footerDisclaimer');
+    }
   }
 
-  const handoutText = settings.handoutText !== undefined
-    ? (settings.handoutText ? String(settings.handoutText).trim() : null)
-    : null;
-  if (handoutText && handoutText.length > 1000) {
-    throw new ProtocolAdminError('Handout text cannot exceed 1000 characters', ADMIN_ERROR_CODES.INVALID_INPUT, 'handoutText');
+  // 4. handoutText
+  const rawHandout = settings.handoutText;
+  const hasHandout = rawHandout !== undefined;
+  let handoutVal = null;
+  if (hasHandout) {
+    handoutVal = rawHandout ? String(rawHandout).trim() : null;
+    if (handoutVal && handoutVal.length > 1000) {
+      throw new ProtocolAdminError('Handout text cannot exceed 1000 characters', ADMIN_ERROR_CODES.INVALID_INPUT, 'handoutText');
+    }
   }
-
-  const allowSelfEnrolParam = allowSelfEnrol !== undefined ? allowSelfEnrol : null;
 
   const sql = `
     INSERT INTO "Setting" (
       "shop", "identityMode", "allowSelfEnrol", "footerDisclaimer", "handoutText", "createdAt", "updatedAt"
     ) VALUES (
-      $1, $2, COALESCE($3, false), $4, $5, NOW(), NOW()
+      $1,
+      COALESCE($2, 'tag'),
+      COALESCE($4, false),
+      $6,
+      $8,
+      NOW(),
+      NOW()
     )
     ON CONFLICT ("shop")
     DO UPDATE SET
-      "identityMode" = COALESCE(EXCLUDED."identityMode", "Setting"."identityMode"),
-      "allowSelfEnrol" = COALESCE($3, "Setting"."allowSelfEnrol"),
-      "footerDisclaimer" = EXCLUDED."footerDisclaimer",
-      "handoutText" = EXCLUDED."handoutText",
+      "identityMode" = CASE WHEN $3 THEN $2 ELSE "Setting"."identityMode" END,
+      "allowSelfEnrol" = CASE WHEN $5 THEN $4 ELSE "Setting"."allowSelfEnrol" END,
+      "footerDisclaimer" = CASE WHEN $7 THEN $6 ELSE "Setting"."footerDisclaimer" END,
+      "handoutText" = CASE WHEN $9 THEN $8 ELSE "Setting"."handoutText" END,
       "updatedAt" = NOW()
     RETURNING *
   `;
 
-  const res = await db.query(sql, [shop, identityMode, allowSelfEnrolParam, footerDisclaimer, handoutText]);
+  const res = await db.query(sql, [
+    shop,
+    modeVal,
+    hasMode,
+    selfEnrolVal,
+    hasAllowSelfEnrol,
+    footerVal,
+    hasFooter,
+    handoutVal,
+    hasHandout
+  ]);
   const row = res.rows[0];
   return {
     ...row,

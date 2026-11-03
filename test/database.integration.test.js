@@ -461,6 +461,76 @@ describe('PostgreSQL Database Integration (app/lib/protocols/service.js)', () =>
     assert.ok(Array.isArray(report.byProtocol));
   });
 
+  it('exercises settings partial updates and field preservation on real PostgreSQL', async (t) => {
+    if (!pgClient || !pgClient._connected) {
+      t.skip('Skipped loudly: PostgreSQL connection not available on localhost:5432');
+      return;
+    }
+
+    const admin = await import('../app/lib/protocols/admin.js');
+
+    // 1. Initial setup with company mode, footer, handout
+    await admin.updateSettings(pgClient, {
+      shop: testShop,
+      adminUser,
+      settings: {
+        identityMode: 'company',
+        allowSelfEnrol: false,
+        footerDisclaimer: 'Real DB Initial Disclaimer',
+        handoutText: 'Real DB Handout'
+      }
+    });
+
+    // 2. { allowSelfEnrol: true } alone keeps company mode, footer and handout
+    const res1 = await admin.updateSettings(pgClient, {
+      shop: testShop,
+      adminUser,
+      settings: { allowSelfEnrol: true }
+    });
+    assert.equal(res1.allowSelfEnrol, true);
+    assert.equal(res1.identityMode, 'company');
+    assert.equal(res1.footerDisclaimer, 'Real DB Initial Disclaimer');
+    assert.equal(res1.handoutText, 'Real DB Handout');
+
+    // 3. { footerDisclaimer: '' } clears the footer and nothing else
+    const res2 = await admin.updateSettings(pgClient, {
+      shop: testShop,
+      adminUser,
+      settings: { footerDisclaimer: '' }
+    });
+    assert.equal(res2.footerDisclaimer, null);
+    assert.equal(res2.identityMode, 'company');
+    assert.equal(res2.allowSelfEnrol, true);
+    assert.equal(res2.handoutText, 'Real DB Handout');
+
+    // 4. { identityMode: 'tag' } alone keeps the other fields
+    const res3 = await admin.updateSettings(pgClient, {
+      shop: testShop,
+      adminUser,
+      settings: { identityMode: 'tag' }
+    });
+    assert.equal(res3.identityMode, 'tag');
+    assert.equal(res3.allowSelfEnrol, true);
+    assert.equal(res3.footerDisclaimer, null);
+    assert.equal(res3.handoutText, 'Real DB Handout');
+
+    // 5. Full form submit still works
+    const res4 = await admin.updateSettings(pgClient, {
+      shop: testShop,
+      adminUser,
+      settings: {
+        mode: 'company',
+        disclaimer: 'Final Disclaimer',
+        handoutText: 'Final Handout',
+        allowSelfEnrol: 'false'
+      }
+    });
+    assert.equal(res4.identityMode, 'company');
+    assert.equal(res4.allowSelfEnrol, false);
+    assert.equal(res4.footerDisclaimer, 'Final Disclaimer');
+    assert.equal(res4.handoutText, 'Final Handout');
+  });
+
   it('allows duplicating a protocol into own library', async (t) => {
     if (!pgClient || !pgClient._connected) {
       t.skip('Skipped loudly: PostgreSQL connection not available on localhost:5432');

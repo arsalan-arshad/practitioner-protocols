@@ -261,24 +261,32 @@ describe('Merchant Admin Layer (app/lib/protocols/admin.js)', () => {
 
         // Setting UPSERT
         if (sql.includes('INSERT INTO "Setting"')) {
-          const [shop, identityMode, allowSelfEnrol, footerDisclaimer, handoutText] = params;
+          const [
+            shop,
+            modeVal,
+            hasMode,
+            selfEnrolVal,
+            hasAllowSelfEnrol,
+            footerVal,
+            hasFooter,
+            handoutVal,
+            hasHandout
+          ] = params;
           const existing = state.settings.find(s => s.shop === shop);
           if (existing) {
-            existing.identityMode = identityMode || existing.identityMode;
-            if (allowSelfEnrol !== null && allowSelfEnrol !== undefined) {
-              existing.allowSelfEnrol = allowSelfEnrol;
-            }
-            existing.footerDisclaimer = footerDisclaimer;
-            existing.handoutText = handoutText;
+            if (hasMode) existing.identityMode = modeVal ?? 'tag';
+            if (hasAllowSelfEnrol) existing.allowSelfEnrol = selfEnrolVal ?? false;
+            if (hasFooter) existing.footerDisclaimer = footerVal ?? null;
+            if (hasHandout) existing.handoutText = handoutVal ?? null;
             existing.updatedAt = new Date();
             return { rows: [{ ...existing }] };
           }
           const created = {
             shop,
-            identityMode: identityMode || 'tag',
-            allowSelfEnrol: allowSelfEnrol !== null && allowSelfEnrol !== undefined ? allowSelfEnrol : false,
-            footerDisclaimer,
-            handoutText,
+            identityMode: modeVal ?? 'tag',
+            allowSelfEnrol: selfEnrolVal ?? false,
+            footerDisclaimer: footerVal ?? null,
+            handoutText: handoutVal ?? null,
             createdAt: new Date(),
             updatedAt: new Date()
           };
@@ -849,6 +857,124 @@ describe('Merchant Admin Layer (app/lib/protocols/admin.js)', () => {
 
       const settingsA = await getSettings(db, { shop: shopA });
       assert.strictEqual(settingsA.allowSelfEnrol, true);
+    });
+
+    it('{allowSelfEnrol:true} alone keeps company mode, footer and handout', async () => {
+      const db = createMockDb();
+      await updateSettings(db, {
+        shop: testShop,
+        adminUser,
+        settings: {
+          identityMode: 'company',
+          allowSelfEnrol: false,
+          footerDisclaimer: 'Clinic Disclaimer',
+          handoutText: 'Clinic Handout Instructions'
+        }
+      });
+
+      const result = await updateSettings(db, {
+        shop: testShop,
+        adminUser,
+        settings: { allowSelfEnrol: true }
+      });
+
+      assert.strictEqual(result.allowSelfEnrol, true);
+      assert.strictEqual(result.identityMode, 'company');
+      assert.strictEqual(result.footerDisclaimer, 'Clinic Disclaimer');
+      assert.strictEqual(result.handoutText, 'Clinic Handout Instructions');
+
+      const fetched = await getSettings(db, { shop: testShop });
+      assert.strictEqual(fetched.allowSelfEnrol, true);
+      assert.strictEqual(fetched.identityMode, 'company');
+      assert.strictEqual(fetched.footerDisclaimer, 'Clinic Disclaimer');
+      assert.strictEqual(fetched.handoutText, 'Clinic Handout Instructions');
+    });
+
+    it('{footerDisclaimer:""} clears the footer and nothing else', async () => {
+      const db = createMockDb();
+      await updateSettings(db, {
+        shop: testShop,
+        adminUser,
+        settings: {
+          identityMode: 'company',
+          allowSelfEnrol: true,
+          footerDisclaimer: 'Active Disclaimer',
+          handoutText: 'Active Handout'
+        }
+      });
+
+      const result = await updateSettings(db, {
+        shop: testShop,
+        adminUser,
+        settings: { footerDisclaimer: '' }
+      });
+
+      assert.strictEqual(result.footerDisclaimer, null);
+      assert.strictEqual(result.identityMode, 'company');
+      assert.strictEqual(result.allowSelfEnrol, true);
+      assert.strictEqual(result.handoutText, 'Active Handout');
+
+      const fetched = await getSettings(db, { shop: testShop });
+      assert.strictEqual(fetched.footerDisclaimer, null);
+      assert.strictEqual(fetched.identityMode, 'company');
+      assert.strictEqual(fetched.allowSelfEnrol, true);
+      assert.strictEqual(fetched.handoutText, 'Active Handout');
+    });
+
+    it('{identityMode:"company"} alone keeps the other fields', async () => {
+      const db = createMockDb();
+      await updateSettings(db, {
+        shop: testShop,
+        adminUser,
+        settings: {
+          identityMode: 'tag',
+          allowSelfEnrol: true,
+          footerDisclaimer: 'Keep This Disclaimer',
+          handoutText: 'Keep This Handout'
+        }
+      });
+
+      const result = await updateSettings(db, {
+        shop: testShop,
+        adminUser,
+        settings: { identityMode: 'company' }
+      });
+
+      assert.strictEqual(result.identityMode, 'company');
+      assert.strictEqual(result.allowSelfEnrol, true);
+      assert.strictEqual(result.footerDisclaimer, 'Keep This Disclaimer');
+      assert.strictEqual(result.handoutText, 'Keep This Handout');
+
+      const fetched = await getSettings(db, { shop: testShop });
+      assert.strictEqual(fetched.identityMode, 'company');
+      assert.strictEqual(fetched.allowSelfEnrol, true);
+      assert.strictEqual(fetched.footerDisclaimer, 'Keep This Disclaimer');
+      assert.strictEqual(fetched.handoutText, 'Keep This Handout');
+    });
+
+    it('full form submit still works (mode + disclaimer + handout + allowSelfEnrol)', async () => {
+      const db = createMockDb();
+      const result = await updateSettings(db, {
+        shop: testShop,
+        adminUser,
+        settings: {
+          mode: 'company',
+          disclaimer: 'Form Disclaimer',
+          handoutText: 'Form Handout',
+          allowSelfEnrol: 'true'
+        }
+      });
+
+      assert.strictEqual(result.identityMode, 'company');
+      assert.strictEqual(result.allowSelfEnrol, true);
+      assert.strictEqual(result.footerDisclaimer, 'Form Disclaimer');
+      assert.strictEqual(result.handoutText, 'Form Handout');
+
+      const fetched = await getSettings(db, { shop: testShop });
+      assert.strictEqual(fetched.identityMode, 'company');
+      assert.strictEqual(fetched.allowSelfEnrol, true);
+      assert.strictEqual(fetched.footerDisclaimer, 'Form Disclaimer');
+      assert.strictEqual(fetched.handoutText, 'Form Handout');
     });
   });
 

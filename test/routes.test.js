@@ -287,7 +287,15 @@ describe('HTTP Routes & Request Handlers (app/lib/protocols/routes.js)', () => {
           return { rows: state.settings.length > 0 ? state.settings : [{ shop: params[0], identityMode: 'tag', allowSelfEnrol: false, footerDisclaimer: null, handoutText: null }] };
         }
         if (sql.includes('INSERT INTO "Setting"')) {
-          const setting = { shop: params[0], identityMode: params[1], allowSelfEnrol: params[2] ?? false, footerDisclaimer: params[3], handoutText: params[4] };
+          const [shop, modeVal, hasMode, selfEnrolVal, hasAllowSelfEnrol, footerVal, hasFooter, handoutVal, hasHandout] = params;
+          const prev = state.settings.find(s => s.shop === shop) || {};
+          const setting = {
+            shop,
+            identityMode: hasMode ? (modeVal ?? 'tag') : (prev.identityMode ?? 'tag'),
+            allowSelfEnrol: hasAllowSelfEnrol ? (selfEnrolVal ?? false) : (prev.allowSelfEnrol ?? false),
+            footerDisclaimer: hasFooter ? (footerVal ?? null) : (prev.footerDisclaimer ?? null),
+            handoutText: hasHandout ? (handoutVal ?? null) : (prev.handoutText ?? null)
+          };
           state.settings = [setting];
           return { rows: [setting] };
         }

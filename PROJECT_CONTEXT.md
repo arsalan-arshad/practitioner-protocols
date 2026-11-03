@@ -1,6 +1,6 @@
 # Practitioner Protocols — Project Context (for Claude)
 
-_Snapshot: 2026-11-03 · Live Railway deployment active (`practitioner-protocols-production.up.railway.app`) with internal Postgres & ledger migrations · Production app record "Practitioner Protocols" released (v2, Public distribution) · Production hardening complete · Milestone M9a (Embedded Merchant Admin) & M9b-1 (allowSelfEnrol Setting, Migration & Pending-Practitioner Admin Review) implemented, pending live dev store verification · Spikes S2, S3, S4, S5 resolved; S1 resolved on the Plus dev store only; S6 candidate proposed (Spike open) · App Store listing artwork added (AI-generated) · 391 tests passing across 96 suites._
+_Snapshot: 2026-11-03 · Live Railway deployment active (`practitioner-protocols-production.up.railway.app`) with internal Postgres & ledger migrations · Production app record "Practitioner Protocols" released (v2, Public distribution) · Production hardening complete · Milestone M9a (Embedded Merchant Admin) & M9b-1 (allowSelfEnrol Setting, Migration & Pending-Practitioner Admin Review) implemented, pending live dev store verification · Spikes S2, S3, S4, S5 resolved; S1 resolved on the Plus dev store only; S6 candidate proposed (Spike open) · App Store listing artwork added (AI-generated) · 395 tests passing across 96 suites._
 _Contains NO secrets. Never paste `.env` values or tokens into chat or docs._
 
 ## 1. What this is
@@ -731,9 +731,9 @@ Run the five spikes in a day or two on a dev store; write the answers into secti
     - Approved rows do not show `(requested, unverified)` or customer links.
     - Endpoints `/api/admin/practitioners/status` and `/practice-name` are reused completely unchanged.
 - **Test Suite Verification:**
-  - 391 unit tests passing across 96 suites (0 failures).
+  - 395 unit tests passing across 96 suites (0 failures).
   - Added test verifying migration registration in `MIGRATION_FILES`.
-  - Added tests for `getSettings` defaults, partial update value preservation, form round-trips (`false` -> `true` -> `false`), and shop A vs shop B isolation.
+  - Added tests for `getSettings` defaults, partial update value preservation (omitted fields keep stored value, explicit empty strings clear disclaimers, full form submit round-trips), and shop A vs shop B isolation.
   - Added tests for HTML rendering (hidden input, checkbox checked/unchecked, pending customer deep link, escaping).
 - **Scope & Privacy Discipline:**
   - Zero new scopes (`read_orders` only). Zero client/patient PII accepted or stored. No changes to `../salesforce`.

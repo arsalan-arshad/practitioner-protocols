@@ -61,7 +61,14 @@
   - Added `getSettings`/`updateSettings` support with default `false`, partial update value preservation (COALESCE), and boolean/string parsing.
   - Added Settings tab UI toggle with hidden `false` fallback and "Tag mode only" notice.
   - Updated Practitioners tab to display pending practitioners (`isApproved: false`) with `(requested, unverified)` and direct links to Shopify admin customer records (`https://<shop>/admin/customers/<numericId>`).
-- [ ] **M9b-2: Self-Enrolment Flow, Portal States & CSRF Protection (Next)**
+- [x] **M9b-2: Self-Enrolment Flow, Portal States & CSRF Protection (Implemented, pending live dev-store verification)**:
+  - Added storefront self-enrolment handler (`POST /apps/protocols?action=enrol`) running before `!isApproved` gate.
+  - Implemented per-customer sliding window rate limiter (5 requests/hour) and per-shop pending cap (200 rows) with HTTP 429.
+  - Enforced mandatory CSRF protections on all mutating App Proxy routes: `Content-Type: application/json` required (HTTP 415), `Sec-Fetch-Site: same-origin` if present (HTTP 403), zero myshopify Origin comparison. Unknown actions return HTTP 400.
+  - Implemented 4 portal states in `renderPortalLiquid`: Guest sign-in with `/account/login`, Request Access form with async submit and `aria-live` status region, Pending Review notice, and Invite-Only notice (for company mode or when self-enrolment is disabled).
+  - Added Liquid delimiter neutralization and HTML entity escaping tests across dangerous payloads (`{{ shop.name }}`, `{% assign x = 1 %}`, `<script>alert(1)</script>`, `"><img src=x>`).
+  - Added compliance webhook integration test confirming `customers/redact` deletes self-enrolled pending profile for that customer.
+  - Verified 424 unit tests passing across 98 suites (0 failures).
 - [ ] **M9b-3: Catalog Product Search & Production Authoring (Blocked on Spike S6 verification)**
 
 ## Later

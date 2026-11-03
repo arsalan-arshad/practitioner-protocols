@@ -18,6 +18,9 @@ Practitioner portal, share kit, client page with add-all, per-line attribution i
 - Removing a practitioner (tag removed / contact removed) revokes access immediately; company-owned protocols stay with the company, personally-owned ones are archived.
 - `disabled` is merchant-only and overrides everything.
 
+> [!NOTE]
+> **Production Access Note (M9b):** In production, practitioner access is strictly gated by in-app approval (`isApproved: true` in `PractitionerProfile`) controlled by the merchant in Shopify admin. The app operates exclusively under the `read_orders` scope and does NOT request or possess `read_customers` scope, so it does not read customer tags in production. The label "Tag Mode" is historical naming referring to single-customer practitioner accounts (as opposed to B2B Company accounts).
+
 ## 3. Identity modes
 - **Tag mode (default, any plan):** `practitioner` customer tag. Owner = customer.
 - **Company mode:** B2B company contact. Owner = company; each protocol also records its creator.

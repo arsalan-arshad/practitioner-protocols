@@ -800,15 +800,19 @@ export function renderPortalLiquid(options = {}) {
     shop = '',
     isLoggedIn = false,
     isApproved = false,
+    hasProfile,
     practiceName = '',
     activeProtocols = [],
     archivedProtocols = [],
     starterProtocols = [],
-    mode = 'tag'
+    mode = 'tag',
+    allowSelfEnrol = false,
+    identityMode = 'tag'
   } = options;
 
   const robotsMeta = '<meta name="robots" content="noindex, nofollow">';
   const safePractice = safePortalText(practiceName);
+  const safeShop = safePortalText(shop);
 
   const styles = `
 <style>
@@ -943,6 +947,35 @@ export function renderPortalLiquid(options = {}) {
     font-weight: 700;
     color: #111827;
     margin: 2rem 0 1rem 0;
+  }
+  .portal-form-label {
+    display: block;
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: #374151;
+    margin-bottom: 0.375rem;
+  }
+  .portal-form-input {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 0.625rem 0.75rem;
+    border: 1px solid #d1d5db;
+    border-radius: 6px;
+    font-size: 0.9375rem;
+    color: #111827;
+    background: #ffffff;
+    transition: border-color 0.15s ease;
+  }
+  .portal-form-input:focus {
+    outline: none;
+    border-color: #047857;
+    box-shadow: 0 0 0 3px rgba(4, 120, 87, 0.1);
+  }
+  .portal-status-region {
+    font-size: 0.875rem;
+    min-height: 1.25rem;
+    margin-top: 0.5rem;
+    font-weight: 500;
   }
   /* Protocol Editor Modal */
   .portal-modal-backdrop {
@@ -1144,7 +1177,7 @@ export function renderPortalLiquid(options = {}) {
   // 1. Unauthenticated state
   if (!isLoggedIn) {
     return `${robotsMeta}${styles}
-<div class="portal-container">
+<div class="portal-container" data-shop="${safeShop}">
   <div class="portal-status-box">
     <svg width="48" height="48" fill="none" viewBox="0 0 24 24" stroke="#047857" style="margin: 0 auto;">
       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>
@@ -1156,10 +1189,135 @@ export function renderPortalLiquid(options = {}) {
 </div>`;
   }
 
-  // 2. Unapproved practitioner state
+  // 2. Logged-in customer without a practitioner profile
+  if (hasProfile === false) {
+    if (allowSelfEnrol && identityMode === 'tag') {
+      // 2a. Request Practitioner Access Form (Tag mode, open)
+      return `${robotsMeta}${styles}
+<div class="portal-container" data-shop="${safeShop}">
+  <div class="portal-status-box" style="text-align: left; max-width: 540px;">
+    <div style="text-align: center; margin-bottom: 1.5rem;">
+      <svg width="48" height="48" fill="none" viewBox="0 0 24 24" stroke="#047857" style="margin: 0 auto 0.75rem auto;">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+      </svg>
+      <h1 class="portal-status-title" style="margin-top: 0;">Request Practitioner Access</h1>
+      <p class="portal-status-desc" style="margin-bottom: 0;">Apply to create and share custom product recommendations with your clients.</p>
+    </div>
+
+    <form id="practitioner-enrol-form" method="POST" action="/apps/protocols?action=enrol" style="display: flex; flex-direction: column; gap: 1rem;">
+      <div>
+        <label for="practice-name-input" class="portal-form-label">
+          Practice or Business Name (optional)
+        </label>
+        <input
+          type="text"
+          id="practice-name-input"
+          name="practiceName"
+          class="portal-form-input"
+          maxlength="60"
+          placeholder="e.g. Acme Wellness"
+          autocomplete="organization"
+        />
+        <div style="font-size: 0.75rem; color: #6b7280; margin-top: 0.25rem;">
+          Maximum 60 characters. Displayed as unverified until approved.
+        </div>
+      </div>
+
+      <div id="enrol-status-message" aria-live="polite" role="status" class="portal-status-region"></div>
+
+      <div style="display: flex; justify-content: flex-end; gap: 0.75rem; margin-top: 0.5rem;">
+        <button type="submit" id="enrol-submit-btn" class="portal-btn portal-btn-primary" style="width: 100%;">
+          Request Access
+        </button>
+      </div>
+    </form>
+  </div>
+</div>
+<script>
+(function() {
+  var form = document.getElementById('practitioner-enrol-form');
+  if (!form) return;
+  var btn = document.getElementById('enrol-submit-btn');
+  var statusEl = document.getElementById('enrol-status-message');
+  var input = document.getElementById('practice-name-input');
+
+  form.addEventListener('submit', function(e) {
+    e.preventDefault();
+    if (btn.disabled) return;
+    btn.disabled = true;
+    btn.textContent = 'Submitting...';
+    statusEl.textContent = '';
+    statusEl.style.color = '#374151';
+
+    var practiceName = (input && input.value ? input.value : '').trim();
+
+    fetch(form.action || '/apps/protocols?action=enrol', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
+      },
+      body: JSON.stringify({ practiceName: practiceName })
+    })
+    .then(function(res) {
+      return res.json().then(function(data) {
+        return { status: res.status, data: data };
+      }).catch(function() {
+        return { status: res.status, data: {} };
+      });
+    })
+    .then(function(result) {
+      if (result.status === 200 || result.status === 201) {
+        statusEl.style.color = '#047857';
+        statusEl.textContent = 'Your request has been submitted for review. Please check back soon.';
+        setTimeout(function() {
+          window.location.reload();
+        }, 1500);
+      } else if (result.status === 429) {
+        statusEl.style.color = '#dc2626';
+        statusEl.textContent = result.data.error || 'Enrolment is temporarily at capacity. Please try again later.';
+        btn.disabled = false;
+        btn.textContent = 'Request Access';
+      } else if (result.status === 403) {
+        statusEl.style.color = '#dc2626';
+        statusEl.textContent = result.data.error || 'Self-enrolment is not available.';
+        btn.disabled = false;
+        btn.textContent = 'Request Access';
+      } else {
+        statusEl.style.color = '#dc2626';
+        statusEl.textContent = result.data.error || 'Unable to submit request. Please try again.';
+        btn.disabled = false;
+        btn.textContent = 'Request Access';
+      }
+    })
+    .catch(function() {
+      statusEl.style.color = '#dc2626';
+      statusEl.textContent = 'Network error. Please try again.';
+      btn.disabled = false;
+      btn.textContent = 'Request Access';
+    });
+  });
+})();
+</script>`;
+    }
+
+    // 2b. Invite-Only Notice (Tag mode closed or Company mode)
+    return `${robotsMeta}${styles}
+<div class="portal-container" data-shop="${safeShop}">
+  <div class="portal-status-box">
+    <svg width="48" height="48" fill="none" viewBox="0 0 24 24" stroke="#6b7280" style="margin: 0 auto;">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>
+    </svg>
+    <h1 class="portal-status-title">Practitioner Program (Invite Only)</h1>
+    <p class="portal-status-desc">Enrolment in the practitioner program is currently by invitation only. If you are an active practitioner, please contact the store administrator for access.</p>
+  </div>
+</div>`;
+  }
+
+  // 3. Unapproved practitioner state (has profile row, but isApproved is false)
   if (!isApproved) {
     return `${robotsMeta}${styles}
-<div class="portal-container">
+<div class="portal-container" data-shop="${safeShop}">
   <div class="portal-status-box">
     <svg width="48" height="48" fill="none" viewBox="0 0 24 24" stroke="#d97706" style="margin: 0 auto;">
       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>

@@ -742,5 +742,181 @@ describe('Practitioner Portal (app/lib/protocols/portal.js)', () => {
       assert.ok(liquid.includes('&#123;&#123; shop.name &#125;&#125;'));
       assert.ok(liquid.includes('&#123;% assign x = 1 %&#125;'));
     });
+
+    describe('Portal States & Self-Enrolment UI (Milestone M9b-2)', () => {
+      it('renders Request Practitioner Access form when customer is logged in, has no profile, allowSelfEnrol is true in Tag mode', () => {
+        const liquid = renderPortalLiquid({
+          isLoggedIn: true,
+          hasProfile: false,
+          allowSelfEnrol: true,
+          identityMode: 'tag'
+        });
+
+        assert.ok(liquid.includes('Request Practitioner Access'));
+        assert.ok(liquid.includes('id="practitioner-enrol-form"'));
+        assert.ok(liquid.includes('action="/apps/protocols?action=enrol"'));
+        assert.ok(liquid.includes('id="practice-name-input"'));
+        assert.ok(liquid.includes('maxlength="60"'));
+        assert.ok(liquid.includes('id="enrol-submit-btn"'));
+        assert.ok(liquid.includes('id="enrol-status-message"'));
+        assert.ok(liquid.includes('aria-live="polite"'));
+        assert.ok(liquid.includes('role="status"'));
+        assert.ok(liquid.includes('fetch('));
+        assert.ok(liquid.includes('application/json'));
+      });
+
+      it('renders Invite-Only notice when customer has no profile and allowSelfEnrol is false', () => {
+        const liquid = renderPortalLiquid({
+          isLoggedIn: true,
+          hasProfile: false,
+          allowSelfEnrol: false,
+          identityMode: 'tag'
+        });
+
+        assert.ok(liquid.includes('Practitioner Program (Invite Only)'));
+        assert.ok(liquid.includes('currently by invitation only'));
+        assert.ok(!liquid.includes('id="practitioner-enrol-form"'));
+      });
+
+      it('renders Invite-Only notice when customer has no profile in Company mode regardless of allowSelfEnrol', () => {
+        const liquid = renderPortalLiquid({
+          isLoggedIn: true,
+          hasProfile: false,
+          allowSelfEnrol: true,
+          identityMode: 'company'
+        });
+
+        assert.ok(liquid.includes('Practitioner Program (Invite Only)'));
+        assert.ok(liquid.includes('currently by invitation only'));
+        assert.ok(!liquid.includes('id="practitioner-enrol-form"'));
+      });
+
+      it('renders Account Pending Approval notice when customer has a pending profile (hasProfile: true, isApproved: false)', () => {
+        const liquid = renderPortalLiquid({
+          isLoggedIn: true,
+          hasProfile: true,
+          isApproved: false,
+          practiceName: 'Greenwood Wellness'
+        });
+
+        assert.ok(liquid.includes('Account Pending Approval'));
+        assert.ok(liquid.includes('Greenwood Wellness'));
+        assert.ok(liquid.includes('reviewed by the store administrator'));
+        assert.ok(!liquid.includes('id="practitioner-enrol-form"'));
+      });
+
+      it('enforces Liquid and XSS safety for practiceName with dangerous payloads', () => {
+        const dangerousPayloads = [
+          '{{ shop.name }}',
+          '{% assign x = 1 %}',
+          '<script>alert(1)</script>',
+          '"><img src=x>'
+        ];
+
+        for (const payload of dangerousPayloads) {
+          const liquid = renderPortalLiquid({
+            isLoggedIn: true,
+            hasProfile: true,
+            isApproved: false,
+            practiceName: payload
+          });
+
+          // Assert raw dangerous string does NOT appear anywhere in the output
+          assert.ok(!liquid.includes(payload), `Raw payload '${payload}' must not reach output unescaped`);
+
+          // Assert properly escaped or neutralized entities exist
+          if (payload === '{{ shop.name }}') {
+            assert.ok(liquid.includes('&#123;&#123; shop.name &#125;&#125;'));
+          } else if (payload === '{% assign x = 1 %}') {
+            assert.ok(liquid.includes('&#123;% assign x = 1 %&#125;'));
+          } else if (payload === '<script>alert(1)</script>') {
+            assert.ok(liquid.includes('&lt;script&gt;alert(1)&lt;/script&gt;'));
+          } else if (payload === '"><img src=x>') {
+            assert.ok(liquid.includes('&quot;&gt;&lt;img src=x&gt;'));
+          }
+        }
+      });
+
+      it('enforces Liquid and XSS safety for shop with dangerous payloads', () => {
+        const dangerousPayloads = [
+          '{{ shop.name }}',
+          '{% assign x = 1 %}',
+          '<script>alert(1)</script>',
+          '"><img src=x>'
+        ];
+
+        for (const payload of dangerousPayloads) {
+          const liquid = renderPortalLiquid({
+            shop: payload,
+            isLoggedIn: true,
+            hasProfile: false,
+            allowSelfEnrol: true,
+            identityMode: 'tag'
+          });
+
+          // Assert raw dangerous string does NOT appear unescaped in HTML attributes, body, or script
+          assert.ok(!liquid.includes(payload), `Raw payload '${payload}' in shop must not reach output unescaped`);
+
+          if (payload === '{{ shop.name }}') {
+            assert.ok(liquid.includes('&#123;&#123; shop.name &#125;&#125;'));
+          } else if (payload === '{% assign x = 1 %}') {
+            assert.ok(liquid.includes('&#123;% assign x = 1 %&#125;'));
+          } else if (payload === '<script>alert(1)</script>') {
+            assert.ok(liquid.includes('&lt;script&gt;alert(1)&lt;/script&gt;'));
+          } else if (payload === '"><img src=x>') {
+            assert.ok(liquid.includes('&quot;&gt;&lt;img src=x&gt;'));
+          }
+        }
+      });
+
+      it('enforces neutral non-clinical copy and zero client-identifying fields', () => {
+        const enrolHtml = renderPortalLiquid({
+          isLoggedIn: true,
+          hasProfile: false,
+          allowSelfEnrol: true,
+          identityMode: 'tag'
+        });
+
+        const pendingHtml = renderPortalLiquid({
+          isLoggedIn: true,
+          hasProfile: true,
+          isApproved: false,
+          practiceName: 'Wellness Center'
+        });
+
+        const inviteOnlyHtml = renderPortalLiquid({
+          isLoggedIn: true,
+          hasProfile: false,
+          allowSelfEnrol: false,
+          identityMode: 'tag'
+        });
+
+        const allHtml = enrolHtml + pendingHtml + inviteOnlyHtml;
+
+        // Strictly no clinical diagnosis/patient wording
+        const forbiddenTerms = [
+          'patient',
+          'diagnosis',
+          'diagnostic',
+          'disease',
+          'treatment',
+          'prescription',
+          'medical condition'
+        ];
+        for (const term of forbiddenTerms) {
+          assert.ok(
+            !allHtml.toLowerCase().includes(term),
+            `Portal markup must not contain forbidden clinical term '${term}'`
+          );
+        }
+
+        // Form must only contain practiceName and NO client-identifying fields (email, phone, name)
+        assert.ok(!enrolHtml.includes('name="email"'));
+        assert.ok(!enrolHtml.includes('name="phone"'));
+        assert.ok(!enrolHtml.includes('name="firstName"'));
+        assert.ok(!enrolHtml.includes('name="lastName"'));
+        assert.ok(!enrolHtml.includes('name="patientName"'));
+      });
+    });
   });
 });

@@ -130,6 +130,34 @@ describe('Shopify Compliance & Attribution Webhooks (app/lib/protocols/webhooks.
       assert.equal(res.profileDeleted, true);
     });
 
+    it('handleCustomersRedact deletes a self-enrolled pending profile (isApproved: false) for that customer', async () => {
+      const mockDb = createMockDb();
+      // Add a self-enrolled pending profile (isApproved: false)
+      mockDb.state.profiles.push({
+        id: 'prof_pending_555',
+        shop: 'test.myshopify.com',
+        ownerGid: 'gid://shopify/Customer/555',
+        practiceName: 'Self-Enrolled Practice',
+        isApproved: false
+      });
+
+      const payload = {
+        shop_domain: 'test.myshopify.com',
+        customer: { id: 555 }
+      };
+
+      const res = await handleCustomersRedact(mockDb, payload, { mode: 'tag' });
+      assert.equal(res.success, true);
+      assert.equal(res.profileDeleted, true);
+
+      // Verify that the query targeted deletion of the profile
+      const deleteProfileQuery = mockDb.state.queries.find(q =>
+        q.sql.includes('DELETE FROM "PractitionerProfile"') &&
+        q.params.includes('gid://shopify/Customer/555')
+      );
+      assert.ok(deleteProfileQuery, 'Must execute DELETE on PractitionerProfile for pending customer GID');
+    });
+
     it('handleCustomersRedact handles Company mode by preserving company protocols', async () => {
       const mockDb = createMockDb();
       const payload = {

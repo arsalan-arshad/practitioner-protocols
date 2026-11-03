@@ -24,7 +24,11 @@ import {
   handleAdminUpdateSettingsRequest,
   handleAdminEmergencyDisableAllRequest,
   handleAdminAttributionCsvRequest,
-  createAdminSessionToken
+  createAdminSessionToken,
+  validateAppProxyCsrf,
+  handleEnrolRequest,
+  setDefaultEnrolRateLimiter,
+  getDefaultEnrolRateLimiter
 } from '../app/lib/protocols/routes.js';
 import { calculateAppProxySignature } from '../app/lib/protocols/proxy.js';
 import { ProtocolValidationError } from '../app/lib/protocols/validation.js';
@@ -240,9 +244,39 @@ describe('HTTP Routes & Request Handlers (app/lib/protocols/routes.js)', () => {
         }
 
         // 10. PractitionerProfile query
-        if (sql.includes('SELECT COUNT(*) as total FROM') && sql.includes('"PractitionerProfile"')) {
+        if (sql.includes('COUNT(*)') && sql.includes('"PractitionerProfile"')) {
           let rows = state.profiles.filter(p => p.shop === params[0]);
-          return { rows: [{ total: rows.length }] };
+          if (sql.includes('"isApproved" = false')) {
+            rows = rows.filter(p => p.isApproved === false);
+          }
+          return { rows: [{ count: rows.length, total: rows.length }] };
+        }
+        if (sql.includes('INSERT INTO "PractitionerProfile"')) {
+          let id, shop, ownerType, ownerGid, practiceName, isApproved;
+          if (params.length === 4) {
+            [id, shop, ownerGid, practiceName] = params;
+            ownerType = 'customer';
+            isApproved = false;
+          } else {
+            [id, shop, ownerType, ownerGid, practiceName, isApproved] = params;
+          }
+          const numericId = String(ownerGid).replace(/^gid:\/\/shopify\/Customer\//, '');
+          const existing = state.profiles.find(p => p.shop === shop && (p.ownerGid === ownerGid || p.ownerGid === numericId));
+          if (existing) {
+            return { rows: [] };
+          }
+          const newProfile = {
+            id,
+            shop,
+            ownerType: ownerType || 'customer',
+            ownerGid,
+            practiceName,
+            isApproved: isApproved ?? false,
+            createdAt: new Date(),
+            updatedAt: new Date()
+          };
+          state.profiles.push(newProfile);
+          return { rows: [newProfile] };
         }
         if (sql.includes('UPDATE "PractitionerProfile"') && sql.includes('"practiceName" = $1')) {
           const [practiceName, shop, ownerGid] = params;
@@ -262,9 +296,10 @@ describe('HTTP Routes & Request Handlers (app/lib/protocols/routes.js)', () => {
         }
         if (sql.includes('FROM "PractitionerProfile"')) {
           const shop = params[0];
-          if (sql.includes('"ownerGid" = $2')) {
+          if (sql.includes('"ownerGid" = $2') || sql.includes('"ownerGid" = $3')) {
             const gid = params[1];
-            const prof = state.profiles.find(pr => pr.shop === shop && pr.ownerGid === gid);
+            const numId = params[2] || (gid ? String(gid).replace(/^gid:\/\/shopify\/Customer\//, '') : '');
+            const prof = state.profiles.find(pr => pr.shop === shop && (pr.ownerGid === gid || pr.ownerGid === numId || pr.ownerGid === `gid://shopify/Customer/${numId}`));
             return { rows: prof ? [prof] : [] };
           }
           let rows = state.profiles.filter(p => p.shop === shop);
@@ -442,11 +477,19 @@ describe('HTTP Routes & Request Handlers (app/lib/protocols/routes.js)', () => {
       practiceName: 'Elite Naturopathic Clinic'
     };
 
+    const testPendingProfile = {
+      id: 'prof_2',
+      shop: testShop,
+      ownerGid: 'gid://shopify/Customer/999888',
+      practiceName: 'Pending Health Center',
+      isApproved: false
+    };
+
     beforeEach(() => {
       db = createMockDb({
         protocols: [testProtocol],
         lines: [testLine],
-        profiles: [testProfile]
+        profiles: [testProfile, testPendingProfile]
       });
     });
 
@@ -1853,6 +1896,407 @@ describe('HTTP Routes & Request Handlers (app/lib/protocols/routes.js)', () => {
       const startersHtml = await startersRes.text();
       assert.ok(startersHtml.includes('Shop A Protocol'));
       assert.ok(!startersHtml.includes('Shop B Protocol'));
+    });
+  });
+
+  describe('Storefront Practitioner Self-Enrolment & Proxy CSRF (Milestone M9b-2)', () => {
+    let db;
+    const testCustomerId = '445566';
+    const customerGid = `gid://shopify/Customer/${testCustomerId}`;
+
+    beforeEach(() => {
+      db = createMockDb({
+        profiles: [],
+        settings: [{
+          shop: testShop,
+          identityMode: 'tag',
+          allowSelfEnrol: true,
+          footerDisclaimer: null,
+          handoutText: null
+        }]
+      });
+      // Reset default enrol limiter
+      setDefaultEnrolRateLimiter(createRateLimiter({ windowMs: 3600000, maxRequests: 5 }));
+    });
+
+    function makeSignedProxyUrl(paramsObj) {
+      const allParams = {
+        shop: testShop,
+        timestamp: '1729500000',
+        ...paramsObj
+      };
+      const signature = calculateAppProxySignature(allParams, apiSecret);
+      const searchParams = new URLSearchParams(allParams);
+      searchParams.set('signature', signature);
+      return `https://${testShop}/apps/protocols?${searchParams.toString()}`;
+    }
+
+    it('CSRF: rejects mutating proxy request without application/json Content-Type (HTTP 415)', async () => {
+      const url = makeSignedProxyUrl({ action: 'enrol', logged_in_customer_id: testCustomerId });
+      const req = new Request(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain' },
+        body: JSON.stringify({ practiceName: 'Health Clinic' })
+      });
+
+      const res = await handleAppProxyRequest(db, req, { apiSecret });
+      assert.equal(res.status, 415);
+      const data = await res.json();
+      assert.ok(data.error.includes('Content-Type must be application/json'));
+    });
+
+    it('CSRF: rejects form-encoded mutating proxy request (HTTP 415)', async () => {
+      const url = makeSignedProxyUrl({ action: 'enrol', logged_in_customer_id: testCustomerId });
+      const req = new Request(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: 'practiceName=Health+Clinic'
+      });
+
+      const res = await handleAppProxyRequest(db, req, { apiSecret });
+      assert.equal(res.status, 415);
+    });
+
+    it('CSRF: rejects mutating proxy request with Sec-Fetch-Site: cross-site (HTTP 403)', async () => {
+      const url = makeSignedProxyUrl({ action: 'enrol', logged_in_customer_id: testCustomerId });
+      const req = new Request(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Sec-Fetch-Site': 'cross-site'
+        },
+        body: JSON.stringify({ practiceName: 'Health Clinic' })
+      });
+
+      const res = await handleAppProxyRequest(db, req, { apiSecret });
+      assert.equal(res.status, 403);
+      const data = await res.json();
+      assert.ok(data.error.includes('cross-site'));
+    });
+
+    it('CSRF: allows mutating proxy request with Sec-Fetch-Site: same-origin', async () => {
+      const url = makeSignedProxyUrl({ action: 'enrol', logged_in_customer_id: testCustomerId });
+      const req = new Request(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Sec-Fetch-Site': 'same-origin'
+        },
+        body: JSON.stringify({ practiceName: 'Health Clinic' })
+      });
+
+      const res = await handleAppProxyRequest(db, req, { apiSecret });
+      assert.equal(res.status, 201);
+      const data = await res.json();
+      assert.equal(data.status, 'pending');
+    });
+
+    it('CSRF: allows mutating proxy request when Sec-Fetch-Site header is omitted', async () => {
+      const url = makeSignedProxyUrl({ action: 'enrol', logged_in_customer_id: testCustomerId });
+      const req = new Request(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ practiceName: 'Health Clinic' })
+      });
+
+      const res = await handleAppProxyRequest(db, req, { apiSecret });
+      assert.equal(res.status, 201);
+    });
+
+    it('CSRF: rejects unknown action on POST request with HTTP 400 (never falls through to create)', async () => {
+      const url = makeSignedProxyUrl({ action: 'hack_admin', logged_in_customer_id: testCustomerId });
+      const req = new Request(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: 'Malicious Protocol' })
+      });
+
+      const res = await handleAppProxyRequest(db, req, { apiSecret });
+      assert.equal(res.status, 400);
+      const data = await res.json();
+      assert.ok(data.error.includes('Invalid or unknown action'));
+    });
+
+    it('CSRF: rejects unknown action on PUT request with HTTP 400', async () => {
+      const url = makeSignedProxyUrl({ action: 'unknown_put', logged_in_customer_id: testCustomerId });
+      const req = new Request(url, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: 'Malicious' })
+      });
+
+      const res = await handleAppProxyRequest(db, req, { apiSecret });
+      assert.equal(res.status, 400);
+    });
+
+    it('Enrolment: requires customer to be logged in (HTTP 401)', async () => {
+      const url = makeSignedProxyUrl({ action: 'enrol' }); // No logged_in_customer_id
+      const req = new Request(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ practiceName: 'Apex Health' })
+      });
+
+      const res = await handleAppProxyRequest(db, req, { apiSecret });
+      assert.equal(res.status, 401);
+      const data = await res.json();
+      assert.ok(data.error.includes('login required'));
+    });
+
+    it('Enrolment: creates pending profile with status 201 when allowSelfEnrol is enabled in Tag mode', async () => {
+      const url = makeSignedProxyUrl({ action: 'enrol', logged_in_customer_id: testCustomerId });
+      const req = new Request(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ practiceName: 'Zenith Integrative Care' })
+      });
+
+      const res = await handleAppProxyRequest(db, req, { apiSecret });
+      assert.equal(res.status, 201);
+      const data = await res.json();
+      assert.deepEqual(data, { status: 'pending' });
+
+      // Verify profile in DB state
+      const profile = db.state.profiles.find(p => p.ownerGid === customerGid);
+      assert.ok(profile);
+      assert.equal(profile.isApproved, false);
+      assert.equal(profile.practiceName, 'Zenith Integrative Care');
+      assert.equal(profile.ownerType, 'customer');
+    });
+
+    it('Enrolment: returns status 200 { status: "pending" } idempotently on repeat submission', async () => {
+      const url = makeSignedProxyUrl({ action: 'enrol', logged_in_customer_id: testCustomerId });
+      const req1 = new Request(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ practiceName: 'First Submission' })
+      });
+
+      const res1 = await handleAppProxyRequest(db, req1, { apiSecret });
+      assert.equal(res1.status, 201);
+
+      // Repeat request with different requested name
+      const req2 = new Request(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ practiceName: 'Second Submission' })
+      });
+
+      const res2 = await handleAppProxyRequest(db, req2, { apiSecret });
+      assert.equal(res2.status, 200);
+      const data2 = await res2.json();
+      assert.deepEqual(data2, { status: 'pending' });
+
+      // Count profiles in state: should still be exactly 1
+      const matchingProfiles = db.state.profiles.filter(p => p.ownerGid === customerGid);
+      assert.equal(matchingProfiles.length, 1);
+      assert.equal(matchingProfiles[0].practiceName, 'First Submission');
+    });
+
+    it('Enrolment: rejects enrolment with HTTP 403 when allowSelfEnrol is false', async () => {
+      db.state.settings[0].allowSelfEnrol = false;
+      const url = makeSignedProxyUrl({ action: 'enrol', logged_in_customer_id: testCustomerId });
+      const req = new Request(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ practiceName: 'Clinic' })
+      });
+
+      const res = await handleAppProxyRequest(db, req, { apiSecret });
+      assert.equal(res.status, 403);
+      const data = await res.json();
+      assert.ok(data.error.includes('not enabled'));
+    });
+
+    it('Enrolment: rejects enrolment with HTTP 403 when store is in company mode', async () => {
+      db.state.settings[0].identityMode = 'company';
+      const url = makeSignedProxyUrl({ action: 'enrol', logged_in_customer_id: testCustomerId });
+      const req = new Request(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ practiceName: 'B2B Clinic' })
+      });
+
+      const res = await handleAppProxyRequest(db, req, { apiSecret });
+      assert.equal(res.status, 403);
+      const data = await res.json();
+      assert.ok(data.error.includes('not enabled'));
+    });
+
+    it('Enrolment: defaults practiceName to "Pending Practitioner" when blank or omitted', async () => {
+      const url = makeSignedProxyUrl({ action: 'enrol', logged_in_customer_id: testCustomerId });
+      const req = new Request(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({})
+      });
+
+      const res = await handleAppProxyRequest(db, req, { apiSecret });
+      assert.equal(res.status, 201);
+      const profile = db.state.profiles.find(p => p.ownerGid === customerGid);
+      assert.equal(profile.practiceName, 'Pending Practitioner');
+    });
+
+    it('Enrolment: accepts requested practiceName up to 60 characters', async () => {
+      const name60 = 'A'.repeat(60);
+      const url = makeSignedProxyUrl({ action: 'enrol', logged_in_customer_id: testCustomerId });
+      const req = new Request(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ practiceName: name60 })
+      });
+
+      const res = await handleAppProxyRequest(db, req, { apiSecret });
+      assert.equal(res.status, 201);
+      const profile = db.state.profiles.find(p => p.ownerGid === customerGid);
+      assert.equal(profile.practiceName, name60);
+    });
+
+    it('Enrolment: rejects practiceName exceeding 60 characters with HTTP 400', async () => {
+      const name61 = 'A'.repeat(61);
+      const url = makeSignedProxyUrl({ action: 'enrol', logged_in_customer_id: testCustomerId });
+      const req = new Request(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ practiceName: name61 })
+      });
+
+      const res = await handleAppProxyRequest(db, req, { apiSecret });
+      assert.equal(res.status, 400);
+      const data = await res.json();
+      assert.ok(data.error.includes('cannot exceed 60 characters'));
+    });
+
+    it('Enrolment: rejects invalid non-object JSON body with HTTP 400', async () => {
+      const url = makeSignedProxyUrl({ action: 'enrol', logged_in_customer_id: testCustomerId });
+      const req = new Request(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: '["array_not_object"]'
+      });
+
+      const res = await handleAppProxyRequest(db, req, { apiSecret });
+      assert.equal(res.status, 400);
+    });
+
+    it('Enrolment: strictly forbids client/patient PII in enrolment payload (HTTP 400)', async () => {
+      const url = makeSignedProxyUrl({ action: 'enrol', logged_in_customer_id: testCustomerId });
+      const req = new Request(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          practiceName: 'Wellness Center',
+          patientName: 'John Doe',
+          clientEmail: 'john@example.com'
+        })
+      });
+
+      const res = await handleAppProxyRequest(db, req, { apiSecret });
+      assert.equal(res.status, 400);
+      const data = await res.json();
+      assert.ok(data.error.includes('forbidden') || data.error.includes('PII'));
+    });
+
+    it('Enrolment: enforces per-shop pending cap (200 rows) with HTTP 429', async () => {
+      // Seed 200 pending profiles
+      for (let i = 1; i <= 200; i++) {
+        db.state.profiles.push({
+          id: `prof_pending_${i}`,
+          shop: testShop,
+          ownerGid: `gid://shopify/Customer/seed_${i}`,
+          practiceName: `Pending Clinic ${i}`,
+          isApproved: false
+        });
+      }
+
+      const url = makeSignedProxyUrl({ action: 'enrol', logged_in_customer_id: testCustomerId });
+      const req = new Request(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ practiceName: 'Over Capacity Clinic' })
+      });
+
+      const res = await handleAppProxyRequest(db, req, { apiSecret });
+      assert.equal(res.status, 429);
+      const data = await res.json();
+      assert.ok(data.error.includes('at capacity'));
+    });
+
+    it('Enrolment: enforces per-customer sliding window rate limit (5 requests / hour) with HTTP 429', async () => {
+      const limiter = createRateLimiter({ windowMs: 3600000, maxRequests: 5 });
+      const url = makeSignedProxyUrl({ action: 'enrol', logged_in_customer_id: testCustomerId });
+
+      // First 5 requests succeed (first creates 201, subsequent are 200 idempotent)
+      for (let i = 0; i < 5; i++) {
+        const req = new Request(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ practiceName: 'Fast Repeat' })
+        });
+        const res = await handleAppProxyRequest(db, req, { apiSecret, enrolRateLimiter: limiter });
+        assert.ok(res.status === 200 || res.status === 201);
+      }
+
+      // 6th request is blocked by customer rate limiter
+      const req6 = new Request(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ practiceName: 'Fast Repeat 6' })
+      });
+      const res6 = await handleAppProxyRequest(db, req6, { apiSecret, enrolRateLimiter: limiter });
+      assert.equal(res6.status, 429);
+      const data6 = await res6.json();
+      assert.ok(data6.error.includes('Too many enrolment requests'));
+      assert.ok(res6.headers.get('retry-after'));
+    });
+
+    it('Authorization: rejects protocol create attempt by pending practitioner with HTTP 403', async () => {
+      db.state.profiles.push({
+        id: 'prof_unapproved',
+        shop: testShop,
+        ownerGid: customerGid,
+        practiceName: 'Unapproved Clinic',
+        isApproved: false
+      });
+
+      const url = makeSignedProxyUrl({ action: 'create', logged_in_customer_id: testCustomerId });
+      const req = new Request(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: 'Unauthorized Protocol',
+          lines: [{ variantGid: 'gid://shopify/ProductVariant/101', quantity: 1 }]
+        })
+      });
+
+      const res = await handleAppProxyRequest(db, req, { apiSecret });
+      assert.equal(res.status, 403);
+      const data = await res.json();
+      assert.ok(data.error.includes('pending approval'));
+    });
+
+    it('Authorization: rejects protocol update attempt by pending practitioner with HTTP 403', async () => {
+      db.state.profiles.push({
+        id: 'prof_unapproved',
+        shop: testShop,
+        ownerGid: customerGid,
+        practiceName: 'Unapproved Clinic',
+        isApproved: false
+      });
+
+      const url = makeSignedProxyUrl({ action: 'update', id: 'proto_1', logged_in_customer_id: testCustomerId });
+      const req = new Request(url, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: 'Hacked Protocol' })
+      });
+
+      const res = await handleAppProxyRequest(db, req, { apiSecret });
+      assert.equal(res.status, 403);
+      const data = await res.json();
+      assert.ok(data.error.includes('pending approval'));
     });
   });
 });

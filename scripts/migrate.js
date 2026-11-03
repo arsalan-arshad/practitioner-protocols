@@ -17,6 +17,7 @@ const ROOT_DIR = join(__dirname, '..');
 export const MIGRATION_FILES = [
   join(ROOT_DIR, 'prisma/migrations/20261021_init/migration.sql'),
   join(ROOT_DIR, 'prisma/migrations/20261022_add_currency_to_stat_unique_and_idempotency/migration.sql'),
+  join(ROOT_DIR, 'prisma/migrations/20261103_add_allow_self_enrol/migration.sql'),
 ];
 
 /**

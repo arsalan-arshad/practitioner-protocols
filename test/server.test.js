@@ -550,7 +550,7 @@ describe('Server & Configuration Hardening (server.js, shopify.app.toml, README.
             ledgerRows.push({ id: params[0] });
             return { rows: [] };
           }
-          if (typeof sql === 'string' && (sql.includes('CREATE TABLE "Protocol"') || sql.includes('ProcessedWebhook'))) {
+          if (typeof sql === 'string' && (sql.includes('CREATE TABLE "Protocol"') || sql.includes('ProcessedWebhook') || sql.includes('allowSelfEnrol'))) {
             executedMigrations.push(sql);
           }
           return { rows: [] };
@@ -592,6 +592,11 @@ describe('Server & Configuration Hardening (server.js, shopify.app.toml, README.
 
       assert.ok(executedQueries.includes('BEGIN'));
       assert.ok(executedQueries.includes('ROLLBACK'));
+    });
+
+    it('verifies allowSelfEnrol migration is registered in MIGRATION_FILES and applies idempotently', () => {
+      const found = MIGRATION_FILES.some(f => f.includes('20261103_add_allow_self_enrol'));
+      assert.ok(found, '20261103_add_allow_self_enrol migration must be registered in MIGRATION_FILES');
     });
   });
 

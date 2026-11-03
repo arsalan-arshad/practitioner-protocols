@@ -566,18 +566,23 @@ export async function getSettings(db, { shop }) {
   }
 
   const sql = `
-    SELECT "shop", "identityMode", "footerDisclaimer", "handoutText", "createdAt", "updatedAt"
+    SELECT "shop", "identityMode", "allowSelfEnrol", "footerDisclaimer", "handoutText", "createdAt", "updatedAt"
     FROM "Setting"
     WHERE "shop" = $1
   `;
   const res = await db.query(sql, [shop]);
   if (res.rows.length > 0) {
-    return res.rows[0];
+    const row = res.rows[0];
+    return {
+      ...row,
+      allowSelfEnrol: Boolean(row.allowSelfEnrol)
+    };
   }
 
   return {
     shop,
     identityMode: 'tag',
+    allowSelfEnrol: false,
     footerDisclaimer: null,
     handoutText: null
   };
@@ -610,50 +615,97 @@ export async function updateSettings(db, { shop, settings, adminUser }) {
 
   assertNoPii(settings);
 
-  let identityMode = settings.identityMode;
-  if (identityMode !== undefined) {
-    if (!ALLOWED_IDENTITY_MODES.has(identityMode)) {
+  // 1. identityMode
+  const rawMode = settings.identityMode !== undefined ? settings.identityMode : settings.mode;
+  const hasMode = rawMode !== undefined;
+  let modeVal = null;
+  if (hasMode) {
+    if (!ALLOWED_IDENTITY_MODES.has(rawMode)) {
       throw new ProtocolAdminError(
-        `Invalid identityMode '${identityMode}'. Must be 'tag' or 'company'.`,
+        `Invalid identityMode '${rawMode}'. Must be 'tag' or 'company'.`,
         ADMIN_ERROR_CODES.INVALID_INPUT,
         'identityMode'
       );
     }
-  } else {
-    identityMode = 'tag';
+    modeVal = rawMode;
   }
 
-  const footerDisclaimer = settings.footerDisclaimer !== undefined
-    ? (settings.footerDisclaimer ? String(settings.footerDisclaimer).trim() : null)
-    : null;
-  if (footerDisclaimer && footerDisclaimer.length > 1000) {
-    throw new ProtocolAdminError('Footer disclaimer cannot exceed 1000 characters', ADMIN_ERROR_CODES.INVALID_INPUT, 'footerDisclaimer');
+  // 2. allowSelfEnrol
+  const hasAllowSelfEnrol = settings.allowSelfEnrol !== undefined;
+  let selfEnrolVal = null;
+  if (hasAllowSelfEnrol) {
+    if (typeof settings.allowSelfEnrol === 'boolean') {
+      selfEnrolVal = settings.allowSelfEnrol;
+    } else if (Array.isArray(settings.allowSelfEnrol)) {
+      const lastVal = settings.allowSelfEnrol[settings.allowSelfEnrol.length - 1];
+      const lower = String(lastVal).trim().toLowerCase();
+      selfEnrolVal = ['true', '1', 'on'].includes(lower);
+    } else {
+      const lower = String(settings.allowSelfEnrol).trim().toLowerCase();
+      selfEnrolVal = ['true', '1', 'on'].includes(lower);
+    }
   }
 
-  const handoutText = settings.handoutText !== undefined
-    ? (settings.handoutText ? String(settings.handoutText).trim() : null)
-    : null;
-  if (handoutText && handoutText.length > 1000) {
-    throw new ProtocolAdminError('Handout text cannot exceed 1000 characters', ADMIN_ERROR_CODES.INVALID_INPUT, 'handoutText');
+  // 3. footerDisclaimer
+  const rawFooter = settings.footerDisclaimer !== undefined ? settings.footerDisclaimer : settings.disclaimer;
+  const hasFooter = rawFooter !== undefined;
+  let footerVal = null;
+  if (hasFooter) {
+    footerVal = rawFooter ? String(rawFooter).trim() : null;
+    if (footerVal && footerVal.length > 1000) {
+      throw new ProtocolAdminError('Footer disclaimer cannot exceed 1000 characters', ADMIN_ERROR_CODES.INVALID_INPUT, 'footerDisclaimer');
+    }
+  }
+
+  // 4. handoutText
+  const rawHandout = settings.handoutText;
+  const hasHandout = rawHandout !== undefined;
+  let handoutVal = null;
+  if (hasHandout) {
+    handoutVal = rawHandout ? String(rawHandout).trim() : null;
+    if (handoutVal && handoutVal.length > 1000) {
+      throw new ProtocolAdminError('Handout text cannot exceed 1000 characters', ADMIN_ERROR_CODES.INVALID_INPUT, 'handoutText');
+    }
   }
 
   const sql = `
     INSERT INTO "Setting" (
-      "shop", "identityMode", "footerDisclaimer", "handoutText", "createdAt", "updatedAt"
+      "shop", "identityMode", "allowSelfEnrol", "footerDisclaimer", "handoutText", "createdAt", "updatedAt"
     ) VALUES (
-      $1, $2, $3, $4, NOW(), NOW()
+      $1,
+      COALESCE($2, 'tag'),
+      COALESCE($4, false),
+      $6,
+      $8,
+      NOW(),
+      NOW()
     )
     ON CONFLICT ("shop")
     DO UPDATE SET
-      "identityMode" = COALESCE(EXCLUDED."identityMode", "Setting"."identityMode"),
-      "footerDisclaimer" = EXCLUDED."footerDisclaimer",
-      "handoutText" = EXCLUDED."handoutText",
+      "identityMode" = CASE WHEN $3 THEN $2 ELSE "Setting"."identityMode" END,
+      "allowSelfEnrol" = CASE WHEN $5 THEN $4 ELSE "Setting"."allowSelfEnrol" END,
+      "footerDisclaimer" = CASE WHEN $7 THEN $6 ELSE "Setting"."footerDisclaimer" END,
+      "handoutText" = CASE WHEN $9 THEN $8 ELSE "Setting"."handoutText" END,
       "updatedAt" = NOW()
     RETURNING *
   `;
 
-  const res = await db.query(sql, [shop, identityMode, footerDisclaimer, handoutText]);
-  return res.rows[0];
+  const res = await db.query(sql, [
+    shop,
+    modeVal,
+    hasMode,
+    selfEnrolVal,
+    hasAllowSelfEnrol,
+    footerVal,
+    hasFooter,
+    handoutVal,
+    hasHandout
+  ]);
+  const row = res.rows[0];
+  return {
+    ...row,
+    allowSelfEnrol: Boolean(row?.allowSelfEnrol)
+  };
 }
 
 // ==========================================
@@ -1456,7 +1508,8 @@ export function renderAdminHtml(options = {}) {
   // Tab 1: Practitioners List
   const renderPractitionersTab = () => {
     const rows = profiles.map((p) => {
-      const gid = escapeAdminText(p.ownerGid || '');
+      const rawGid = p.ownerGid || '';
+      const gid = escapeAdminText(rawGid);
       const practice = escapeAdminText(p.practiceName || 'Not Set');
       const isApproved = Boolean(p.isApproved);
       const statusBadge = isApproved
@@ -1466,16 +1519,32 @@ export function renderAdminHtml(options = {}) {
         ? `<button type="submit" class="Polaris-Button">Revoke</button>`
         : `<button type="submit" class="Polaris-Button Polaris-Button--primary">Approve</button>`;
 
+      const numericCustomerId = rawGid.startsWith('gid://shopify/Customer/')
+        ? rawGid.replace(/^gid:\/\/shopify\/Customer\//, '')
+        : (rawGid.match(/\/Customer\/(\d+)/)?.[1] || (/^\d+$/.test(rawGid) ? rawGid : ''));
+      const safeNumericId = escapeAdminText(numericCustomerId);
+
+      const customerLinkHtml = (!isApproved && safeNumericId && safeShop)
+        ? `<div style="font-size:0.75rem; margin-top:0.25rem;"><a href="https://${safeShop}/admin/customers/${safeNumericId}" target="_blank" rel="noopener noreferrer">https://${safeShop}/admin/customers/${safeNumericId}</a></div>`
+        : '';
+
+      const practiceDisplay = practice === 'Not Set'
+        ? practice
+        : `${practice}${!isApproved ? ' (requested, unverified)' : ''}`;
+
       return `
       <tr>
-        <td><code>${gid}</code></td>
+        <td>
+          <code>${gid}</code>
+          ${customerLinkHtml}
+        </td>
         <td>
           <form method="POST" action="/api/admin/practitioners/practice-name" style="display:flex; align-items:center; gap:0.5rem; margin:0;">
             <input type="hidden" name="ownerGid" value="${gid}">
             <input type="text" name="practiceName" value="${practice === 'Not Set' ? '' : practice}" placeholder="Set Practice Name" style="padding:0.35rem 0.5rem; font-size:0.875rem; border:1px solid var(--p-color-border); border-radius:4px; max-width:220px;">
             <button type="submit" class="Polaris-Button" style="padding:0.35rem 0.6rem; font-size:0.75rem;">Save Name</button>
           </form>
-          <div style="font-size:0.75rem; color:var(--p-color-text-subdued); margin-top:0.25rem;">Current: <strong>${practice}</strong></div>
+          <div style="font-size:0.75rem; color:var(--p-color-text-subdued); margin-top:0.25rem;">Current: <strong>${practiceDisplay}</strong></div>
         </td>
         <td>${statusBadge}</td>
         <td>
@@ -1654,8 +1723,9 @@ export function renderAdminHtml(options = {}) {
 
   // Tab 4: Settings & Emergency Controls
   const renderSettingsTab = () => {
-    const mode = settings?.mode === 'company' ? 'company' : 'tag';
-    const disclaimer = escapeAdminText(settings?.disclaimer || '');
+    const mode = settings?.mode === 'company' || settings?.identityMode === 'company' ? 'company' : 'tag';
+    const isSelfEnrol = Boolean(settings?.allowSelfEnrol);
+    const disclaimer = escapeAdminText(settings?.disclaimer || settings?.footerDisclaimer || '');
     const handout = escapeAdminText(settings?.handoutText || '');
 
     return `
@@ -1668,6 +1738,18 @@ export function renderAdminHtml(options = {}) {
             <option value="tag" ${mode === 'tag' ? 'selected' : ''}>Tag Mode (Customer Tag "practitioner")</option>
             <option value="company" ${mode === 'company' ? 'selected' : ''}>Company Mode (B2B Company Contact)</option>
           </select>
+        </div>
+        <div style="margin-bottom: 1rem;">
+          <input type="hidden" name="allowSelfEnrol" value="false">
+          <label style="display:flex; align-items:flex-start; gap:0.5rem; cursor:pointer;">
+            <input type="checkbox" name="allowSelfEnrol" value="true" ${isSelfEnrol ? 'checked' : ''} style="margin-top:0.2rem; width:1.125rem; height:1.125rem;">
+            <div>
+              <span style="font-weight:600; display:block;">Allow Practitioner Self-Enrolment</span>
+              <span style="color:var(--p-color-text-subdued); font-size:0.8125rem;">
+                When enabled, signed-in customers visiting the protocol portal can submit an enrolment request for review. (Tag mode only).
+              </span>
+            </div>
+          </label>
         </div>
         <div style="margin-bottom: 1rem;">
           <label style="display:block; font-weight:600; margin-bottom:0.25rem;">Storefront Footer Disclaimer</label>

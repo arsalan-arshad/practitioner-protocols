@@ -1,6 +1,6 @@
 # Practitioner Protocols — Project Context (for Claude)
 
-_Snapshot: 2026-10-31 · Live Railway deployment active (`practitioner-protocols-production.up.railway.app`) with internal Postgres & ledger migrations · Production app record "Practitioner Protocols" released (v2, Public distribution) · Production hardening complete · Milestone M9a (Embedded Merchant Admin in Production Mode) implemented, pending live dev store verification · Spikes S2, S3, S4, S5 resolved; S1 resolved on the Plus dev store only; discount_allocations observation pending · App Store listing artwork added (AI-generated) · 384 tests passing across 96 suites._
+_Snapshot: 2026-11-03 · Live Railway deployment active (`practitioner-protocols-production.up.railway.app`) with internal Postgres & ledger migrations · Production app record "Practitioner Protocols" released (v2, Public distribution) · Production hardening complete · Milestone M9a (Embedded Merchant Admin) & M9b-1 (allowSelfEnrol Setting, Migration & Pending-Practitioner Admin Review) implemented, pending live dev store verification · Spikes S2, S3, S4, S5 resolved; S1 resolved on the Plus dev store only; S6 candidate proposed (Spike open) · App Store listing artwork added (AI-generated) · 395 tests passing across 96 suites._
 _Contains NO secrets. Never paste `.env` values or tokens into chat or docs._
 
 ## 1. What this is
@@ -706,7 +706,38 @@ Run the five spikes in a day or two on a dev store; write the answers into secti
   - Full suite: **384 tests passing** across 96 suites (0 failures).
 - **Status & Next Steps:**
   - Milestone M9a is complete and verified in code and automated tests (status: implemented, pending live dev store verification).
-  - Milestone M9b queued as design doc only for a follow-up branch (`docs/m9b-design`).
+  - Milestone M9b design approved (`docs/M9B_DESIGN.md`) on sequential roadmap.
+
+## 39. Milestone M9b-1 — allowSelfEnrol Setting, Migration & Pending-Practitioner Admin Review
+
+- **Objective:**
+  Implement PR 1 of Milestone M9b: database migration for `allowSelfEnrol`, settings data access and partial updates, Settings tab toggle UI, and Practitioners tab pending review enhancements with direct Shopify admin customer deep links.
+- **Database Schema & Migration:**
+  - Added `allowSelfEnrol Boolean @default(false)` to `Setting` in `prisma/schema.prisma`.
+  - Authored PostgreSQL migration `prisma/migrations/20261103_add_allow_self_enrol/migration.sql`:
+    `ALTER TABLE "Setting" ADD COLUMN IF NOT EXISTS "allowSelfEnrol" BOOLEAN NOT NULL DEFAULT false;`
+  - Registered migration in `scripts/migrate.js` `MIGRATION_FILES`.
+- **Settings Data Access & Persistence (`app/lib/protocols/admin.js`):**
+  - `getSettings`: selects `"allowSelfEnrol"` and returns default `allowSelfEnrol: false` when unconfigured.
+  - `updateSettings`:
+    - Absence rule: an absent `allowSelfEnrol` key preserves the stored value via SQL `COALESCE($3, "Setting"."allowSelfEnrol")` and never resets to `false`.
+    - Type parsing: accepts boolean or strings `'true'` / `'1'` / `'on'` / `'false'`, as well as form array values `['false', 'true']`.
+    - Passthrough: `handleAdminUpdateSettingsRequest` in `routes.js` forwards the parsed payload directly.
+- **Merchant Admin UI (`renderAdminHtml`):**
+  - Settings Tab: renders `<input type="hidden" name="allowSelfEnrol" value="false">` before the checkbox (checked when enabled) with label "Allow Practitioner Self-Enrolment" and text "(Tag mode only)".
+  - Practitioners Tab:
+    - Pending rows (`isApproved: false`) show the practice name with `(requested, unverified)`.
+    - Pending rows render a direct link to the customer record in Shopify admin: `<a href="https://${safeShop}/admin/customers/${safeNumericId}" target="_blank" rel="noopener noreferrer">` with full HTML escaping via `escapeAdminText`.
+    - Approved rows do not show `(requested, unverified)` or customer links.
+    - Endpoints `/api/admin/practitioners/status` and `/practice-name` are reused completely unchanged.
+- **Test Suite Verification:**
+  - 395 unit tests passing across 96 suites (0 failures).
+  - Added test verifying migration registration in `MIGRATION_FILES`.
+  - Added tests for `getSettings` defaults, partial update value preservation (omitted fields keep stored value, explicit empty strings clear disclaimers, full form submit round-trips), and shop A vs shop B isolation.
+  - Added tests for HTML rendering (hidden input, checkbox checked/unchecked, pending customer deep link, escaping).
+- **Scope & Privacy Discipline:**
+  - Zero new scopes (`read_orders` only). Zero client/patient PII accepted or stored. No changes to `../salesforce`.
+
 
 
 

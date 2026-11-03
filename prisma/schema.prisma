@@ -112,6 +112,7 @@ model ProcessedWebhook {
 model Setting {
   shop             String   @id
   identityMode     String   @default("tag") // 'tag' (default) | 'company' (B2B)
+  allowSelfEnrol   Boolean  @default(false) // Practitioner self-enrolment via App Proxy (default off)
   footerDisclaimer String?  // Optional custom legal or brand disclaimer
   handoutText      String?  // Custom print instructions for handouts
   createdAt        DateTime @default(now())

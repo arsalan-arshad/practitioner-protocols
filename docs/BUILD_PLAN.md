@@ -54,12 +54,15 @@
   - Empty database states render clean Polaris empty tables without throwing 500.
   - App Bridge session refresh signal (`X-Shopify-Retry-Invalid-Session-Request: 1`) on 401 unauthorized.
 
-## M9b — Practitioner Self-Enrolment & Portal Production Wiring (Queued)
-- [ ] Design doc queued for separate branch (`docs/m9b-design`):
-  - Self-enrolment toggle in Settings (default off) with database migration.
-  - Pending practitioner profile creation via signed App Proxy `logged_in_customer_id` without requiring `read_customers` scope or client PII.
-  - Merchant approval workflow and practice name assignment in Admin UI.
-  - Wire storefront portal and protocol creation/edit routes in production mode (`server.js`).
+## M9b — Practitioner Self-Enrolment & Portal Production Wiring
+- [x] Design doc approved (`docs/M9B_DESIGN.md`) on sequential roadmap (M9b-1, M9b-2, M9b-3).
+- [x] **M9b-1: Self-Enrolment Setting, Migration & Admin Controls (Implemented, pending live dev store verification)**:
+  - Added `allowSelfEnrol` column to `Setting` in `prisma/schema.prisma` and registered migration `20261103_add_allow_self_enrol/migration.sql` in `scripts/migrate.js`.
+  - Added `getSettings`/`updateSettings` support with default `false`, partial update value preservation (COALESCE), and boolean/string parsing.
+  - Added Settings tab UI toggle with hidden `false` fallback and "Tag mode only" notice.
+  - Updated Practitioners tab to display pending practitioners (`isApproved: false`) with `(requested, unverified)` and direct links to Shopify admin customer records (`https://<shop>/admin/customers/<numericId>`).
+- [ ] **M9b-2: Self-Enrolment Flow, Portal States & CSRF Protection (Next)**
+- [ ] **M9b-3: Catalog Product Search & Production Authoring (Blocked on Spike S6 verification)**
 
 ## Later
 Practitioner application form · aggregate "client orders" count on protocol cards · protocol version history · Salesforce rollup via Bridge Recipes.

@@ -6,8 +6,8 @@
 - [x] S3 attribution carrier (verified hidden line property `_protocol_token` survives Cart AJAX through to completed guest order and signed-in B2B order, and verified in live `orders/paid` webhook payload capture; populated `discount_allocations` observation pending).
 - [x] S4 Cart AJAX 20 lines (verified adding 20 distinct variant lines in 971ms in single request).
 - [x] S5 practitioner-preview pricing (verified retail vs B2B pricing, quantity rules, sold-out all-or-nothing, and overstock partial add on live dev store).
-- [ ] S6 storefront product search execution (evaluate Storefront API token vs App Proxy query execution for real-time variant search in production protocol editor).
-- [x] Record empirical findings for S1–S5 in `PROJECT_CONTEXT.md` §5 and update decisions D1–D4. Re-rank scope if a spike fails. Detailed execution plan in [`docs/SPIKES_CHECKLIST.md`](SPIKES_CHECKLIST.md).
+- [x] S6 storefront product search execution (answered on dev store `ai-agent-app-h9qwnwd8`: `/search/suggest.json` returns up to 10 products with empty `variants: []`; `/products/<handle>.js` returns full variants with prices in minor units; client-side storefront fetch chosen; Option A selected: store `ProtocolLine.productHandle` via migration; unblocks M9b-3).
+- [x] Record empirical findings for S1–S6 in `PROJECT_CONTEXT.md` §5 & §41 and update decisions D1–D4 & D7. Detailed execution plan in [`docs/SPIKES_CHECKLIST.md`](SPIKES_CHECKLIST.md).
 
 ## M1 — Foundation
 - [x] Pure engine core: share-token generator, schema validation, permission checks, cart payload construction, QR generator, attribution extraction (`npm test` 289 pure unit tests passing).
@@ -47,7 +47,8 @@
 - [ ] Final owner review, dev store end-to-end verification, tagging, and release.
 
 ## M9a — Embedded Merchant Admin in Production Mode
-- [x] Embedded Merchant Admin in Production Mode (implemented, pending live verification on the dev store):
+- [x] Embedded Merchant Admin in Production Mode (VERIFIED LIVE on dev store `ai-agent-app-h9qwnwd8` 2026-11-04):
+  - Embedded admin loads inside Shopify Admin iframe, empty states render cleanly, tab navigation functions with fresh App Bridge session tokens.
   - `GET /`, `GET /admin`, and `GET /app` served via App Bridge ID tokens and HS256 session verification (`renderAdminHtml`, `renderAdminBootstrapHtml`).
   - Embedded iframe bootstrap pattern: missing session token inside admin iframe renders bootstrap page that retrieves `await shopify.idToken()` and reloads with `?id_token=<token>`, never redirecting iframe to `/api/auth`.
   - Top-level direct navigation with `?shop=` redirects to `/api/auth?shop=...`; direct navigation without shop returns 401.
@@ -57,21 +58,26 @@
 
 ## M9b — Practitioner Self-Enrolment & Portal Production Wiring
 - [x] Design doc approved (`docs/M9B_DESIGN.md`) on sequential roadmap (M9b-1, M9b-2, M9b-3).
-- [x] **M9b-1: Self-Enrolment Setting, Migration & Admin Controls (Implemented, pending live dev store verification)**:
-  - Added `allowSelfEnrol` column to `Setting` in `prisma/schema.prisma` and registered migration `20261103_add_allow_self_enrol/migration.sql` in `scripts/migrate.js`.
+- [x] **M9b-1: Self-Enrolment Setting, Migration & Admin Controls (VERIFIED LIVE on dev store 2026-11-04)**:
+  - Added `allowSelfEnrol` column to `Setting` in `prisma/schema.prisma` and registered migration `20261103_add_allow_self_enrol/migration.sql` in `scripts/migrate.js` (applied automatically on deploy).
   - Added `getSettings`/`updateSettings` support with default `false`, partial update value preservation (COALESCE), and boolean/string parsing.
-  - Added Settings tab UI toggle with hidden `false` fallback and "Tag mode only" notice.
-  - Updated Practitioners tab to display pending practitioners (`isApproved: false`) with `(requested, unverified)` and direct links to Shopify admin customer records (`https://<shop>/admin/customers/<numericId>`).
-- [x] **M9b-2: Self-Enrolment Flow, Portal States & CSRF Protection (Implemented, pending live dev-store verification)**:
-  - Added storefront self-enrolment handler (`POST /apps/protocols?action=enrol`) running before `!isApproved` gate.
-  - Implemented per-customer sliding window rate limiter (5 requests/hour) and per-shop pending cap (200 rows) with HTTP 429.
-  - Enforced mandatory CSRF protections on all mutating App Proxy routes: `Content-Type: application/json` required (HTTP 415), `Sec-Fetch-Site: same-origin` if present (HTTP 403), zero myshopify Origin comparison. Unknown actions return HTTP 400.
-  - Implemented 4 portal states in `renderPortalLiquid`: Guest sign-in with `/account/login`, Request Access form with async submit and `aria-live` status region, Pending Review notice, and Invite-Only notice (for company mode or when self-enrolment is disabled).
-  - Added Liquid delimiter neutralization and HTML entity escaping tests across dangerous payloads (`{{ shop.name }}`, `{% assign x = 1 %}`, `<script>alert(1)</script>`, `"><img src=x>`).
-  - Added compliance webhook integration test confirming `customers/redact` deletes self-enrolled pending profile for that customer.
-  - Verified 443 unit tests passing across 102 suites (0 failures).
-- [ ] **M9b-3: Catalog Product Search & Production Authoring (Blocked on Spike S6 verification)**
-  - Note: server.js /api/proxy currently passes createFakeVariantResolver with a hardcoded demo variant; M9b-3 must remove it from production so the client page never shows demo data.
+  - Settings tab toggle renders, saves, and persists across reloads (toggled back off after test).
+  - Practitioners tab displays pending practitioners (`isApproved: false`) with `(requested, unverified)` and direct links to Shopify admin customer records (`https://<shop>/admin/customers/<numericId>`).
+- [x] **M9b-2: Self-Enrolment Flow, Portal States & CSRF Protection (VERIFIED LIVE on dev store 2026-11-04)**:
+  - Verified live on dev store:
+    - Enrol round trip: JSON POST through the App Proxy (body and `Content-Type: application/json` preserved in transit).
+    - Pending portal state displaying requested name.
+    - Admin pending row displaying "(requested, unverified)" with direct Shopify admin customer deep link.
+    - Merchant approval flips profile to approved.
+    - Approved practitioner portal and protocol editor display upon reload.
+    - CSRF media-type rejections: form-encoded and `text/plain; application/json` POSTs return HTTP 415.
+    - Unknown action returns HTTP 400.
+  - Note: The per-customer rate limit (5/hr), the pending cap (200), `customers/redact` profile deletion, and `Sec-Fetch-Site` handling are covered by unit tests and were NOT exercised live.
+- [ ] **M9b-3: Catalog Product Search & Production Authoring (UNBLOCKED — Spike S6 Answered, Option A Chosen)**
+  - Note: `server.js` `/api/proxy` currently passes `createFakeVariantResolver` with a hardcoded demo variant; M9b-3 must remove it from production so the client page never shows demo data.
+  - Implement migration adding `ProtocolLine.productHandle`.
+  - Client-side product search via `/search/suggest.json` followed by `/products/<handle>.js` hydration with min query length and debounce.
+  - Production protocol create and update handlers writing to PostgreSQL.
 
 ## Later
 Practitioner application form · aggregate "client orders" count on protocol cards · protocol version history · Salesforce rollup via Bridge Recipes.

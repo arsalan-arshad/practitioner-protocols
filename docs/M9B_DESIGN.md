@@ -176,44 +176,51 @@ Enrolment is **never executed on a GET request**. It requires an explicit user P
 
 ---
 
-## 5. Product Search in Production (Spike S6 Proposed Approach)
+## 5. Product Search in Production (Spike S6 Answered)
 
-> [!IMPORTANT]
-> **Spike S6 Status: OPEN.**  
-> Spike S6 is NOT resolved. The proposed approach below is a candidate to be confirmed on the live dev store (to be confirmed by a dev-store spike). Implementation of search in production is gated on S6 verification.
+> [!NOTE]
+> **Spike S6 Status: ANSWERED (2026-11-04 on dev store `ai-agent-app-h9qwnwd8`, signed-in storefront).**  
+> Empirical findings from the live dev store confirmed the predictive search contract, variant resolution workflow, and client-side execution model. Milestone M9b-3 is unblocked.
 
-### 5.1 Candidate Approach: Client-Side Storefront Predictive Search
-In the protocol editor modal, client-side JavaScript queries the storefront's native predictive search:
-```
-GET /search/suggest.json?resources[type]=product&resources[options][unavailable_products]=show&q=${encodeURIComponent(query)}
-```
-
-### 5.2 Questions to be Confirmed by Spike S6:
-1. **Response fields:** Does `/search/suggest.json` return variant IDs and availability, or only top-level product records (`id`, `title`, `handle`, `image`)? If variants are omitted, can a client fetch `/products/${handle}.js` to obtain variant arrays?
-2. **Server-side fetch from Railway:** Can the Node.js backend fetch `/search/suggest.json` from Railway, or does Cloudflare/Shopify challenge, block, or throttle non-browser IP traffic?
-3. **Password-protected storefront:** Does `/search/suggest.json` function when the dev store has storefront password protection active?
-4. **B2B / contextual pricing:** Does `/search/suggest.json` support company-specific or localized pricing, or only default store currency?
-5. **Throttling:** What are Shopify's rate limits on storefront search suggestions during rapid user typing?
+### 5.1 Empirical Findings on Live Dev Store
+1. **`/search/suggest.json` Contract:**
+   - Endpoint: `GET /search/suggest.json?resources[type]=product&resources[options][unavailable_products]=show&q=${query}`
+   - Returns up to 10 products with fields: `id` (numeric), `handle`, `title`, `price` (formatted string e.g. `"945.00"`), `available` (boolean), `image`, `url`.
+   - The `variants` array is present in the response but was **EMPTY** (`variants: []`) across all 10 results tested.
+   - Empty query returns HTTP 422 Unprocessable Entity. No match returns HTTP 200 with empty results.
+   - Throttling: 25 rapid requests all returned HTTP 200 without rate-limit errors.
+   - Unavailable products are returned when requested (`available: false`).
+2. **`/products/<handle>.js` Contract:**
+   - Endpoint: `GET /products/${handle}.js`
+   - Returns full product and variant records: `id` (numeric), `title`, `price` in **minor currency units** (cents e.g. `94500` for $945.00), `available`, `sku`, `quantity_rule`.
+3. **Server-Side Fetch vs Client-Side Execution:**
+   - Anonymous requests to `/search/suggest.json` from outside the browser redirect to `/password` when storefront password protection is active.
+   - Server-side fetch from Node/Railway is **not relied on** and was left untested from Railway.
+   - **Architecture Decision:** All catalog and search calls are strictly **client-side from the storefront origin**. The backend server never fetches the storefront.
+4. **Untested Conditions:**
+   - B2B / contextual pricing for a logged-in B2B buyer was not tested in S6 (future enhancement).
 
 ---
 
 ## 6. Variant Display & Validation in Production
 
 ### 6.1 Current Schema & Resolver Limitation
-- In PostgreSQL, `ProtocolLine` stores only `variantGid`, `quantity`, `position`, and `usageNote`.
-- In demo mode, `resolveVariants` relied on an in-memory or GraphQL Storefront executor to fetch live titles, prices, and handles.
-- In production, the app currently has only the `read_orders` scope and does **not** have `read_products` or a Storefront API access token.
+- In PostgreSQL, `ProtocolLine` currently stores `variantGid`, `quantity`, `position`, and `usageNote`.
+- In demo mode, `resolveVariants` relied on `createFakeVariantResolver` with a hardcoded demo variant.
+- In production, the app operates strictly under `read_orders` without `read_products` or Storefront API access tokens.
 
-### 6.2 Display Candidates (Pending S6 Verification)
-- **Option A:** Store `productHandle` in `ProtocolLine` (requires schema migration) and fetch `/products/${handle}.js` client-side from the storefront origin to hydrate variant titles and prices.
-- **Option B:** Hydrate lines via client-side Storefront API if public Storefront token is available.
-- **Decision:** The variant resolution strategy is deferred until Spike S6 results are confirmed.
+### 6.2 Display Architecture & Resolution Decision: Option A Selected
+- **Selected: Option A (Client-Side Hydration via Product Handle):**
+  - Milestone M9b-3 adds `ProtocolLine.productHandle` via a new Prisma schema migration.
+  - The protocol editor performs client-side search: `GET /search/suggest.json` with minimum query length (e.g. 2 chars) and debounce (300ms) $\rightarrow$ upon selection or inspection, fetches `GET /products/${handle}.js` to obtain variant arrays, titles, and minor-unit prices.
+  - On protocol display / edit, lines are hydrated client-side from `/products/${handle}.js` matching on `variantGid`.
+  - Production `/api/proxy` removes `createFakeVariantResolver` so real production stores never display demo data.
 
 ### 6.3 Backend Validation for Protocol Create & Update
 When an approved practitioner calls `POST action=create` or `POST action=update`:
-- **Format Validation:** Each `variantGid` is validated against canonical format `^gid://shopify/ProductVariant/\d+$` and length limits ($\le 100$ characters).
-- **Residual Risk:** Without `read_products` or Storefront API query access, the backend **cannot verify** whether a submitted `variantGid` actually exists in the merchant's store, is currently published, or is available for sale.
-- **Failure Mode:** If an invalid, removed, or foreign variant ID is saved, the error will only manifest downstream when the client attempts to add the line to cart or view product details.
+- **Format Validation:** Each `variantGid` is validated against canonical format `^gid://shopify/ProductVariant/\d+$` and length limits ($\le 100$ characters). `productHandle` is validated against handle format.
+- **Residual Risk:** Without `read_products` or Storefront API query access, the backend cannot verify whether a submitted `variantGid` actually exists in the merchant's store, is currently published, or is available for sale.
+- **Failure Mode:** If an invalid, removed, or foreign variant ID is saved, the error will manifest downstream when the client attempts to add the line to cart or view product details.
 
 ---
 
@@ -243,7 +250,7 @@ flowchart LR
     M9b2 --> M9b3["PR 3: M9b-3 (Search + Authoring, Blocked on S6)"]
 ```
 
-### PR 1: Milestone M9b-1 — Migration, Setting, and Admin Controls
+### PR 1: Milestone M9b-1 — Migration, Setting, and Admin Controls (VERIFIED LIVE on dev store 2026-11-04)
 - **Scope:**
   - Add `allowSelfEnrol` to `prisma/schema.prisma` and create `20261103_add_allow_self_enrol/migration.sql`.
   - Update `scripts/migrate.js` `MIGRATION_FILES` array.
@@ -251,25 +258,37 @@ flowchart LR
   - Update `renderSettingsTab` with hidden input + checkbox.
   - Display pending practitioners in `renderAdminHtml` with Shopify admin customer links.
 - **Done Criteria:**
-  - All 384 existing tests pass.
+  - All 384 existing tests pass (443 total unit tests passing).
   - Test added confirming the new migration is in `MIGRATION_FILES` and applies idempotently.
   - New tests for `allowSelfEnrol` defaults, partial update preservation, and admin HTML rendering.
+  - **Live Verification:** Toggle renders (migration applied on deploy), saves and persists across reloads; toggled back off after test.
 
-### PR 2: Milestone M9b-2 — Self-Enrolment Flow, Portal States, and CSRF
+### PR 2: Milestone M9b-2 — Self-Enrolment Flow, Portal States, and CSRF (VERIFIED LIVE on dev store 2026-11-04)
 - **Scope:**
   - Implement `POST action=enrol` in `handleAppProxyRequest`.
-  - Enforce per-shop pending cap (200) and rate limits.
-  - Enforce CSRF headers (`Content-Type: application/json`, `Sec-Fetch-Site: same-origin` when present).
+  - Enforce per-shop pending cap (200) and rate limits (5/hr per customer).
+  - Enforce CSRF headers (`Content-Type: application/json` required -> 415; `Sec-Fetch-Site: same-origin` if present -> 403; unknown action -> 400).
   - Render portal liquid states: Enrolment form, Pending approval notice, and Invite-only notice.
   - Wire existing admin endpoints (`/api/admin/practitioners/status` and `/practice-name`).
 - **Done Criteria:**
-  - All tests green.
-  - New test coverage for enrolment creation, idempotency, pending cap, CSRF rejection, and Rule-4 authorization checks.
+  - All tests green (443 unit tests passing across 102 suites).
+  - Test coverage for enrolment creation, idempotency, pending cap, CSRF rejection, and Rule-4 authorization checks.
+  - **Live Verification on Dev Store:**
+    - Enrol round trip: JSON POST through App Proxy (body and `Content-Type: application/json` preserved in transit).
+    - Pending portal state displaying requested name.
+    - Admin pending row displaying "(requested, unverified)" with direct Shopify admin customer deep link.
+    - Merchant approval flips profile to approved.
+    - Approved practitioner portal and protocol editor display upon reload.
+    - CSRF media-type rejections: form-encoded and `text/plain; application/json` POSTs return HTTP 415.
+    - Unknown action returns HTTP 400.
+    - *Note on unexercised checks:* The per-customer rate limit (5/hr), the pending cap (200), `customers/redact` profile deletion, and `Sec-Fetch-Site` handling are covered by unit tests and were NOT exercised live.
 
-### PR 3: Milestone M9b-3 — Product Search & Production Authoring
+### PR 3: Milestone M9b-3 — Product Search & Production Authoring (UNBLOCKED — Spike S6 Answered, Option A Chosen)
 - **Scope:**
-  - Blocked on findings from Spike S6 on dev store.
-  - Wire `/apps/protocols?action=search` based on confirmed S6 candidate.
+  - Unblocked by findings from Spike S6 on dev store (`ai-agent-app-h9qwnwd8`).
+  - Wire `/apps/protocols?action=search` based on Option A (client-side `suggest.json` -> `/products/<handle>.js` hydration; debounce + min query length).
+  - Add `ProtocolLine.productHandle` schema migration.
+  - Remove `createFakeVariantResolver` from production `/api/proxy` in `server.js`.
   - Implement production protocol create and update handlers writing to PostgreSQL.
 - **Done Criteria:**
   - Full end-to-end authoring verified in production mode.
@@ -306,9 +325,10 @@ flowchart LR
    - **Cross-Shop Isolation:** Practitioner from Shop A cannot view, create, or modify protocols on Shop B.
    - **Link Revocation Behaviour:** Existing share links for protocols authored by a revoked practitioner remain accessible to clients if active (preventing client disruption), but the practitioner cannot log in or edit them.
 
-### 9.2 Manual Dev Store Verification (PR 1 & PR 2)
-1. Open Admin -> Settings -> Toggle "Allow Practitioner Self-Enrolment" on and off; verify state persists.
-2. Visit storefront `/apps/protocols` logged in as customer -> Submit "Request Practitioner Access".
-3. Open Admin -> Practitioners -> Verify pending row with requested practice name and customer link -> Approve and set practice name.
-4. Refresh storefront -> Verify active portal loads.
-5. **CSRF Proxy Verification (PR 2):** Confirm on the dev store that a JSON POST body and `Content-Type: application/json` survive Shopify App Proxy transit, and that a cross-site form post is rejected.
+### 9.2 Manual Dev Store Verification (COMPLETED on dev store 2026-11-04)
+1. **[VERIFIED]** Open Admin -> Settings -> Toggle "Allow Practitioner Self-Enrolment" on and off; verify state persists across reload (M9b-1).
+2. **[VERIFIED]** Visit storefront `/apps/protocols` logged in as customer -> Submit "Request Practitioner Access" (enrol round trip via JSON POST through App Proxy) (M9b-2).
+3. **[VERIFIED]** Open Admin -> Practitioners -> Verify pending row with requested practice name and customer link -> Approve and set practice name (M9b-2).
+4. **[VERIFIED]** Refresh storefront -> Verify active portal loads (M9b-2).
+5. **[VERIFIED]** CSRF Proxy Verification: Confirmed on the dev store that JSON POST body and `Content-Type: application/json` survive Shopify App Proxy transit; confirmed form-encoded and `text/plain; application/json` POSTs return HTTP 415; unknown action returns HTTP 400 (M9b-2).
+*(Note: Per-customer rate limiting of 5/hr, the 200 pending cap, `customers/redact` profile deletion, and `Sec-Fetch-Site` handling are covered by automated unit tests and were NOT exercised live on the dev store).*

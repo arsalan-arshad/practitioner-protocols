@@ -29,6 +29,7 @@ The idea grew out of a client request. The owner decided to build their **own, g
 - **D4 — Attribution carrier:** hidden line-item property (`_protocol_token`) vs cart attribute. **Verified on Live Orders:** Dev store orders #1016 (guest) and #1017 (signed-in B2B company contact) confirmed line-item properties (`_protocol_token`, `_protocol_id`, `_protocol_usage`) reached completed order, visible in Admin, and directly verified hidden from shoppers on Dawn cart, drawer, checkout, and customer account order details. Raw `orders/paid` webhook JSON payload inspection remains open; second theme unchecked.
 - **D5 — Public name** and listing category; avoid "Shopify" in the name.
 - **D6 — Practice naming control:** admin-set only (recommended) vs practitioner-set with approval.
+- **D7 — Product Catalog Search & Hydration in Production:** `/search/suggest.json` vs Storefront API. **Decided (Spike S6 Answered):** Option A. Store `productHandle` in `ProtocolLine` via schema migration; protocol editor uses client-side predictive search (`/search/suggest.json` with debounce) and hydrates variant details (titles, availability, minor-unit prices) via `/products/<handle>.js` from storefront origin; server never fetches storefront; `createFakeVariantResolver` removed in M9b-3.
 
 ## 6. Open questions for the owner
 - **Q1:** Is there a first brand (any vertical) willing to be the reference store? Without one, treat v1 as a portfolio piece and keep the scope tight.
@@ -46,8 +47,9 @@ The idea grew out of a client request. The owner decided to build their **own, g
 - S1 beyond the Plus dev store (verify extension availability on non-Plus plans vs universal App Proxy baseline).
 - Real `X-Forwarded-For` hop-count check on Railway behind Shopify App Proxy (`TRUSTED_PROXY_HOPS=1` currently assumed).
 - Second-theme property-hiding check (verified on Dawn; second free theme pending).
-- Real database-backed admin session-token authentication and UI: Milestone M9a implemented (embedded `/`, `/admin`, `/app` served with App Bridge session tokens, bootstrap reload, and cross-shop 403 protection; pending live dev store verification).
-- No way to create a protocol in production yet: Milestone M9b queued as design doc (practitioner self-enrolment toggle in Settings, pending profile creation via signed App Proxy customer ID, merchant practice name approval, and production portal route wiring).
+- Real database-backed admin session-token authentication and UI: Milestone M9a verified live on dev store `ai-agent-app-h9qwnwd8` (embedded `/`, `/admin`, `/app` served with App Bridge session tokens, bootstrap reload, empty states, and cross-shop 403 protection).
+- Practitioner self-enrolment and portal wiring: Milestones M9b-1 (`allowSelfEnrol` setting, migration, pending review table) and M9b-2 (enrol round trip, pending portal state, admin pending row with customer deep link, approval, approved portal, CSRF 415/400 rejections) verified live on dev store `ai-agent-app-h9qwnwd8`; per-customer rate limit, pending cap, `customers/redact` deletion, and `Sec-Fetch-Site` handling are covered by unit tests and not exercised live.
+- Milestone M9b-3 (Product search via Option A, authoring creation/updates in PostgreSQL, remove demo fake resolver from production `/api/proxy`): unblocked.
 - Add `CODEOWNERS` file (required for the Code Owners rule on `protect-main` branch protection to take effect).
 - Decision on publishing `v0.1.0` GitHub Release.
 - App Store listing screenshots (must be real captures of the finished UI, Shopify rule 4.4.4/4.4.5).
@@ -790,7 +792,54 @@ Run the five spikes in a day or two on a dev store; write the answers into secti
   - Verified `customers/redact` webhook handler deletes self-enrolled pending profile (`isApproved: false`) for that customer.
 - **Test Suite Verification:**
   - Full suite: **443 tests passing** across 102 suites (0 failures).
-  - Milestone M9b-2 is implemented and verified via automated tests (status: implemented, pending live dev-store verification).
+  - Milestone M9b-2 is implemented and verified via automated tests (status: verified live on dev store `ai-agent-app-h9qwnwd8` on 2026-11-04).
+
+## 41. Spike S6 Findings & Live Dev Store Verification of M9a, M9b-1, and M9b-2 (2026-11-04)
+
+- **Spike S6 Empirical Findings (Dev Store `ai-agent-app-h9qwnwd8`, Signed-In Storefront):**
+  - **`/search/suggest.json` Contract:**
+    - Query format: `GET /search/suggest.json?resources[type]=product&resources[options][unavailable_products]=show&q=${query}`
+    - Returns up to 10 products with fields: `id` (numeric), `handle`, `title`, `price` (formatted string e.g. `"945.00"`), `available` (boolean), `image`, `url`.
+    - The `variants` array is present in the response but was **EMPTY** (`variants: []`) across all 10 results tested.
+    - Empty query returns HTTP 422 Unprocessable Entity. No match returns HTTP 200 with empty results.
+    - Throttling: 25 rapid requests all returned HTTP 200 without rate-limit errors.
+    - Unavailable products are returned when requested (`available: false`).
+  - **`/products/<handle>.js` Contract:**
+    - Endpoint: `GET /products/${handle}.js`
+    - Returns full product and variant records: `id` (numeric), `title`, `price` in **minor currency units** (cents e.g. `94500` for $945.00), `available`, `sku`, `quantity_rule`.
+  - **Server-Side Fetch vs Client-Side Execution:**
+    - Anonymous requests to `/search/suggest.json` from outside the browser redirect to `/password` when storefront password protection is active.
+    - Server-side fetch from Node/Railway is not relied on and was left untested from Railway.
+    - **Architecture Decision (Option A):** All catalog and search calls are strictly **client-side from the storefront origin**. The backend server never fetches the storefront.
+    - M9b-3 will add `ProtocolLine.productHandle` via a new Prisma migration; the editor will debounce queries to `suggest.json` and hydrate variant details from `/products/<handle>.js`.
+    - `createFakeVariantResolver` with hardcoded demo data in `server.js` `/api/proxy` will be removed in M9b-3.
+  - **Untested Conditions:**
+    - B2B / contextual pricing for a logged-in B2B buyer was not tested in S6.
+
+- **Milestone M9a Live Dev Store Verification (2026-11-04):**
+  - Embedded admin successfully loads inside the Shopify Admin iframe on dev store `ai-agent-app-h9qwnwd8`.
+  - Empty database states render clean Polaris empty tables without 500 errors.
+  - Tab navigation functions smoothly with fresh App Bridge session tokens (`id_token`).
+
+- **Milestone M9b-1 Live Dev Store Verification (2026-11-04):**
+  - Schema migration `20261103_add_allow_self_enrol` automatically applied on Railway deploy.
+  - In Shopify Admin -> Settings tab: "Allow Practitioner Self-Enrolment" toggle renders cleanly.
+  - Toggling on saves and persists across page reload (toggled back off after test).
+
+- **Milestone M9b-2 Live Dev Store Verification (2026-11-04):**
+  - **Exercised Live on Dev Store:**
+    - Enrol round trip: JSON POST through the App Proxy preserves both request body and `Content-Type: application/json` header in transit.
+    - Pending portal state displaying the requested practice name.
+    - Merchant Admin Practitioners tab displays the pending row with requested practice name, "(requested, unverified)" badge, and direct deep link to the customer record (`https://<shop>/admin/customers/<id>`).
+    - Merchant approval flips `isApproved` to `true`.
+    - Approved practitioner portal and protocol editor display upon storefront refresh.
+    - CSRF media-type enforcement: form-encoded POST (`application/x-www-form-urlencoded`) and `text/plain; application/json` POST return HTTP 415.
+    - Unknown action returns HTTP 400.
+  - **Automated Test Coverage (Not Exercised Live):**
+    - The per-customer sliding-window rate limit (5/hr), the per-shop pending cap (200), `customers/redact` compliance webhook profile deletion, and `Sec-Fetch-Site` handling are covered by automated unit tests and were NOT exercised live on the dev store.
+
+- **PostgreSQL Database Integration Check:**
+  - The reviewer ran `npm run test:db` against an embedded PostgreSQL over the wire protocol: 10/11 passed; the concurrency test needs two simultaneous connections, which that harness does not support, so it was not verified there.
 
 ## 41. Brand Assets v2 — App Store Icon, Feature Image, README Banner & Thumbnail (2026-11-04)
 

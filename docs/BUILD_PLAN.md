@@ -43,6 +43,7 @@
 
 ## M8 — Release
 - [x] README written from verified code; architecture, schema, security guarantees, and test instructions documented.
+- [x] Brand assets v2 produced and verified: text-free App Store icon (`app-icon-1200.png`) and listing feature image (`feature-image-1600x900.png`) replacing the previous shopping-bag motif; wide README hero banner (`readme-banner-1600x400.png`) and social preview thumbnail (`thumbnail-1280x640.png`) with code-rendered typography.
 - [ ] Final owner review, dev store end-to-end verification, tagging, and release.
 
 ## M9a — Embedded Merchant Admin in Production Mode

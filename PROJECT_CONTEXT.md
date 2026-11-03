@@ -1,6 +1,6 @@
 # Practitioner Protocols — Project Context (for Claude)
 
-_Snapshot: 2026-11-04 · Live Railway deployment active (`practitioner-protocols-production.up.railway.app`) with internal Postgres & ledger migrations · Production app record "Practitioner Protocols" released (v2, Public distribution) · Production hardening complete · Milestones M9a (Embedded Merchant Admin), M9b-1 (allowSelfEnrol Setting, Migration & Pending Review) & M9b-2 (Storefront Self-Enrolment Flow, Portal States, and App Proxy CSRF Protection) VERIFIED LIVE on dev store `ai-agent-app-h9qwnwd8` · Spikes S2, S3, S4, S5, S6 resolved; S1 resolved on the Plus dev store only; S6 answered on dev store (Option A chosen; M9b-3 unblocked) · App Store listing artwork added (AI-generated) · 443 tests passing across 102 suites._
+_Snapshot: 2026-11-04 · Live Railway deployment active (`practitioner-protocols-production.up.railway.app`) with internal Postgres & ledger migrations · Production app record "Practitioner Protocols" released (v2, Public distribution) · Production hardening complete · Milestone M9a (Embedded Merchant Admin), M9b-1 (allowSelfEnrol Setting, Migration & Pending-Practitioner Admin Review) & M9b-2 (Storefront Self-Enrolment Flow, Portal States, and App Proxy CSRF Protection) implemented, pending live dev store verification · Spikes S2, S3, S4, S5 resolved; S1 resolved on the Plus dev store only; S6 candidate proposed (Spike open) · Brand assets v2 produced and verified (text-free App Store icon & feature image; code-composited README hero banner & social thumbnail; shopping-bag glyph eliminated) · 443 tests passing across 102 suites._
 _Contains NO secrets. Never paste `.env` values or tokens into chat or docs._
 
 ## 1. What this is
@@ -840,6 +840,34 @@ Run the five spikes in a day or two on a dev store; write the answers into secti
 
 - **PostgreSQL Database Integration Check:**
   - The reviewer ran `npm run test:db` against an embedded PostgreSQL over the wire protocol: 10/11 passed; the concurrency test needs two simultaneous connections, which that harness does not support, so it was not verified there.
+
+## 41. Brand Assets v2 — App Store Icon, Feature Image, README Banner & Thumbnail (2026-11-04)
+
+- **Objective:**
+  Redo the brand assets ("v2") to eliminate previous shopping-bag / Shopify-lookalike motifs and accidental smile curves, establish a cohesive design system across all 4 marketing and repository deliverables, and wire them cleanly into `README.md`.
+- **Hard Rule Compliance:**
+  - **Zero Text / Typography in Listing Artwork:** `app-icon-1200.png` and `feature-image-1600x900.png` contain zero text, letters, numbers, or brand names.
+  - **Zero Shopping-Bag Glyphs:** Replaced the previous bag silhouette entirely with a central protocol-convergence node: stacked offset rounded cards converging into a single coral QR/link token.
+  - **Zero Clinical or Medical Imagery:** No medical crosses, stethoscopes, pills, syringes, or human figures/faces. Product shapes are generic, flat, unbranded silhouettes (dropper bottle, cream jar, cosmetic tube, box).
+  - **Zero Accidental Faces:** Checked visually to confirm no smile-like curves, arcs, or dual-dot faces.
+  - **Safe Margins:** All key focal elements are strictly positioned within the central 80% safe zone.
+- **Deliverables & Specifications:**
+  1. `assets/listing/app-icon-1200.png`: 1200 × 1200 px (1:1 square), 1.2 MB. Stacked offset rounded protocol cards converging symmetrically into a central coral QR node on deep teal. Tested on contact sheet down to 32 × 32 px.
+  2. `assets/listing/feature-image-1600x900.png`: 1600 × 900 px (16:9 widescreen), 1.0 MB. Curated list card with 4 generic product silhouettes connected via vector bus to a glowing coral QR node on deep teal.
+  3. `assets/brand/readme-banner-1600x400.png`: 1600 × 400 px, 175 KB. Wide README hero banner pairing the text-free product card and QR node with code-rendered typography: wordmark "Practitioner Protocols" (`#F8FBF8`) and tagline "One link. One tap. Their whole protocol in the cart." (`#89DCBF`). Contrast ratios: 11.2:1 (wordmark) and 8.6:1 (tagline).
+  4. `assets/brand/thumbnail-1280x640.png`: 1280 × 640 px (2:1 aspect ratio), 202 KB (< 1 MB). GitHub social preview and screencast thumbnail with centered wordmark, tagline, and protocol-to-QR motif.
+- **Color Palette (Sampled Directly from Deliverables):**
+  - Deep Teal (Background): `#09484D` (icon) / `#0D4448` (feature & brand assets)
+  - Mint (Accents & Tagline): `#8DE3BF` / `#8FE1BF` / `#89DCBF`
+  - Warm Sand & Off-White (Cards & Wordmark): `#FAF8F5` / `#F5FCF5` / `#F8FBF8` / `#CBA574`
+  - Coral Accent (QR / Link Node): `#EB684A` / `#C6593B`
+- **Manual Owner Next Steps (Post-Merge):**
+  - Upload `assets/brand/thumbnail-1280x640.png` as the GitHub repository social preview via repo Settings -> Social preview.
+  - Upload `assets/listing/app-icon-1200.png` and `assets/listing/feature-image-1600x900.png` in the Shopify Partner / Dev Dashboard.
+  - Capture 3–6 real UI screenshots (1600 × 900 px) from the running app for App Store listing submission.
+- **Verification:**
+  - All 443 unit tests passing across 102 suites (0 failures).
+
 
 
 

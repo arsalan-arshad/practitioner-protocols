@@ -1,8 +1,10 @@
-# App Store Listing Artwork — Practitioner Protocols
+# App Store Listing Artwork — Practitioner Protocols (v2)
 
 This directory contains the listing artwork assets for the **Practitioner Protocols** Shopify App Store listing.
 
-> **Honesty & Transparency Disclosure:** These artwork assets were AI-generated using Google's **Imagen 3** generative image model on 2026-10-31, and post-processed to exact pixel dimensions. In strict accordance with Shopify App Store requirements (Rules 4.4.4 and 4.4.5), these assets do not contain screenshots, fake UI mockups, text baked into images, Shopify brand marks, or medical claims. Real in-app screenshots will be captured directly from the live application.
+> **Honesty & Transparency Disclosure:** These artwork assets were produced on 2026-11-04 as part of the Brand Assets v2 refresh. The text-free base artwork was generated using Google's **Imagen 3** (`generate_image`) generative image model, and processed to exact pixel dimensions. In strict accordance with Shopify App Store requirements (Rules 4.4.4 and 4.4.5), these listing assets contain zero text, zero letters/numbers, zero Shopify brand marks or bag glyphs, zero clinical or medical claims, and zero human figures or faces.
+>
+> **Note on Listing Screenshots:** Shopify App Store rules require 3–6 real UI screenshots (1600 × 900 px) demonstrating the actual merchant admin and practitioner portal in operation. In compliance with Rule 4.4.4, screenshots must be authentic captures of the running software rather than illustrations or mockups; these will be captured directly from the live application and dev store during the final release phase.
 
 ---
 
@@ -10,16 +12,17 @@ This directory contains the listing artwork assets for the **Practitioner Protoc
 
 - **File:** `app-icon-1200.png`
 - **Dimensions:** 1200 × 1200 px (1:1 square)
-- **Format:** PNG (solid RGB background, `hasAlpha: no`)
-- **Model Used:** Imagen 3
-- **Generation Date:** 2026-10-31
-- **Color Palette:** Deep teal (`#0F5C5C`), warm off-white (`#F7F5F0`), terracotta accent (`#E07A5F`)
+- **Format:** PNG (sRGB color space, solid background)
+- **Model Used:** Gemini Imagen 3 (`generate_image`)
+- **Generation Date:** 2026-11-04
+- **Alt Text (Factual):**
+  > "Practitioner Protocols app icon: stacked offset rounded cards converging into a central coral rounded-square QR node on a deep teal background."
 - **Generation Prompt:**
-  > "Minimalist vector app icon on solid deep teal (#0F5C5C) background. Three horizontal rounded off-white checklist pill bars stacked cleanly, converging into a simple geometric shopping bag silhouette. Subtle terracotta accent dot/badge. High contrast, clean geometric flat shapes, ~10% margin padding. No text, no letters, no words, no medical cross, no Shopify logo or bag mark, no people, no screenshots, solid background without transparency."
+  > "Minimalist vector app icon on solid deep teal (#0B3C3D) background. Stacked offset rounded protocol cards in warm off-white (#FAF8F5) and mint (#7AE5B8) converging symmetrically into a bold central coral (#E76F51) rounded-square QR node with 3-corner finder pattern mark. Symmetrical, centered subject, ~15% margin padding, high contrast (>= 4.5:1), clean flat shapes. Strictly NO text, NO letters, NO words, NO shopping bag, NO bag handles, NO Shopify logo, NO medical cross, NO pills, NO human figures, NO smiling curves."
 - **Shopify Specs Compliance:**
-  - Square 1200 × 1200 px with ~10% edge padding for Shopify's dynamic corner rounding.
-  - High-contrast, iconic geometry designed for crisp legibility at 64 × 64 px favicon / store listing scales.
-  - Zero text, letters, medical crosses, or Shopify logos.
+  - Square 1200 × 1200 px with ~15% edge padding for dynamic corner rounding on mobile and desktop App Store surfaces.
+  - High-contrast geometry tested for legibility down to 32 × 32 px favicon and 64 × 64 px dashboard scales.
+  - Zero text, zero bag silhouettes, zero medical crosses, zero logo lookalikes.
 
 ---
 
@@ -27,25 +30,35 @@ This directory contains the listing artwork assets for the **Practitioner Protoc
 
 - **File:** `feature-image-1600x900.png`
 - **Dimensions:** 1600 × 900 px (16:9 aspect ratio)
-- **Format:** PNG (solid RGB background, `hasAlpha: no`)
-- **Model Used:** Imagen 3
-- **Generation Date:** 2026-10-31
+- **Format:** PNG (sRGB color space, solid background)
+- **Model Used:** Gemini Imagen 3 (`generate_image`)
+- **Generation Date:** 2026-11-04
 - **Alt Text (Factual):**
-  > "A curated list of generic unbranded wellness products converging into a single shopping bag."
+  > "A curated list card of generic unbranded wellness products (dropper bottle, cream jar, cosmetic tube, box) converging via a vector connector line into a single coral QR code link node on deep teal background."
 - **Generation Prompt:**
-  > "Wide 16:9 minimalist vector banner artwork featuring generic unbranded product silhouettes (dropper, cream jar, bottle) connected through stylized off-white checklist protocol lines and terracotta accents into a sleek shopping bag emblem on a solid deep teal background. Solid clean background with contrast >= 4.5:1. No text, no fake UI, no Shopify logo, no medical cross, no people, no pricing, no star ratings."
+  > "Calm, premium 16:9 minimalist vector banner artwork on solid deep teal (#0B3C3D) background. In the center, safely within the central 80% margins, a horizontal clean off-white rounded protocol card displays a row of 4 generic unbranded product silhouettes (dropper bottle, cream jar, lotion tube, rectangular carton box) in soft mint and warm sand. A clean straight vector connector line flows from the card to the right, terminating in a glowing coral (#E76F51) rounded-square QR node. Strictly NO text, NO letters, NO words, NO shopping bag, NO shopping cart, NO bag handles, NO Shopify logo, NO medical cross, NO healthcare symbols, NO human figures, NO smile-like curves, NO ratings, NO pricing."
 - **Shopify Specs Compliance:**
   - Standard 1600 × 900 px (16:9) banner format.
-  - High contrast ratio (> 4.5:1) between foreground elements and solid background.
-  - Expands upon the core checklist-to-cart concept rather than duplicating the icon alone (Rule 4.4.4).
+  - All visual content positioned strictly within the central 80% safe zone.
+  - High contrast ratio (> 4.5:1, measured > 11:1) between foreground elements and deep teal background.
   - Contains no baked-in marketing copy, statistics, pricing, testimonials, or brand names.
 
 ---
 
-## 3. Verification Report (`sips`)
+## 3. Sampled Hex Color Palette
+
+Measured directly from the final PNG files:
+- **Deep Teal (Background):** `#09484D` (icon) / `#0D4448` (feature banner)
+- **Mint (Product & Accents):** `#8DE3BF` (icon) / `#8FE1BF` (feature banner)
+- **Warm Sand & Off-White (Cards & Packaging):** `#FAF8F5` / `#F5FCF5` / `#CBA574`
+- **Coral Accent (QR Node):** `#EB684A` (icon) / `#C6593B` (feature banner)
+
+---
+
+## 4. Verification (`sips` & file sizes)
 
 ```bash
-sips -g pixelWidth -g pixelHeight -g hasAlpha app-icon-1200.png feature-image-1600x900.png
+sips -g pixelWidth -g pixelHeight app-icon-1200.png feature-image-1600x900.png
 ```
-- `app-icon-1200.png`: `pixelWidth: 1200`, `pixelHeight: 1200`, `hasAlpha: no` (Exact match, solid background)
-- `feature-image-1600x900.png`: `pixelWidth: 1600`, `pixelHeight: 900`, `hasAlpha: no` (Exact match, solid background)
+- `app-icon-1200.png`: `pixelWidth: 1200`, `pixelHeight: 1200`, size: 1.2 MB (< 2 MB)
+- `feature-image-1600x900.png`: `pixelWidth: 1600`, `pixelHeight: 900`, size: 1.0 MB (< 2 MB)

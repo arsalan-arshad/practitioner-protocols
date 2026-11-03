@@ -1,5 +1,9 @@
 <p align="center">
-  <img src="assets/listing/app-icon-1200.png" alt="Practitioner Protocols app icon" width="120">
+  <img src="assets/brand/readme-banner-1600x400.png" alt="Practitioner Protocols brand hero banner displaying the wordmark, tagline, curated protocol card, and QR node" width="100%">
+</p>
+
+<p align="center">
+  <img src="assets/listing/app-icon-1200.png" alt="Practitioner Protocols app icon: stacked offset rounded cards converging into a central coral rounded-square QR node on a deep teal background" width="96">
 </p>
 
 # Practitioner Protocols — Share Product Recommendations by Link or QR, Buy in One Tap
@@ -9,10 +13,10 @@
 > ⚙️ **Status: Complete Engine, Admin & Storefront Modules Verified (443/443 Unit Tests Passing across 102 Suites)** | **Live PostgreSQL Integration (11 integration tests run against a live PostgreSQL instance (they skip with a notice when none is reachable))** | **Live Railway Hosting with Postgres** | **Dev Store Spikes Verified (S2, S3, S4, S5 Answered; S1 Answered on Plus Dev Store Only; S6 Answered on Dev Store)** | **Milestones M9a, M9b-1 & M9b-2 Verified Live on Dev Store**
 
 <p align="center">
-  <img src="assets/listing/feature-image-1600x900.png" alt="A curated list of generic unbranded wellness products converging into a single shopping bag." width="720">
+  <img src="assets/listing/feature-image-1600x900.png" alt="A curated list card of generic unbranded wellness products converging into a single coral QR code link node on deep teal background." width="720">
 </p>
 
-<sub>Artwork is AI-generated. Details in [assets/listing/README.md](assets/listing/README.md).</sub>
+<sub>Artwork is AI-generated (text-free vector artwork via Imagen 3; typography composited via code). Details in [assets/listing/README.md](assets/listing/README.md) and [assets/brand/README.md](assets/brand/README.md).</sub>
 
 ---
 
@@ -246,6 +250,7 @@ psql $DATABASE_URL -f prisma/migrations/20261022_add_currency_to_stat_unique_and
 │           ├── service.js       # Transactional PostgreSQL service layer (withTransaction)
 │           └── routes.js        # HTTP request controllers & webhook router
 ├── assets/
+│   ├── brand/                   # Brand hero banner and social preview thumbnail
 │   └── listing/                 # App Store icon and feature image (AI-generated)
 ├── docs/
 │   ├── BUILD_PLAN.md            # Milestones and progress tracker

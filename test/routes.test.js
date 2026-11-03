@@ -284,10 +284,10 @@ describe('HTTP Routes & Request Handlers (app/lib/protocols/routes.js)', () => {
 
         // 12. Settings & Stats queries
         if (sql.includes('FROM "Setting"')) {
-          return { rows: state.settings.length > 0 ? state.settings : [{ shop: params[0], identityMode: 'tag', footerDisclaimer: null, handoutText: null }] };
+          return { rows: state.settings.length > 0 ? state.settings : [{ shop: params[0], identityMode: 'tag', allowSelfEnrol: false, footerDisclaimer: null, handoutText: null }] };
         }
         if (sql.includes('INSERT INTO "Setting"')) {
-          const setting = { shop: params[0], identityMode: params[1], footerDisclaimer: params[2], handoutText: params[3] };
+          const setting = { shop: params[0], identityMode: params[1], allowSelfEnrol: params[2] ?? false, footerDisclaimer: params[3], handoutText: params[4] };
           state.settings = [setting];
           return { rows: [setting] };
         }

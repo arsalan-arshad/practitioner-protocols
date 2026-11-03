@@ -68,8 +68,9 @@
   - Implemented 4 portal states in `renderPortalLiquid`: Guest sign-in with `/account/login`, Request Access form with async submit and `aria-live` status region, Pending Review notice, and Invite-Only notice (for company mode or when self-enrolment is disabled).
   - Added Liquid delimiter neutralization and HTML entity escaping tests across dangerous payloads (`{{ shop.name }}`, `{% assign x = 1 %}`, `<script>alert(1)</script>`, `"><img src=x>`).
   - Added compliance webhook integration test confirming `customers/redact` deletes self-enrolled pending profile for that customer.
-  - Verified 424 unit tests passing across 98 suites (0 failures).
+  - Verified 443 unit tests passing across 102 suites (0 failures).
 - [ ] **M9b-3: Catalog Product Search & Production Authoring (Blocked on Spike S6 verification)**
+  - Note: server.js /api/proxy currently passes createFakeVariantResolver with a hardcoded demo variant; M9b-3 must remove it from production so the client page never shows demo data.
 
 ## Later
 Practitioner application form · aggregate "client orders" count on protocol cards · protocol version history · Salesforce rollup via Bridge Recipes.

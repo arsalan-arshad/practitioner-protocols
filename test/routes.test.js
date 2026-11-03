@@ -2005,6 +2005,140 @@ describe('HTTP Routes & Request Handlers (app/lib/protocols/routes.js)', () => {
       assert.equal(res.status, 201);
     });
 
+    describe('CSRF exact media type verification (enrol, create, update)', () => {
+      const bypassTypes = [
+        'text/plain; application/json',
+        'application/x-www-form-urlencoded; x=application/json',
+        'multipart/form-data; boundary=application/json',
+        'application/jsonx'
+      ];
+      const validTypes = [
+        'application/json; charset=utf-8',
+        'APPLICATION/JSON'
+      ];
+
+      describe('action=enrol', () => {
+        for (const ct of bypassTypes) {
+          it(`rejects bypass Content-Type '${ct}' with 415 on enrol`, async () => {
+            const url = makeSignedProxyUrl({ action: 'enrol', logged_in_customer_id: testCustomerId });
+            const req = new Request(url, {
+              method: 'POST',
+              headers: { 'Content-Type': ct },
+              body: JSON.stringify({ practiceName: 'Health Clinic' })
+            });
+            const res = await handleAppProxyRequest(db, req, { apiSecret });
+            assert.equal(res.status, 415);
+            const data = await res.json();
+            assert.ok(data.error.includes('Content-Type must be application/json'));
+          });
+        }
+
+        for (const ct of validTypes) {
+          it(`accepts valid Content-Type '${ct}' on enrol`, async () => {
+            const url = makeSignedProxyUrl({ action: 'enrol', logged_in_customer_id: testCustomerId });
+            const req = new Request(url, {
+              method: 'POST',
+              headers: { 'Content-Type': ct },
+              body: JSON.stringify({ practiceName: 'Health Clinic' })
+            });
+            const res = await handleAppProxyRequest(db, req, { apiSecret });
+            assert.ok(res.status === 200 || res.status === 201);
+          });
+        }
+      });
+
+      describe('action=create', () => {
+        beforeEach(() => {
+          db.state.profiles.push({
+            id: 'prof_approved_create',
+            shop: testShop,
+            ownerGid: customerGid,
+            practiceName: 'Approved Center',
+            isApproved: true
+          });
+        });
+
+        for (const ct of bypassTypes) {
+          it(`rejects bypass Content-Type '${ct}' with 415 on create`, async () => {
+            const url = makeSignedProxyUrl({ action: 'create', logged_in_customer_id: testCustomerId });
+            const req = new Request(url, {
+              method: 'POST',
+              headers: { 'Content-Type': ct },
+              body: JSON.stringify({
+                name: 'Immune Protocol',
+                lines: [{ variantGid: 'gid://shopify/ProductVariant/101', quantity: 1 }]
+              })
+            });
+            const res = await handleAppProxyRequest(db, req, { apiSecret });
+            assert.equal(res.status, 415);
+          });
+        }
+
+        for (const ct of validTypes) {
+          it(`accepts valid Content-Type '${ct}' on create`, async () => {
+            const url = makeSignedProxyUrl({ action: 'create', logged_in_customer_id: testCustomerId });
+            const req = new Request(url, {
+              method: 'POST',
+              headers: { 'Content-Type': ct },
+              body: JSON.stringify({
+                name: 'Immune Protocol',
+                lines: [{ variantGid: 'gid://shopify/ProductVariant/101', quantity: 1 }]
+              })
+            });
+            const res = await handleAppProxyRequest(db, req, { apiSecret });
+            assert.equal(res.status, 201);
+          });
+        }
+      });
+
+      describe('action=update', () => {
+        beforeEach(() => {
+          db.state.profiles.push({
+            id: 'prof_approved_update',
+            shop: testShop,
+            ownerGid: customerGid,
+            practiceName: 'Approved Center',
+            isApproved: true
+          });
+          db.state.protocols.push({
+            id: 'proto_update_target',
+            shop: testShop,
+            ownerType: 'customer',
+            ownerId: customerGid,
+            createdBy: customerGid,
+            name: 'Original Protocol',
+            status: 'active'
+          });
+        });
+
+        for (const ct of bypassTypes) {
+          it(`rejects bypass Content-Type '${ct}' with 415 on update`, async () => {
+            const url = makeSignedProxyUrl({ action: 'update', id: 'proto_update_target', logged_in_customer_id: testCustomerId });
+            const req = new Request(url, {
+              method: 'POST',
+              headers: { 'Content-Type': ct },
+              body: JSON.stringify({ name: 'Renamed Protocol' })
+            });
+            const res = await handleAppProxyRequest(db, req, { apiSecret });
+            assert.equal(res.status, 415);
+          });
+        }
+
+        for (const ct of validTypes) {
+          it(`accepts valid Content-Type '${ct}' on update`, async () => {
+            const url = makeSignedProxyUrl({ action: 'update', id: 'proto_update_target', logged_in_customer_id: testCustomerId });
+            const req = new Request(url, {
+              method: 'POST',
+              headers: { 'Content-Type': ct },
+              body: JSON.stringify({ name: 'Renamed Protocol' })
+            });
+            const res = await handleAppProxyRequest(db, req, { apiSecret });
+            assert.equal(res.status, 200);
+          });
+        }
+      });
+    });
+
     it('CSRF: rejects unknown action on POST request with HTTP 400 (never falls through to create)', async () => {
       const url = makeSignedProxyUrl({ action: 'hack_admin', logged_in_customer_id: testCustomerId });
       const req = new Request(url, {
@@ -2093,6 +2227,28 @@ describe('HTTP Routes & Request Handlers (app/lib/protocols/routes.js)', () => {
       const matchingProfiles = db.state.profiles.filter(p => p.ownerGid === customerGid);
       assert.equal(matchingProfiles.length, 1);
       assert.equal(matchingProfiles[0].practiceName, 'First Submission');
+    });
+
+    it('Enrolment: returns 200 { status: "approved" } when existing profile is already approved', async () => {
+      db.state.profiles.push({
+        id: 'prof_already_approved',
+        shop: testShop,
+        ownerGid: customerGid,
+        practiceName: 'Elite Naturopathic Clinic',
+        isApproved: true
+      });
+
+      const url = makeSignedProxyUrl({ action: 'enrol', logged_in_customer_id: testCustomerId });
+      const req = new Request(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ practiceName: 'Re-request' })
+      });
+
+      const res = await handleAppProxyRequest(db, req, { apiSecret });
+      assert.equal(res.status, 200);
+      const data = await res.json();
+      assert.deepEqual(data, { status: 'approved' });
     });
 
     it('Enrolment: rejects enrolment with HTTP 403 when allowSelfEnrol is false', async () => {

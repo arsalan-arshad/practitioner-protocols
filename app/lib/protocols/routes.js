@@ -143,7 +143,8 @@ export function getDefaultEnrolRateLimiter() {
  */
 export function validateAppProxyCsrf(request) {
   const contentType = getHeader(request, 'content-type') || '';
-  if (!contentType.toLowerCase().includes('application/json')) {
+  const mediaType = contentType.split(';')[0].trim().toLowerCase();
+  if (mediaType !== 'application/json') {
     return Response.json(
       { error: 'Content-Type must be application/json' },
       {
@@ -365,8 +366,9 @@ export async function handleEnrolRequest(db, request, { shop, customerGid, optio
         [shop, customerGid, numericId]
       );
       if (existingRes?.rows?.[0]) {
+        const isApproved = Boolean(existingRes.rows[0].isApproved);
         return Response.json(
-          { status: 'pending' },
+          { status: isApproved ? 'approved' : 'pending' },
           { status: 200, headers: { 'Content-Type': 'application/json' } }
         );
       }
@@ -403,8 +405,13 @@ export async function handleEnrolRequest(db, request, { shop, customerGid, optio
         );
       } else {
         // Conflict occurred -> already exists
+        const existingProf = await db.query(
+          'SELECT "isApproved" FROM "PractitionerProfile" WHERE "shop" = $1 AND ("ownerGid" = $2 OR "ownerGid" = $3)',
+          [shop, customerGid, numericId]
+        );
+        const isApproved = Boolean(existingProf?.rows?.[0]?.isApproved);
         return Response.json(
-          { status: 'pending' },
+          { status: isApproved ? 'approved' : 'pending' },
           { status: 200, headers: { 'Content-Type': 'application/json' } }
         );
       }

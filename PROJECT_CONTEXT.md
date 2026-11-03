@@ -1,6 +1,6 @@
 # Practitioner Protocols — Project Context (for Claude)
 
-_Snapshot: 2026-11-04 · Live Railway deployment active (`practitioner-protocols-production.up.railway.app`) with internal Postgres & ledger migrations · Production app record "Practitioner Protocols" released (v2, Public distribution) · Production hardening complete · Milestone M9a (Embedded Merchant Admin), M9b-1 (allowSelfEnrol Setting, Migration & Pending-Practitioner Admin Review) & M9b-2 (Storefront Self-Enrolment Flow, Portal States, and App Proxy CSRF Protection) implemented, pending live dev store verification · Spikes S2, S3, S4, S5 resolved; S1 resolved on the Plus dev store only; S6 candidate proposed (Spike open) · App Store listing artwork added (AI-generated) · 424 tests passing across 98 suites._
+_Snapshot: 2026-11-04 · Live Railway deployment active (`practitioner-protocols-production.up.railway.app`) with internal Postgres & ledger migrations · Production app record "Practitioner Protocols" released (v2, Public distribution) · Production hardening complete · Milestone M9a (Embedded Merchant Admin), M9b-1 (allowSelfEnrol Setting, Migration & Pending-Practitioner Admin Review) & M9b-2 (Storefront Self-Enrolment Flow, Portal States, and App Proxy CSRF Protection) implemented, pending live dev store verification · Spikes S2, S3, S4, S5 resolved; S1 resolved on the Plus dev store only; S6 candidate proposed (Spike open) · App Store listing artwork added (AI-generated) · 443 tests passing across 102 suites._
 _Contains NO secrets. Never paste `.env` values or tokens into chat or docs._
 
 ## 1. What this is
@@ -789,7 +789,7 @@ Run the five spikes in a day or two on a dev store; write the answers into secti
 - **Compliance Webhook Verification:**
   - Verified `customers/redact` webhook handler deletes self-enrolled pending profile (`isApproved: false`) for that customer.
 - **Test Suite Verification:**
-  - Full suite: **424 tests passing** across 98 suites (0 failures).
+  - Full suite: **443 tests passing** across 102 suites (0 failures).
   - Milestone M9b-2 is implemented and verified via automated tests (status: implemented, pending live dev-store verification).
 
 

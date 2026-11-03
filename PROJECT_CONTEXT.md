@@ -48,7 +48,7 @@ The idea grew out of a client request. The owner decided to build their **own, g
 - Real `X-Forwarded-For` hop-count check on Railway behind Shopify App Proxy (`TRUSTED_PROXY_HOPS=1` currently assumed).
 - Second-theme property-hiding check (verified on Dawn; second free theme pending).
 - Real database-backed admin session-token authentication and UI: Milestone M9a verified live on dev store `ai-agent-app-h9qwnwd8` (embedded `/`, `/admin`, `/app` served with App Bridge session tokens, bootstrap reload, empty states, and cross-shop 403 protection).
-- Practitioner self-enrolment and portal wiring: Milestones M9b-1 (`allowSelfEnrol` setting, migration, pending review table) and M9b-2 (self-enrolment form, portal states, CSRF enforcement, merchant approval) verified live on dev store `ai-agent-app-h9qwnwd8`.
+- Practitioner self-enrolment and portal wiring: Milestones M9b-1 (`allowSelfEnrol` setting, migration, pending review table) and M9b-2 (enrol round trip, pending portal state, admin pending row with customer deep link, approval, approved portal, CSRF 415/400 rejections) verified live on dev store `ai-agent-app-h9qwnwd8`; per-customer rate limit, pending cap, `customers/redact` deletion, and `Sec-Fetch-Site` handling are covered by unit tests and not exercised live.
 - Milestone M9b-3 (Product search via Option A, authoring creation/updates in PostgreSQL, remove demo fake resolver from production `/api/proxy`): unblocked.
 - Add `CODEOWNERS` file (required for the Code Owners rule on `protect-main` branch protection to take effect).
 - Decision on publishing `v0.1.0` GitHub Release.
@@ -827,18 +827,19 @@ Run the five spikes in a day or two on a dev store; write the answers into secti
   - Toggling on saves and persists across page reload (toggled back off after test).
 
 - **Milestone M9b-2 Live Dev Store Verification (2026-11-04):**
-  - **Storefront Form & Submission:**
-    - Logged-in customer navigating to `/apps/protocols` sees the Request Access form.
-    - JSON POST through the App Proxy preserves both request body and `Content-Type: application/json` header in transit.
-    - Submission returns HTTP 201 `{ status: "pending" }` and UI transitions to "Account Pending Approval" displaying the requested practice name.
-  - **Merchant Review & Approval:**
-    - Shopify Admin Practitioners tab displays the pending row with requested practice name, "(requested, unverified)" badge, and direct deep link to the customer record (`https://<shop>/admin/customers/<id>`).
-    - Approving the practitioner flips `isApproved` to `true`; storefront refresh renders the approved practitioner library and editor modal.
-  - **CSRF & Security Enforcement:**
-    - Form-encoded POST (`application/x-www-form-urlencoded`) returns HTTP 415.
-    - Content-Type bypass attempt (`text/plain; application/json`) returns HTTP 415.
+  - **Exercised Live on Dev Store:**
+    - Enrol round trip: JSON POST through the App Proxy preserves both request body and `Content-Type: application/json` header in transit.
+    - Pending portal state displaying the requested practice name.
+    - Merchant Admin Practitioners tab displays the pending row with requested practice name, "(requested, unverified)" badge, and direct deep link to the customer record (`https://<shop>/admin/customers/<id>`).
+    - Merchant approval flips `isApproved` to `true`.
+    - Approved practitioner portal and protocol editor display upon storefront refresh.
+    - CSRF media-type enforcement: form-encoded POST (`application/x-www-form-urlencoded`) and `text/plain; application/json` POST return HTTP 415.
     - Unknown action returns HTTP 400.
-    - `Sec-Fetch-Site` presence after proxy was not observed; the rule (reject only if present and `!= 'same-origin'`) is safe either way.
+  - **Automated Test Coverage (Not Exercised Live):**
+    - The per-customer sliding-window rate limit (5/hr), the per-shop pending cap (200), `customers/redact` compliance webhook profile deletion, and `Sec-Fetch-Site` handling are covered by automated unit tests and were NOT exercised live on the dev store.
+
+- **PostgreSQL Database Integration Check:**
+  - The reviewer ran `npm run test:db` against an embedded PostgreSQL over the wire protocol: 10/11 passed; the concurrency test needs two simultaneous connections, which that harness does not support, so it was not verified there.
 
 
 

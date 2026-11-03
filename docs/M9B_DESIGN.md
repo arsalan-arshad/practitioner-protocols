@@ -273,7 +273,15 @@ flowchart LR
 - **Done Criteria:**
   - All tests green (443 unit tests passing across 102 suites).
   - Test coverage for enrolment creation, idempotency, pending cap, CSRF rejection, and Rule-4 authorization checks.
-  - **Live Verification:** Logged-in customer sees request form; JSON POST through App Proxy (body and `Content-Type: application/json` preserved); 201 -> "Account Pending Approval" with requested name; admin shows pending row with customer deep link and `(requested, unverified)`; Approve -> approved library renders; form-encoded and `text/plain; application/json` POSTs -> 415; unknown action -> 400. `Sec-Fetch-Site` presence after proxy was not observed; rule (reject only if present and `!= same-origin`) is safe either way.
+  - **Live Verification on Dev Store:**
+    - Enrol round trip: JSON POST through App Proxy (body and `Content-Type: application/json` preserved in transit).
+    - Pending portal state displaying requested name.
+    - Admin pending row displaying "(requested, unverified)" with direct Shopify admin customer deep link.
+    - Merchant approval flips profile to approved.
+    - Approved practitioner portal and protocol editor display upon reload.
+    - CSRF media-type rejections: form-encoded and `text/plain; application/json` POSTs return HTTP 415.
+    - Unknown action returns HTTP 400.
+    - *Note on unexercised checks:* The per-customer rate limit (5/hr), the pending cap (200), `customers/redact` profile deletion, and `Sec-Fetch-Site` handling are covered by unit tests and were NOT exercised live.
 
 ### PR 3: Milestone M9b-3 — Product Search & Production Authoring (UNBLOCKED — Spike S6 Answered, Option A Chosen)
 - **Scope:**
@@ -318,8 +326,9 @@ flowchart LR
    - **Link Revocation Behaviour:** Existing share links for protocols authored by a revoked practitioner remain accessible to clients if active (preventing client disruption), but the practitioner cannot log in or edit them.
 
 ### 9.2 Manual Dev Store Verification (COMPLETED on dev store 2026-11-04)
-1. **[VERIFIED]** Open Admin -> Settings -> Toggle "Allow Practitioner Self-Enrolment" on and off; verify state persists across reload.
-2. **[VERIFIED]** Visit storefront `/apps/protocols` logged in as customer -> Submit "Request Practitioner Access".
-3. **[VERIFIED]** Open Admin -> Practitioners -> Verify pending row with requested practice name and customer link -> Approve and set practice name.
-4. **[VERIFIED]** Refresh storefront -> Verify active portal loads.
-5. **[VERIFIED]** CSRF Proxy Verification: Confirmed on the dev store that JSON POST body and `Content-Type: application/json` survive Shopify App Proxy transit; confirmed form-encoded and `text/plain; application/json` POSTs return HTTP 415; unknown action returns HTTP 400.
+1. **[VERIFIED]** Open Admin -> Settings -> Toggle "Allow Practitioner Self-Enrolment" on and off; verify state persists across reload (M9b-1).
+2. **[VERIFIED]** Visit storefront `/apps/protocols` logged in as customer -> Submit "Request Practitioner Access" (enrol round trip via JSON POST through App Proxy) (M9b-2).
+3. **[VERIFIED]** Open Admin -> Practitioners -> Verify pending row with requested practice name and customer link -> Approve and set practice name (M9b-2).
+4. **[VERIFIED]** Refresh storefront -> Verify active portal loads (M9b-2).
+5. **[VERIFIED]** CSRF Proxy Verification: Confirmed on the dev store that JSON POST body and `Content-Type: application/json` survive Shopify App Proxy transit; confirmed form-encoded and `text/plain; application/json` POSTs return HTTP 415; unknown action returns HTTP 400 (M9b-2).
+*(Note: Per-customer rate limiting of 5/hr, the 200 pending cap, `customers/redact` profile deletion, and `Sec-Fetch-Site` handling are covered by automated unit tests and were NOT exercised live on the dev store).*

@@ -63,12 +63,15 @@
   - Settings tab toggle renders, saves, and persists across reloads (toggled back off after test).
   - Practitioners tab displays pending practitioners (`isApproved: false`) with `(requested, unverified)` and direct links to Shopify admin customer records (`https://<shop>/admin/customers/<numericId>`).
 - [x] **M9b-2: Self-Enrolment Flow, Portal States & CSRF Protection (VERIFIED LIVE on dev store 2026-11-04)**:
-  - Logged-in customer sees Request Access form on `/apps/protocols`.
-  - JSON POST through App Proxy succeeds (body and `Content-Type: application/json` preserved in transit).
-  - 201 response renders "Account Pending Approval" with requested name; admin shows pending row with customer deep link and `(requested, unverified)`; merchant approval flips profile and approved library renders.
-  - Form-encoded and `text/plain; application/json` POSTs return HTTP 415; unknown action returns HTTP 400.
-  - `Sec-Fetch-Site` presence after proxy was not observed; rule (reject only if present and `!= same-origin`) is safe either way.
-  - Per-customer rate limiting (5/hr) and per-shop pending cap (200) active; compliance webhooks verified.
+  - Verified live on dev store:
+    - Enrol round trip: JSON POST through the App Proxy (body and `Content-Type: application/json` preserved in transit).
+    - Pending portal state displaying requested name.
+    - Admin pending row displaying "(requested, unverified)" with direct Shopify admin customer deep link.
+    - Merchant approval flips profile to approved.
+    - Approved practitioner portal and protocol editor display upon reload.
+    - CSRF media-type rejections: form-encoded and `text/plain; application/json` POSTs return HTTP 415.
+    - Unknown action returns HTTP 400.
+  - Note: The per-customer rate limit (5/hr), the pending cap (200), `customers/redact` profile deletion, and `Sec-Fetch-Site` handling are covered by unit tests and were NOT exercised live.
 - [ ] **M9b-3: Catalog Product Search & Production Authoring (UNBLOCKED — Spike S6 Answered, Option A Chosen)**
   - Note: `server.js` `/api/proxy` currently passes `createFakeVariantResolver` with a hardcoded demo variant; M9b-3 must remove it from production so the client page never shows demo data.
   - Implement migration adding `ProtocolLine.productHandle`.

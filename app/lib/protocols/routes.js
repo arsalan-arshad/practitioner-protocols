@@ -37,6 +37,7 @@ import {
   enrichProtocolLines,
   searchCatalogProducts
 } from './catalog.js';
+import { generateShareToken } from './token.js';
 import { renderPortalLiquid } from './portal.js';
 import {
   ProtocolAdminError,
@@ -120,6 +121,53 @@ export function getDefaultProxyRateLimiter() {
   return defaultProxyRateLimiter;
 }
 
+// Module-level default customer enrol limiter (5 requests / hour)
+let defaultEnrolRateLimiter = createRateLimiter({ windowMs: 3600000, maxRequests: 5 });
+
+export function setDefaultEnrolRateLimiter(limiter) {
+  defaultEnrolRateLimiter = limiter;
+}
+
+export function getDefaultEnrolRateLimiter() {
+  return defaultEnrolRateLimiter;
+}
+
+/**
+ * Validates CSRF headers on mutating Shopify App Proxy requests.
+ * Mutating requests MUST have Content-Type: application/json (else 415).
+ * If Sec-Fetch-Site is present, it must be 'same-origin' (else 403).
+ * Origin comparison is strictly avoided because custom domains differ from myshopify.
+ *
+ * @param {Request | any} request
+ * @returns {Response | null} Error response if invalid, null if valid
+ */
+export function validateAppProxyCsrf(request) {
+  const contentType = getHeader(request, 'content-type') || '';
+  const mediaType = contentType.split(';')[0].trim().toLowerCase();
+  if (mediaType !== 'application/json') {
+    return Response.json(
+      { error: 'Content-Type must be application/json' },
+      {
+        status: 415,
+        headers: { 'Content-Type': 'application/json' }
+      }
+    );
+  }
+
+  const secFetchSite = getHeader(request, 'sec-fetch-site');
+  if (secFetchSite && secFetchSite.toLowerCase() !== 'same-origin') {
+    return Response.json(
+      { error: 'Forbidden: cross-site requests are not allowed' },
+      {
+        status: 403,
+        headers: { 'Content-Type': 'application/json' }
+      }
+    );
+  }
+
+  return null;
+}
+
 /**
  * Converts domain/service errors into appropriate HTTP JSON responses.
  * @param {any} err
@@ -188,6 +236,196 @@ export function handleErrorResponse(err) {
       error: err?.message || 'Internal Server Error'
     },
     { status: 500 }
+  );
+}
+
+/**
+ * Handles explicit practitioner self-enrolment (action=enrol).
+ * Enforces per-customer rate limit, store settings (allowSelfEnrol & tag mode),
+ * zero client PII, practice name validation, and per-shop pending cap (200).
+ *
+ * @param {any} db
+ * @param {Request | any} request
+ * @param {{ shop: string, customerGid: string, options?: any }} context
+ * @returns {Promise<Response>}
+ */
+export async function handleEnrolRequest(db, request, { shop, customerGid, options = {} }) {
+  const activeEnrolLimiter = options.enrolRateLimiter !== undefined ? options.enrolRateLimiter : defaultEnrolRateLimiter;
+  if (activeEnrolLimiter) {
+    const enrolKey = createRateLimitKey('enrol', shop, customerGid);
+    let isLimited = false;
+    let retryAfterSeconds = 3600;
+
+    if (typeof activeEnrolLimiter.isRateLimited === 'function') {
+      const res = activeEnrolLimiter.isRateLimited(enrolKey);
+      isLimited = res.limited;
+      retryAfterSeconds = res.retryAfterSeconds;
+    } else if (typeof activeEnrolLimiter.isAllowed === 'function') {
+      isLimited = !activeEnrolLimiter.isAllowed(enrolKey);
+    }
+
+    if (isLimited) {
+      return Response.json(
+        { error: 'Too many enrolment requests. Please try again later.' },
+        {
+          status: 429,
+          headers: {
+            'Content-Type': 'application/json',
+            'Retry-After': String(retryAfterSeconds)
+          }
+        }
+      );
+    }
+  }
+
+  // Check store settings: allowSelfEnrol must be true and identityMode must be 'tag'
+  let settings = { allowSelfEnrol: false, identityMode: 'tag' };
+  try {
+    if (db) {
+      settings = await getSettings(db, { shop });
+    }
+  } catch {
+    // fallback to defaults
+  }
+
+  if (!settings.allowSelfEnrol || settings.identityMode === 'company') {
+    return Response.json(
+      { error: 'Practitioner self-enrolment is not enabled for this store.' },
+      { status: 403, headers: { 'Content-Type': 'application/json' } }
+    );
+  }
+
+  // Parse body
+  let body = null;
+  try {
+    if (typeof request.json === 'function') {
+      body = await request.json();
+    } else if (typeof request.text === 'function') {
+      const raw = await request.text();
+      body = JSON.parse(raw);
+    }
+  } catch {
+    return Response.json(
+      { error: 'Invalid JSON body' },
+      { status: 400, headers: { 'Content-Type': 'application/json' } }
+    );
+  }
+
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    return Response.json(
+      { error: 'Request body must be a JSON object' },
+      { status: 400, headers: { 'Content-Type': 'application/json' } }
+    );
+  }
+
+  // PII assertion on entire body
+  try {
+    assertNoPii(body);
+  } catch {
+    return Response.json(
+      { error: 'PII or clinical diagnostic terms are strictly forbidden.' },
+      { status: 400, headers: { 'Content-Type': 'application/json' } }
+    );
+  }
+
+  let requestedPracticeName = 'Pending Practitioner';
+  if (body.practiceName !== undefined && body.practiceName !== null) {
+    if (typeof body.practiceName !== 'string') {
+      return Response.json(
+        { error: 'Practice name must be a string' },
+        { status: 400, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+    const trimmed = body.practiceName.trim();
+    if (trimmed.length > 60) {
+      return Response.json(
+        { error: 'Practice name cannot exceed 60 characters' },
+        { status: 400, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+    if (trimmed.length > 0) {
+      try {
+        assertNoPii(trimmed);
+      } catch {
+        return Response.json(
+          { error: 'Practice name contains forbidden terms or PII' },
+          { status: 400, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+      requestedPracticeName = trimmed;
+    }
+  }
+
+  const numericId = String(customerGid).replace(/^gid:\/\/shopify\/Customer\//, '');
+
+  if (db && typeof db.query === 'function') {
+    try {
+      // 1. Idempotency check: does profile already exist for this customer?
+      const existingRes = await db.query(
+        'SELECT "id", "isApproved" FROM "PractitionerProfile" WHERE "shop" = $1 AND ("ownerGid" = $2 OR "ownerGid" = $3)',
+        [shop, customerGid, numericId]
+      );
+      if (existingRes?.rows?.[0]) {
+        const isApproved = Boolean(existingRes.rows[0].isApproved);
+        return Response.json(
+          { status: isApproved ? 'approved' : 'pending' },
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+
+      // 2. Pending cap check: maximum 200 pending profiles per shop
+      const countRes = await db.query(
+        'SELECT COUNT(*)::int as count FROM "PractitionerProfile" WHERE "shop" = $1 AND "isApproved" = false',
+        [shop]
+      );
+      const pendingCount = Number(countRes?.rows?.[0]?.count ?? countRes?.rows?.[0]?.total ?? 0);
+      if (pendingCount >= 200) {
+        return Response.json(
+          { error: 'Practitioner enrolment is currently at capacity. Please try again later.' },
+          { status: 429, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+
+      // 3. Insert new pending profile
+      const newId = generateShareToken(16);
+      const insertSql = `
+        INSERT INTO "PractitionerProfile" (
+          "id", "shop", "ownerType", "ownerGid", "practiceName", "isApproved", "createdAt", "updatedAt"
+        ) VALUES (
+          $1, $2, 'customer', $3, $4, false, NOW(), NOW()
+        )
+        ON CONFLICT ("shop", "ownerGid") DO NOTHING
+        RETURNING *;
+      `;
+      const insertRes = await db.query(insertSql, [newId, shop, customerGid, requestedPracticeName]);
+      if (insertRes?.rows?.length > 0) {
+        return Response.json(
+          { status: 'pending' },
+          { status: 201, headers: { 'Content-Type': 'application/json' } }
+        );
+      } else {
+        // Conflict occurred -> already exists
+        const existingProf = await db.query(
+          'SELECT "isApproved" FROM "PractitionerProfile" WHERE "shop" = $1 AND ("ownerGid" = $2 OR "ownerGid" = $3)',
+          [shop, customerGid, numericId]
+        );
+        const isApproved = Boolean(existingProf?.rows?.[0]?.isApproved);
+        return Response.json(
+          { status: isApproved ? 'approved' : 'pending' },
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+    } catch {
+      return Response.json(
+        { error: 'Database error during enrolment' },
+        { status: 500, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+  }
+
+  return Response.json(
+    { status: 'pending' },
+    { status: 201, headers: { 'Content-Type': 'application/json' } }
   );
 }
 
@@ -301,20 +539,47 @@ export async function handleAppProxyRequest(db, request, options = {}) {
   }
 
   const customerGid = getLoggedInCustomerGid(queryParams);
+  const method = (request?.method || 'GET').toUpperCase();
+  const isMutating = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method);
+  const action = urlObj.searchParams.get('action');
 
-  // 4. If no token provided on App Proxy root (/apps/protocols), render Practitioner Portal (M3)
-  if (!token) {
+  // --- CSRF & MUTATING REQUESTS (SPEC §7 & M9b-2) ---
+  if (isMutating) {
+    // 1. Mandatory CSRF checks before every mutating branch
+    const csrfError = validateAppProxyCsrf(request);
+    if (csrfError) return csrfError;
+
+    // 2. Authentication: mutating proxy routes require logged-in customer
     if (!customerGid) {
-      const portalLiquid = renderPortalLiquid({ shop, isLoggedIn: false });
-      return new Response(portalLiquid, {
-        status: 200,
-        headers: {
-          'Content-Type': 'application/liquid; charset=utf-8',
-          'X-Robots-Tag': 'noindex, nofollow'
-        }
-      });
+      return Response.json(
+        { error: 'Unauthorized: login required' },
+        { status: 401, headers: { 'Content-Type': 'application/json' } }
+      );
     }
 
+    // 3. Unknown POST/PUT actions -> 400, never fall through to create
+    if (method === 'POST') {
+      if (!['enrol', 'create', 'update'].includes(action)) {
+        return Response.json(
+          { error: 'Invalid or unknown action' },
+          { status: 400, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+    } else if (method === 'PUT') {
+      if (action && action !== 'update') {
+        return Response.json(
+          { error: 'Invalid or unknown action' },
+          { status: 400, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+    }
+
+    // 4. Handle action=enrol BEFORE the !isApproved gate
+    if (method === 'POST' && action === 'enrol') {
+      return handleEnrolRequest(db, request, { shop, customerGid, options });
+    }
+
+    // 5. For create and update, practitioner MUST be approved
     let isApproved = false;
     let practiceName = '';
     const numericId = String(customerGid).replace(/^gid:\/\/shopify\/Customer\//, '');
@@ -335,29 +600,13 @@ export async function handleAppProxyRequest(db, request, options = {}) {
     }
 
     if (!isApproved) {
-      const portalLiquid = renderPortalLiquid({
-        shop,
-        isLoggedIn: true,
-        isApproved: false,
-        practiceName
-      });
-      return new Response(portalLiquid, {
-        status: 200,
-        headers: {
-          'Content-Type': 'application/liquid; charset=utf-8',
-          'X-Robots-Tag': 'noindex, nofollow'
-        }
-      });
+      return Response.json(
+        { error: 'Forbidden: practitioner account pending approval' },
+        { status: 403, headers: { 'Content-Type': 'application/json' } }
+      );
     }
 
-    // Handle practitioner actions (product search, protocol creation, protocol update)
-    const action = urlObj.searchParams.get('action');
-    if (action === 'search') {
-      const q = urlObj.searchParams.get('q') || '';
-      return handleProductSearchRequest(shop, q, options);
-    }
-
-    if (action === 'create' || (request?.method === 'POST' && action !== 'search')) {
+    if (method === 'POST' && action === 'create') {
       try {
         let body = null;
         if (typeof request.json === 'function') {
@@ -379,7 +628,7 @@ export async function handleAppProxyRequest(db, request, options = {}) {
       }
     }
 
-    if (action === 'update' || request?.method === 'PUT') {
+    if ((method === 'PUT' && (!action || action === 'update')) || (method === 'POST' && action === 'update')) {
       try {
         let body = null;
         if (typeof request.json === 'function') {
@@ -400,6 +649,82 @@ export async function handleAppProxyRequest(db, request, options = {}) {
       } catch (err) {
         return handleErrorResponse(err);
       }
+    }
+
+    // Unknown POST/PUT actions -> 400, never fall through to create
+    return Response.json(
+      { error: 'Invalid or unknown action' },
+      { status: 400, headers: { 'Content-Type': 'application/json' } }
+    );
+  }
+
+  // 4. If no token provided on App Proxy root (/apps/protocols), render Practitioner Portal (M3 / M9b-2)
+  if (!token) {
+    if (!customerGid) {
+      const portalLiquid = renderPortalLiquid({ shop, isLoggedIn: false });
+      return new Response(portalLiquid, {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/liquid; charset=utf-8',
+          'X-Robots-Tag': 'noindex, nofollow'
+        }
+      });
+    }
+
+    let isApproved = false;
+    let practiceName = '';
+    let hasProfile = false;
+    const numericId = String(customerGid).replace(/^gid:\/\/shopify\/Customer\//, '');
+
+    if (db && typeof db.query === 'function') {
+      try {
+        const profRes = await db.query(
+          'SELECT "id", "isApproved", "practiceName" FROM "PractitionerProfile" WHERE "shop" = $1 AND ("ownerGid" = $2 OR "ownerGid" = $3)',
+          [shop, customerGid, numericId]
+        );
+        if (profRes?.rows?.[0]) {
+          hasProfile = true;
+          isApproved = Boolean(profRes.rows[0].isApproved);
+          practiceName = profRes.rows[0].practiceName || '';
+        }
+      } catch {
+        // Non-fatal fallback
+      }
+    }
+
+    let settings = { allowSelfEnrol: false, identityMode: 'tag' };
+    if (db) {
+      try {
+        settings = await getSettings(db, { shop });
+      } catch {
+        // Non-fatal fallback
+      }
+    }
+
+    if (!isApproved) {
+      const portalLiquid = renderPortalLiquid({
+        shop,
+        isLoggedIn: true,
+        isApproved: false,
+        hasProfile,
+        practiceName,
+        allowSelfEnrol: settings.allowSelfEnrol,
+        identityMode: settings.identityMode
+      });
+      return new Response(portalLiquid, {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/liquid; charset=utf-8',
+          'X-Robots-Tag': 'noindex, nofollow'
+        }
+      });
+    }
+
+    // Handle practitioner actions (product search)
+    const action = urlObj.searchParams.get('action');
+    if (action === 'search') {
+      const q = urlObj.searchParams.get('q') || '';
+      return handleProductSearchRequest(shop, q, options);
     }
 
     let activeProtocols = [];
@@ -434,6 +759,7 @@ export async function handleAppProxyRequest(db, request, options = {}) {
       shop,
       isLoggedIn: true,
       isApproved: true,
+      hasProfile: true,
       practiceName,
       activeProtocols,
       starterProtocols,

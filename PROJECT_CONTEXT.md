@@ -1,6 +1,6 @@
 # Practitioner Protocols — Project Context (for Claude)
 
-_Snapshot: 2026-11-03 · Live Railway deployment active (`practitioner-protocols-production.up.railway.app`) with internal Postgres & ledger migrations · Production app record "Practitioner Protocols" released (v2, Public distribution) · Production hardening complete · Milestone M9a (Embedded Merchant Admin) & M9b-1 (allowSelfEnrol Setting, Migration & Pending-Practitioner Admin Review) implemented, pending live dev store verification · Spikes S2, S3, S4, S5 resolved; S1 resolved on the Plus dev store only; S6 candidate proposed (Spike open) · App Store listing artwork added (AI-generated) · 395 tests passing across 96 suites._
+_Snapshot: 2026-11-04 · Live Railway deployment active (`practitioner-protocols-production.up.railway.app`) with internal Postgres & ledger migrations · Production app record "Practitioner Protocols" released (v2, Public distribution) · Production hardening complete · Milestone M9a (Embedded Merchant Admin), M9b-1 (allowSelfEnrol Setting, Migration & Pending-Practitioner Admin Review) & M9b-2 (Storefront Self-Enrolment Flow, Portal States, and App Proxy CSRF Protection) implemented, pending live dev store verification · Spikes S2, S3, S4, S5 resolved; S1 resolved on the Plus dev store only; S6 candidate proposed (Spike open) · App Store listing artwork added (AI-generated) · 443 tests passing across 102 suites._
 _Contains NO secrets. Never paste `.env` values or tokens into chat or docs._
 
 ## 1. What this is
@@ -737,6 +737,60 @@ Run the five spikes in a day or two on a dev store; write the answers into secti
   - Added tests for HTML rendering (hidden input, checkbox checked/unchecked, pending customer deep link, escaping).
 - **Scope & Privacy Discipline:**
   - Zero new scopes (`read_orders` only). Zero client/patient PII accepted or stored. No changes to `../salesforce`.
+
+## 40. Milestone M9b-2 — Storefront Self-Enrolment Flow, Portal States & App Proxy CSRF Protection
+
+- **Objective:**
+  Implement PR 2 of Milestone M9b: storefront self-enrolment flow (`POST /apps/protocols?action=enrol`), portal lifecycle states (Guest, Request Access Form, Pending Review, Invite Only), per-customer rate limiting, per-shop pending capacity cap, mandatory anti-CSRF protections on all mutating App Proxy routes, and Liquid/XSS safety.
+- **Storefront Self-Enrolment Submission (`POST /apps/protocols?action=enrol`):**
+  - Gated before the `!isApproved` check in `handleAppProxyRequest`.
+  - Requires authenticated customer session via App Proxy signed `logged_in_customer_id` (returns HTTP 401 if absent).
+  - Enforces per-customer rate limit: dedicated sliding window rate limiter tracking 5 requests / hour per `(shop, customerGid)` returning HTTP 429 with `Retry-After`.
+  - Validates store settings: requires `allowSelfEnrol: true` and `identityMode: 'tag'`; returns HTTP 403 Forbidden if self-enrolment is disabled or store is in Company mode.
+  - Body parsing & PII assertion: requires valid JSON object; strictly asserts zero client/patient PII or diagnostic terms (`assertNoPii`) returning HTTP 400.
+  - Practice Name: optional string, maximum 60 characters; sanitized against PII; defaults to `"Pending Practitioner"` when omitted or empty; returns HTTP 400 if invalid or exceeding length.
+  - Per-shop pending cap: enforces soft limit of 200 pending profiles per shop (`isApproved = false`) returning HTTP 429 when at capacity.
+  - Idempotent insertion:
+    ```sql
+    INSERT INTO "PractitionerProfile" (
+      "id", "shop", "ownerType", "ownerGid", "practiceName", "isApproved", "createdAt", "updatedAt"
+    ) VALUES (
+      $1, $2, 'customer', $3, $4, false, NOW(), NOW()
+    )
+    ON CONFLICT ("shop", "ownerGid") DO NOTHING
+    RETURNING *;
+    ```
+  - Response contract (application/json, zero PII):
+    - 201 `{ status: "pending" }` on creation.
+    - 200 `{ status: "pending" }` on duplicate/existing submission (idempotent).
+    - 403 `{ error }` when closed (`allowSelfEnrol: false`) or `identityMode === 'company'`.
+    - 400 `{ error }` on invalid practiceName, length > 60, or PII.
+    - 429 `{ error }` on pending cap (200) or rate limit (5/hr).
+    - 415 / 403 on CSRF check rejections.
+- **App Proxy CSRF Protection:**
+  - Mandatory on all mutating routes (`POST action=enrol`, `POST action=create`, `PUT action=update`):
+    - `Content-Type: application/json` is mandatory (returns HTTP 415 Unsupported Media Type for form-encoded or missing headers).
+    - `Sec-Fetch-Site`: if present, must be `"same-origin"` (returns HTTP 403 Forbidden for cross-site requests).
+    - No comparison between `Origin` and `myshopify.com` domain: stores with custom domains send their primary domain, so `Origin == myshopify` check would reject legitimate requests; additionally, proxy header forwarding is unverified.
+    - Unknown POST/PUT actions return HTTP 400, never falling through to create.
+    - Unapproved practitioners attempting protocol create or update receive HTTP 403 JSON.
+- **Portal Lifecycle States (`renderPortalLiquid`):**
+  - **Guest State** (`!isLoggedIn`): renders Sign In Required notice with `/account/login` link.
+  - **Request Access Form** (`isLoggedIn && !hasProfile && allowSelfEnrol && identityMode === 'tag'`): renders form with `#practitioner-enrol-form`, `#practice-name-input` (`maxlength="60"`), `#enrol-submit-btn`, `#enrol-status-message` (`aria-live="polite"`, `role="status"`), and async submission script.
+  - **Pending Review Notice** (`isLoggedIn && !isApproved && hasProfile`): renders Account Pending Approval notice with safe practice name badge (`(requested, unverified)`).
+  - **Invite-Only Notice** (`isLoggedIn && !hasProfile && (!allowSelfEnrol || identityMode === 'company')`): renders Practitioner Program (Invite Only) notice with no form.
+  - **Approved Library** (`isLoggedIn && isApproved`): renders active protocols library and protocol editor modal.
+- **Neutral Non-Clinical Copy & Liquid/XSS Safety:**
+  - Portal markup strictly contains zero clinical terms ("patient", "diagnosis", "disease", "treatment", "prescription").
+  - Form contains zero client-identifying fields (only optional `practiceName`).
+  - Dangerous payloads (`{{ shop.name }}`, `{% assign x = 1 %}`, `<script>alert(1)</script>`, `"><img src=x>`) in `practiceName` and `shop` are strictly neutralized and escaped across HTML body, attributes, and JavaScript.
+- **Production Access Note:**
+  - In production, practitioner access is strictly gated by in-app approval (`isApproved: true` in `PractitionerProfile`) controlled by the merchant in Shopify admin. The app operates exclusively under the `read_orders` scope and does NOT request or possess `read_customers` scope, so it does not read customer tags in production. The label "Tag Mode" is historical naming referring to single-customer practitioner accounts (as opposed to B2B Company accounts).
+- **Compliance Webhook Verification:**
+  - Verified `customers/redact` webhook handler deletes self-enrolled pending profile (`isApproved: false`) for that customer.
+- **Test Suite Verification:**
+  - Full suite: **443 tests passing** across 102 suites (0 failures).
+  - Milestone M9b-2 is implemented and verified via automated tests (status: implemented, pending live dev-store verification).
 
 
 

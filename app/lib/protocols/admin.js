@@ -20,11 +20,14 @@ export class ProtocolAdminError extends Error {
 
 export const ADMIN_ERROR_CODES = {
   UNAUTHORIZED: 'UNAUTHORIZED',
+  FORBIDDEN: 'FORBIDDEN',
   INVALID_INPUT: 'INVALID_INPUT',
   NOT_FOUND: 'NOT_FOUND',
   NOT_STARTER: 'NOT_STARTER',
   PII_NOT_ALLOWED: 'PII_NOT_ALLOWED'
 };
+
+export const SHOPIFY_DOMAIN_REGEX = /^[a-zA-Z0-9][a-zA-Z0-9\-]*\.myshopify\.com$/;
 
 const PII_FORBIDDEN_KEY_PATTERN = /(?:patient|client|ssn|health|medical|diagnosis|condition)/i;
 const PII_TEXT_PATTERN = /(?:patient\s*(?:name|id|email|phone|diagnosis|condition)|client\s*(?:name|id|email|phone|diagnosis)|patient\s+diagnosis|client\s+diagnosis|\bssn\b)/i;
@@ -881,7 +884,7 @@ export async function exportAttributionCsv(db, options) {
  * @param {string} str
  * @returns {string}
  */
-function escapeAdminText(str) {
+export function escapeAdminText(str) {
   if (typeof str !== 'string') return '';
   return str
     .replace(/&/g, '&amp;')
@@ -916,7 +919,9 @@ export function createAdminSessionToken(claims, apiSecret) {
     userId = 'gid://shopify/User/1',
     shop,
     apiKey = 'test_api_key',
-    expiresInSec = 3600
+    expiresInSec = 3600,
+    iss,
+    aud
   } = claims;
 
   if (!shop) {
@@ -928,9 +933,9 @@ export function createAdminSessionToken(claims, apiSecret) {
 
   const header = { alg: 'HS256', typ: 'JWT' };
   const payload = {
-    iss: `https://${cleanShop}/admin`,
+    iss: iss !== undefined ? iss : `https://${cleanShop}/admin`,
     dest: `https://${cleanShop}`,
-    aud: apiKey,
+    aud: aud !== undefined ? aud : apiKey,
     sub: userId,
     exp: now + expiresInSec,
     nbf: now,
@@ -1037,7 +1042,7 @@ export function verifyAdminSessionToken(token, options = {}) {
     );
   }
 
-  // 4. Shop / Dest verification
+  // 4. Shop / Dest and Issuer verification
   let shopFromDest = '';
   if (payload.dest) {
     try {
@@ -1047,23 +1052,43 @@ export function verifyAdminSessionToken(token, options = {}) {
     }
   }
 
+  let hostFromIss = '';
+  if (payload.iss) {
+    try {
+      hostFromIss = new URL(payload.iss).hostname;
+    } catch {
+      hostFromIss = String(payload.iss).replace(/^https?:\/\//, '').split('/')[0];
+    }
+  }
+
+  const normDestHost = (shopFromDest || '').toLowerCase().trim();
+  const normIssHost = (hostFromIss || '').toLowerCase().trim();
+
+  if (!normIssHost || !normDestHost || normIssHost !== normDestHost) {
+    throw new ProtocolAdminError(
+      `Unauthorized: Token issuer host '${normIssHost}' does not match destination host '${normDestHost}'`,
+      ADMIN_ERROR_CODES.UNAUTHORIZED
+    );
+  }
+
   if (expectedShop) {
-    const normExpected = expectedShop.toLowerCase().replace(/^https?:\/\//, '').split('/')[0];
-    const normDest = shopFromDest.toLowerCase();
-    if (normDest && normDest !== normExpected) {
+    const normExpected = expectedShop.toLowerCase().replace(/^https?:\/\//, '').split('/')[0].trim();
+    if (normDestHost && normDestHost !== normExpected) {
       throw new ProtocolAdminError(
-        `Unauthorized: Token destination '${normDest}' does not match expected shop '${normExpected}'`,
-        ADMIN_ERROR_CODES.UNAUTHORIZED
+        `Forbidden: Token destination '${normDestHost}' does not match expected shop '${normExpected}'`,
+        ADMIN_ERROR_CODES.FORBIDDEN
       );
     }
   }
 
-  // 5. Audience verification
-  if (apiKey && payload.aud && payload.aud !== apiKey) {
-    throw new ProtocolAdminError(
-      `Unauthorized: Token audience '${payload.aud}' does not match expected client ID`,
-      ADMIN_ERROR_CODES.UNAUTHORIZED
-    );
+  // 5. Audience verification: when apiKey is configured, require payload.aud to be present and match apiKey
+  if (apiKey) {
+    if (!payload.aud || payload.aud !== apiKey) {
+      throw new ProtocolAdminError(
+        `Unauthorized: Token audience '${payload.aud || ''}' does not match expected client ID`,
+        ADMIN_ERROR_CODES.UNAUTHORIZED
+      );
+    }
   }
 
   return {
@@ -1168,14 +1193,91 @@ export function extractAdminSession(req, options = {}) {
 }
 
 // ==========================================
-// 7. Embedded Polaris Admin UI (Milestone M6)
+// 7. Embedded Polaris Admin UI (Milestone M6 / M9a)
 // ==========================================
 
 /**
- * Renders the full Merchant Admin embedded Polaris HTML UI (Milestone M6).
+ * Renders the minimal Shopify App Bridge bootstrap page for embedded apps.
+ * In production mode inside the Shopify admin iframe, this page loads App Bridge from CDN,
+ * retrieves an ID token via window.shopify.idToken(), and reloads the current URL with ?id_token=<token>.
+ *
+ * @param {{ apiKey?: string, shop?: string }} [options={}]
+ * @returns {string}
+ */
+export function renderAdminBootstrapHtml(options = {}) {
+  const { apiKey = '', shop = '' } = options;
+  const safeApiKey = escapeAdminText(apiKey);
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="shopify-api-key" content="${safeApiKey}">
+  <title>Practitioner Protocols</title>
+  <script src="https://cdn.shopify.com/shopifycloud/app-bridge.js"></script>
+  <style>
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      color: #6d7175;
+      background: #f6f6f7;
+    }
+    .spinner {
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <div class="spinner">
+    <p id="bootstrap-message">Loading Practitioner Protocols...</p>
+  </div>
+  <script>
+    (async function() {
+      var msgEl = document.getElementById('bootstrap-message');
+      var params = new URLSearchParams(window.location.search);
+      if (params.has('id_token')) {
+        if (msgEl) {
+          msgEl.textContent = 'Unable to start the app session. Please reopen the app from your Shopify admin.';
+        }
+        return;
+      }
+
+      var timeoutId = setTimeout(function() {
+        if (msgEl) {
+          msgEl.textContent = 'Unable to start the app session. Please reopen the app from your Shopify admin.';
+        }
+      }, 5000);
+
+      try {
+        if (window.shopify && typeof window.shopify.idToken === 'function') {
+          var token = await window.shopify.idToken();
+          if (token) {
+            clearTimeout(timeoutId);
+            var url = new URL(window.location.href);
+            url.searchParams.set('id_token', token);
+            window.location.replace(url.toString());
+            return;
+          }
+        }
+      } catch (err) {
+        console.error('Failed to obtain App Bridge session token:', err);
+      }
+    })();
+  </script>
+</body>
+</html>`;
+}
+
+/**
+ * Renders the full Merchant Admin embedded Polaris HTML UI (Milestone M6 / M9a).
  *
  * @param {{
  *   shop?: string,
+ *   apiKey?: string,
  *   profiles?: Array<any>,
  *   starters?: Array<any>,
  *   report?: any,
@@ -1187,6 +1289,7 @@ export function extractAdminSession(req, options = {}) {
 export function renderAdminHtml(options = {}) {
   const {
     shop = '',
+    apiKey = '',
     profiles = [],
     starters = [],
     report = null,
@@ -1595,12 +1698,16 @@ export function renderAdminHtml(options = {}) {
   else if (currentTab === 'settings') tabContent = renderSettingsTab();
   else tabContent = renderPractitionersTab();
 
+  const appBridgeHead = apiKey
+    ? `  <meta name="shopify-api-key" content="${escapeAdminText(apiKey)}">\n  <script src="https://cdn.shopify.com/shopifycloud/app-bridge.js"></script>\n`
+    : '';
+
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Practitioner Protocols &mdash; Admin</title>
+${appBridgeHead}  <title>Practitioner Protocols &mdash; Admin</title>
   ${styles}
 </head>
 <body>
@@ -1621,6 +1728,130 @@ export function renderAdminHtml(options = {}) {
       ${tabContent}
     </main>
   </div>
+
+  <script>
+    (function() {
+      async function getToken() {
+        if (window.shopify && typeof window.shopify.idToken === 'function') {
+          try {
+            return await window.shopify.idToken();
+          } catch (e) {
+            console.warn('App Bridge idToken error:', e);
+          }
+        }
+        const params = new URLSearchParams(window.location.search);
+        return params.get('id_token') || '';
+      }
+
+      // Preserve query params and session token across Polaris tabs
+      document.querySelectorAll('a.Polaris-Tab').forEach(function(link) {
+        link.addEventListener('click', async function(e) {
+          e.preventDefault();
+          const currentUrl = new URL(window.location.href);
+          const targetUrl = new URL(link.getAttribute('href'), window.location.href);
+          ['shop', 'host', 'embedded'].forEach(function(key) {
+            const val = currentUrl.searchParams.get(key);
+            if (val && !targetUrl.searchParams.has(key)) {
+              targetUrl.searchParams.set(key, val);
+            }
+          });
+          const token = await getToken();
+          if (token) {
+            targetUrl.searchParams.set('id_token', token);
+          }
+          window.location.href = targetUrl.toString();
+        });
+      });
+
+      // Intercept forms
+      document.querySelectorAll('form').forEach(function(form) {
+        form.addEventListener('submit', async function(e) {
+          const action = form.getAttribute('action') || '';
+          const method = (form.getAttribute('method') || 'GET').toUpperCase();
+
+          if (method === 'GET') {
+            e.preventDefault();
+            const currentUrl = new URL(window.location.href);
+            const formUrl = new URL(action || window.location.href, window.location.href);
+            new FormData(form).forEach(function(val, key) {
+              formUrl.searchParams.set(key, val);
+            });
+            ['shop', 'host', 'embedded'].forEach(function(key) {
+              const val = currentUrl.searchParams.get(key);
+              if (val && !formUrl.searchParams.has(key)) {
+                formUrl.searchParams.set(key, val);
+              }
+            });
+            const token = await getToken();
+            if (token) {
+              formUrl.searchParams.set('id_token', token);
+            }
+            window.location.href = formUrl.toString();
+            return;
+          }
+
+          if (action.startsWith('/api/admin/')) {
+            e.preventDefault();
+            const token = await getToken();
+            const formData = new FormData(form);
+            const submitBtn = form.querySelector('button[type="submit"]');
+            if (submitBtn) submitBtn.disabled = true;
+
+            try {
+              const headers = { 'Accept': 'application/json' };
+              if (token) {
+                headers['Authorization'] = 'Bearer ' + token;
+              }
+              const urlParams = new URLSearchParams();
+              formData.forEach(function(v, k) { urlParams.append(k, v); });
+              headers['Content-Type'] = 'application/x-www-form-urlencoded';
+
+              const res = await fetch(action, {
+                method: 'POST',
+                headers: headers,
+                body: urlParams.toString()
+              });
+
+              if (res.ok) {
+                const freshToken = await getToken();
+                const nextUrl = new URL(window.location.href);
+                if (freshToken) {
+                  nextUrl.searchParams.set('id_token', freshToken);
+                }
+                window.location.href = nextUrl.toString();
+              } else {
+                const err = await res.json().catch(function() { return {}; });
+                alert(err.error || 'Action failed');
+                if (submitBtn) submitBtn.disabled = false;
+              }
+            } catch (err) {
+              console.error(err);
+              alert('Request failed');
+              if (submitBtn) submitBtn.disabled = false;
+            }
+          }
+        });
+      });
+
+      // Intercept CSV export link
+      document.querySelectorAll('a[href*="/api/admin/attribution.csv"]').forEach(function(link) {
+        link.addEventListener('click', async function(e) {
+          e.preventDefault();
+          const token = await getToken();
+          const targetUrl = new URL(link.getAttribute('href'), window.location.href);
+          if (token) {
+            targetUrl.searchParams.set('id_token', token);
+          }
+          const currentUrl = new URL(window.location.href);
+          const shop = currentUrl.searchParams.get('shop');
+          if (shop && !targetUrl.searchParams.has('shop')) {
+            targetUrl.searchParams.set('shop', shop);
+          }
+          window.location.href = targetUrl.toString();
+        });
+      });
+    })();
+  </script>
 </body>
 </html>`;
 }

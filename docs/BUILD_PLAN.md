@@ -1,12 +1,13 @@
 # Practitioner Protocols — Build Plan
 
 ## M0 — Spikes (1–2 days, dev store with B2B + new customer accounts)
-- [x] S1 practitioner surface (customer account UI extension vs app-proxy portal; D1 decided: App Proxy portal is the baseline across all plans; full-page extension deferred as optional Plus upgrade).
-- [ ] S2 app-proxy page in theme layout + verify `noindex` and `sitemap.xml` exclusion (Liquid evaluation confirmed in Session 12; reverse-proxy hop count for rate limiting needs re-measuring on real host).
-- [ ] S3 attribution carrier (verified hidden line property `_protocol_token` survives Cart AJAX through to completed guest order #1016 and signed-in B2B order #1017; raw `orders/paid` webhook payload capture pending).
+- [x] S1 practitioner surface (customer account UI extension vs app-proxy portal; D1 decided: App Proxy portal is the baseline across all plans; full-page extension deferred as optional Plus upgrade; verified on Plus dev store).
+- [x] S2 app-proxy page in theme layout + verify `noindex` and `sitemap.xml` exclusion (verified on dev store with reverse proxy headers and `noindex` tag; hop count configuration tracked).
+- [x] S3 attribution carrier (verified hidden line property `_protocol_token` survives Cart AJAX through to completed guest order and signed-in B2B order, and verified in live `orders/paid` webhook payload capture; populated `discount_allocations` observation pending).
 - [x] S4 Cart AJAX 20 lines (verified adding 20 distinct variant lines in 971ms in single request).
 - [x] S5 practitioner-preview pricing (verified retail vs B2B pricing, quantity rules, sold-out all-or-nothing, and overstock partial add on live dev store).
-- [ ] Record empirical findings for S1–S5 in `PROJECT_CONTEXT.md` §5 and update decisions D1–D4. Re-rank scope if a spike fails. Detailed execution plan in [`docs/SPIKES_CHECKLIST.md`](SPIKES_CHECKLIST.md).
+- [ ] S6 storefront product search execution (evaluate Storefront API token vs App Proxy query execution for real-time variant search in production protocol editor).
+- [x] Record empirical findings for S1–S5 in `PROJECT_CONTEXT.md` §5 and update decisions D1–D4. Re-rank scope if a spike fails. Detailed execution plan in [`docs/SPIKES_CHECKLIST.md`](SPIKES_CHECKLIST.md).
 
 ## M1 — Foundation
 - [x] Pure engine core: share-token generator, schema validation, permission checks, cart payload construction, QR generator, attribution extraction (`npm test` 289 pure unit tests passing).
@@ -43,6 +44,22 @@
 ## M8 — Release
 - [x] README written from verified code; architecture, schema, security guarantees, and test instructions documented.
 - [ ] Final owner review, dev store end-to-end verification, tagging, and release.
+
+## M9a — Embedded Merchant Admin in Production Mode
+- [x] Embedded Merchant Admin in Production Mode (implemented, pending live verification on the dev store):
+  - `GET /`, `GET /admin`, and `GET /app` served via App Bridge ID tokens and HS256 session verification (`renderAdminHtml`, `renderAdminBootstrapHtml`).
+  - Embedded iframe bootstrap pattern: missing session token inside admin iframe renders bootstrap page that retrieves `await shopify.idToken()` and reloads with `?id_token=<token>`, never redirecting iframe to `/api/auth`.
+  - Top-level direct navigation with `?shop=` redirects to `/api/auth?shop=...`; direct navigation without shop returns 401.
+  - Cross-shop parameter mismatch (`?shop=` != `token.dest`) strictly rejected with HTTP 403 Forbidden across `GET /` and all `/api/admin/*` endpoints.
+  - Empty database states render clean Polaris empty tables without throwing 500.
+  - App Bridge session refresh signal (`X-Shopify-Retry-Invalid-Session-Request: 1`) on 401 unauthorized.
+
+## M9b — Practitioner Self-Enrolment & Portal Production Wiring (Queued)
+- [ ] Design doc queued for separate branch (`docs/m9b-design`):
+  - Self-enrolment toggle in Settings (default off) with database migration.
+  - Pending practitioner profile creation via signed App Proxy `logged_in_customer_id` without requiring `read_customers` scope or client PII.
+  - Merchant approval workflow and practice name assignment in Admin UI.
+  - Wire storefront portal and protocol creation/edit routes in production mode (`server.js`).
 
 ## Later
 Practitioner application form · aggregate "client orders" count on protocol cards · protocol version history · Salesforce rollup via Bridge Recipes.

@@ -1,11 +1,11 @@
 /**
  * @file Practitioner Protocols Server Entry (Node.js >= 22.12 ESM).
  * 
- * Serves the demo Merchant Admin (Polaris), App Proxy portal/client pages,
+ * Serves the embedded Merchant Admin (Polaris), App Proxy portal/client pages,
  * printable handouts, and compliance webhooks on local dev / demo.
  * 
- * In production mode (DATABASE_URL set), server startup is refused until real
- * Shopify Admin session-token authentication and OAuth are implemented.
+ * In production mode (DATABASE_URL set), serves the embedded Merchant Admin
+ * authenticated via Shopify App Bridge session tokens (id_token).
  */
 
 import http from 'node:http';
@@ -13,7 +13,7 @@ import crypto from 'node:crypto';
 import { URL, URLSearchParams, fileURLToPath } from 'node:url';
 import pg from 'pg';
 import { getDatabaseSslConfig } from './scripts/migrate.js';
-import { renderAdminHtml } from './app/lib/protocols/admin.js';
+import { renderAdminHtml, renderAdminBootstrapHtml } from './app/lib/protocols/admin.js';
 import { renderPortalLiquid } from './app/lib/protocols/portal.js';
 import { renderProtocolLiquid, verifyAppProxyHmac, verifyOAuthHmac } from './app/lib/protocols/proxy.js';
 import { renderHandoutHtml } from './app/lib/protocols/handout.js';
@@ -374,8 +374,8 @@ export function createRequestListener(options = {}) {
       }
 
       // Admin Action Routes & Attribution CSV:
-      // When DATABASE_URL is set (production mode), requests without session-token verification
-      // return 501 Not Implemented. Never use a hard-coded adminUser.
+      // When DATABASE_URL is set (production mode), requests require Shopify Admin session-token verification.
+      // Missing session tokens return 401 with retry header.
       if (
         pathname === '/api/admin/practitioners/status' ||
         pathname === '/api/admin/practitioners/practice-name' ||
@@ -384,17 +384,21 @@ export function createRequestListener(options = {}) {
         pathname === '/api/admin/emergency/disable-all' ||
         pathname === '/api/admin/attribution.csv'
       ) {
+        const authHeader = req.headers?.authorization || req.headers?.Authorization;
         const hasSession = Boolean(
-          req.headers.authorization ||
+          authHeader ||
           url.searchParams.get('id_token') ||
           url.searchParams.get('session')
         );
 
         if (databaseUrl && !hasSession) {
-          res.writeHead(501, { 'Content-Type': 'application/json' });
+          res.writeHead(401, {
+            'Content-Type': 'application/json',
+            'X-Shopify-Retry-Invalid-Session-Request': '1',
+          });
           res.end(
             JSON.stringify({
-              error: 'Not Implemented',
+              error: 'Unauthorized',
               message: 'Admin routes with database persistence require Shopify Admin session-token verification.',
             })
           );
@@ -404,7 +408,7 @@ export function createRequestListener(options = {}) {
         if (databaseUrl && hasSession) {
           const webReq = await toWebRequest(req);
           let webRes;
-          const handlerOpts = { apiSecret, expectedShop: url.searchParams.get('shop') || DEMO_SHOP };
+          const handlerOpts = { apiSecret, apiKey, isDemoMode: false };
 
           if (pathname === '/api/admin/practitioners/status') {
             webRes = await handleAdminPractitionerStatusRequest(pool, webReq, handlerOpts);
@@ -499,9 +503,6 @@ export function createRequestListener(options = {}) {
       // In production mode (DATABASE_URL configured), demo routes return 404, never demo content
       if (databaseUrl) {
         if (
-          pathname === '/' ||
-          pathname === '/admin' ||
-          pathname === '/app' ||
           pathname === '/portal' ||
           pathname === '/portal/preview' ||
           pathname === '/protocol/demo' ||
@@ -517,8 +518,88 @@ export function createRequestListener(options = {}) {
         }
       }
 
-      // 1. Merchant Admin UI (Shopify Polaris embedded admin - Demo Preview)
+      // 1. Merchant Admin UI (Shopify Polaris embedded admin - Production & Demo Preview)
       if (pathname === '/' || pathname === '/admin' || pathname === '/app') {
+        if (databaseUrl) {
+          const authHeader = req.headers?.authorization || req.headers?.Authorization;
+          const hasSession = Boolean(
+            authHeader ||
+            url.searchParams.get('id_token') ||
+            url.searchParams.get('session')
+          );
+
+          const isEmbedded =
+            url.searchParams.get('embedded') === '1' ||
+            Boolean(url.searchParams.get('host'));
+
+          const shopParam = (url.searchParams.get('shop') || '').toLowerCase().trim();
+
+          if (hasSession) {
+            const webReq = await toWebRequest(req);
+            const webRes = await handleAdminDashboardRequest(pool, webReq, {
+              apiSecret,
+              apiKey,
+              isDemoMode: false,
+            });
+
+            // If token is invalid/expired (401) and request is inside embedded iframe,
+            // serve App Bridge bootstrap page to get a fresh token instead of raw JSON 401.
+            // Mismatched shop (403 Forbidden) and non-embedded 401s are preserved.
+            if (webRes.status === 401 && isEmbedded) {
+              const bootstrapHtml = renderAdminBootstrapHtml({ apiKey, shop: shopParam });
+              const frameAncestors = shopParam && SHOPIFY_DOMAIN_REGEX.test(shopParam)
+                ? `https://${shopParam} https://admin.shopify.com`
+                : `https://*.myshopify.com https://admin.shopify.com`;
+
+              res.writeHead(200, {
+                'Content-Type': 'text/html; charset=utf-8',
+                'Content-Security-Policy': `frame-ancestors ${frameAncestors};`,
+                'X-Content-Type-Options': 'nosniff',
+                'Referrer-Policy': 'strict-origin-when-cross-origin',
+              });
+              res.end(bootstrapHtml);
+              return;
+            }
+
+            res.writeHead(webRes.status, Object.fromEntries(webRes.headers.entries()));
+            const text = await webRes.text();
+            res.end(text);
+            return;
+          }
+
+          // No session token present:
+          // Check if embedded inside Shopify admin iframe
+
+          if (isEmbedded) {
+            // Embedded iframe: do NOT redirect to /api/auth. Serve App Bridge bootstrap page.
+            const bootstrapHtml = renderAdminBootstrapHtml({ apiKey, shop: shopParam });
+            const frameAncestors = shopParam && SHOPIFY_DOMAIN_REGEX.test(shopParam)
+              ? `https://${shopParam} https://admin.shopify.com`
+              : `https://*.myshopify.com https://admin.shopify.com`;
+
+            res.writeHead(200, {
+              'Content-Type': 'text/html; charset=utf-8',
+              'Content-Security-Policy': `frame-ancestors ${frameAncestors};`,
+              'X-Content-Type-Options': 'nosniff',
+              'Referrer-Policy': 'strict-origin-when-cross-origin',
+            });
+            res.end(bootstrapHtml);
+            return;
+          }
+
+          // Top-level direct browser navigation (outside embedded iframe)
+          if (shopParam && SHOPIFY_DOMAIN_REGEX.test(shopParam)) {
+            res.writeHead(302, { Location: `/api/auth?shop=${encodeURIComponent(shopParam)}` });
+            res.end();
+            return;
+          }
+
+          res.writeHead(401, { 'Content-Type': 'text/plain' });
+          res.end('Authentication required: Missing shop or admin session');
+          return;
+        }
+
+        // Demo Mode Preview (DATABASE_URL unset/empty)
         const shopParam = url.searchParams.get('shop') || DEMO_SHOP;
         const activeTab = url.searchParams.get('tab') || 'practitioners';
         const month = url.searchParams.get('month');
@@ -527,6 +608,7 @@ export function createRequestListener(options = {}) {
         }
         const html = renderAdminHtml({
           shop: shopParam,
+          apiKey,
           profiles: DEMO_PROFILES,
           starters: DEMO_STARTERS,
           report: DEMO_REPORT,

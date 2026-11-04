@@ -536,5 +536,32 @@ describe('Attribution & Cart Payload (app/lib/protocols/attribution.js)', () => 
       assert.ok(aggregateQuery);
       assert.ok(!aggregateQuery.sql.includes('FOR UPDATE'));
     });
+
+    it('updateProtocol rejects lines: [] with ProtocolValidationError and does not delete existing lines', async () => {
+      const { fakePool, clientQueries } = createFakePool();
+      const user = { id: 'gid://shopify/Customer/1', role: 'practitioner', ownerType: 'customer', ownerId: 'gid://shopify/Customer/1' };
+      const input = {
+        name: 'Invalid Empty Lines',
+        lines: []
+      };
+
+      await assert.rejects(
+        () => updateProtocol(fakePool, {
+          shop: 'test.myshopify.com',
+          user,
+          protocolId: 'proto_1',
+          input
+        }),
+        (err) => {
+          assert.equal(err.name, 'ProtocolValidationError');
+          assert.ok(err.message.includes('at least 1 product line'));
+          return true;
+        }
+      );
+
+      // Verify no DELETE query was executed
+      const deleteQuery = clientQueries.find(q => q.sql.includes('DELETE FROM "ProtocolLine"'));
+      assert.equal(deleteQuery, undefined, 'DELETE query must not run when validation fails');
+    });
   });
 });

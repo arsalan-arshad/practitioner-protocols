@@ -73,13 +73,17 @@
     - CSRF media-type rejections: form-encoded and `text/plain; application/json` POSTs return HTTP 415.
     - Unknown action returns HTTP 400.
   - Note: The per-customer rate limit (5/hr), the pending cap (200), `customers/redact` profile deletion, and `Sec-Fetch-Site` handling are covered by unit tests and were NOT exercised live.
-- [x] **M9b-3a: Catalog Search, Production Authoring & Client Page Hydration (IMPLEMENTED, LIVE VERIFICATION IN PROGRESS)**:
+- [x] **M9b-3a: Catalog Search, Production Authoring & Client Page Hydration (IMPLEMENTED; LIVE VERIFICATION: EDITOR SAVE, CLIENT PAGE HYDRATION AND ADD-ALL VERIFIED LIVE, EDIT/LIST/HANDOUT FIXED IN FOLLOW-UP, PENDING RE-CHECK)**:
   - Migration `20261104_add_product_handle_to_protocol_line/migration.sql` adding nullable `productHandle TEXT` to `ProtocolLine` table; updated `prisma/schema.prisma` and registered in `scripts/migrate.js`.
   - Validation: `productHandle` format (`^[a-z0-9][a-z0-9-]{0,254}$`), variant GID format, payload sanitization. Handled null handles gracefully (rendered "Product no longer available").
   - Practitioner editor (approved state): client-side debounced (300ms, $\ge 2$ chars) `/search/suggest.json` with `resources[options][unavailable_products]=show`, on-select `/products/<handle>.js` variant hydration converting prices from minor units and disabling out-of-stock variants, quantity 1-10, usage notes $\le 200$ chars, saving via POST JSON `action=create` and `action=update` with strict `textContent` rendering (zero `innerHTML`) and no stored prices.
   - Client protocol page (`/apps/protocols/<token>`, production): rendered cards with data attributes, client-side hydration from `/products/<handle>.js` updating titles, prices, stock status and dynamic "Add all to cart" disabling.
   - Production server cleanup: removed `createFakeVariantResolver` from production `/api/proxy` path (`variantResolver: pool ? undefined : createFakeVariantResolver(...)`).
-  - Automated unit test coverage: 471 passing tests across 107 suites (including node:vm script parse regression guards).
+  - Follow-up live check hotfix:
+    - Bug 1 (data loss on edit): Portal queries now join `ProtocolLine` with `json_agg` and `linesCount` matching `service.js` shape, preserving exact customer/starter shop scoping so editing loads all existing lines.
+    - Bug 2 (fake `$0.00` total): Removed total retail price display from portal cards (shows `"N item(s)"`), and eliminated all hardcoded `$` symbols in `portal.js` and `proxy.js`.
+    - Bug 3 (print handout): Implemented print-friendly layout in `renderProtocolLiquid` when `?handout=1` (with `@media print`, `window.print()` trigger, hidden banner/Add buttons, and settings `handoutText` and `footerDisclaimer`). Chosen over hiding the link because M4 already built handout/QR modules and theme-native client hydration provides a superior print experience.
+  - Automated unit test coverage: 477 passing tests across 107 suites (including node:vm script parse regression guards).
 - [ ] **M9b-3b: Protocol Lifecycle Management (Archive, Restore, Duplicate)**:
   - Portal actions for archiving, restoring, and duplicating protocols in production mode with ownership and status guards.
 

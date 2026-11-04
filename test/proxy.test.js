@@ -535,6 +535,38 @@ describe('Shopify App Proxy & Storefront (app/lib/protocols/proxy.js)', () => {
         });
         assertScriptsParse(liquid, 'client page with enriched lines');
       });
+
+      it('parses client script with isHandout: true without SyntaxError', () => {
+        const liquid = renderProtocolLiquid({
+          protocol: {
+            ...mockProtocol,
+            lines: [
+              {
+                variantGid: 'gid://shopify/ProductVariant/1001',
+                productHandle: 'omega-3',
+                quantity: 2,
+                usageNote: '2 daily'
+              }
+            ]
+          },
+          practiceName: 'Wellness Clinic',
+          isLoggedInPractitioner: true,
+          isHandout: true,
+          handoutText: 'Take as directed.',
+          footerDisclaimer: 'FDA disclaimer text.'
+        });
+        assertScriptsParse(liquid, 'handout page with isHandout: true');
+        assert.ok(liquid.includes('window.print()'), 'Must contain print trigger');
+        assert.ok(liquid.includes('Wellness Clinic'), 'Must render practice name');
+        assert.ok(liquid.includes('Take as directed.'), 'Must render handout text');
+        assert.ok(liquid.includes('FDA disclaimer text.'), 'Must render disclaimer');
+
+        assert.ok(!liquid.includes('<div class="protocol-practitioner-banner"'), 'Must suppress practitioner banner markup');
+        assert.ok(!liquid.includes("You're signed in as a professional"), 'Must not include practitioner banner message');
+        assert.ok(!liquid.includes('<button type="button" class="protocol-btn protocol-btn-secondary protocol-line-add-btn"'), 'Must not render line Add buttons in markup');
+        assert.ok(!liquid.includes('id="protocol-add-all-btn"'), 'Must not render Add all to cart button in markup');
+        assert.ok(!liquid.includes('Add all to cart'), 'Must not render Add all to cart text');
+      });
     });
   });
 });

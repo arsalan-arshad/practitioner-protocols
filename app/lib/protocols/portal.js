@@ -10,7 +10,7 @@ export { ProtocolValidationError };
  *
  * @param {number} minorAmount - Amount in cents/minor units (e.g. 2999)
  * @param {string} [currency='USD'] - ISO 4217 currency code
- * @returns {string} Formatted string, e.g. "$29.99"
+ * @returns {string} Formatted string, e.g. "29.99"
  */
 export function formatMoney(minorAmount, currency = 'USD') {
   const safeMinor = Number.isFinite(minorAmount) ? Math.round(minorAmount) : 0;
@@ -22,7 +22,7 @@ export function formatMoney(minorAmount, currency = 'USD') {
       currency: currency.toUpperCase()
     }).format(major);
   } catch {
-    return `$${major.toFixed(2)}`;
+    return major.toFixed(2);
   }
 }
 
@@ -1342,7 +1342,6 @@ export function renderPortalLiquid(options = {}) {
         const token = safePortalText(p.token || '');
         const protoId = safePortalText(p.id || '');
         const items = typeof p.linesCount === 'number' ? p.linesCount : (p.lines?.length || 0);
-        const retail = safePortalText(p.retailTotal || '$0.00');
         const shareUrl = `/apps/protocols/${token}`;
         const handoutUrl = `/apps/protocols/${token}?handout=1`;
 
@@ -1351,7 +1350,7 @@ export function renderPortalLiquid(options = {}) {
           <div>
             <h3 class="portal-card-title">${title}</h3>
             <div class="portal-card-meta">
-              <div>${items} ${items === 1 ? 'item' : 'items'} &middot; Total: ${retail}</div>
+              <div>${items} ${items === 1 ? 'item' : 'items'}</div>
               <div style="font-size: 0.75rem; margin-top: 0.25rem;">Share token: <code>${token}</code></div>
             </div>
           </div>
@@ -1365,7 +1364,7 @@ export function renderPortalLiquid(options = {}) {
     </div>`;
   };
 
-  const protocolsJson = JSON.stringify([...activeProtocols, ...starterProtocols])
+  const protocolsJson = JSON.stringify([...activeProtocols, ...starterProtocols, ...archivedProtocols])
     .replace(/</g, '\\u003c')
     .replace(/\{\{/g, '\\u007b\\u007b')
     .replace(/\}\}/g, '\\u007d\\u007d')

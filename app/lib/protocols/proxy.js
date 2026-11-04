@@ -328,11 +328,21 @@ export function normalizeVariantId(idOrGid) {
  *     }>
  *   } | null,
  *   practiceName?: string,
- *   isLoggedInPractitioner?: boolean
+ *   isLoggedInPractitioner?: boolean,
+ *   isHandout?: boolean,
+ *   handoutText?: string,
+ *   footerDisclaimer?: string
  * }} options
  * @returns {string} Liquid markup string
  */
-export function renderProtocolLiquid({ protocol, practiceName = '', isLoggedInPractitioner = false } = {}) {
+export function renderProtocolLiquid({
+  protocol,
+  practiceName = '',
+  isLoggedInPractitioner = false,
+  isHandout = false,
+  handoutText = '',
+  footerDisclaimer = ''
+} = {}) {
   // Determine protocol state: 'active' | 'archived' | 'disabled' | 'not_found'
   let state = 'not_found';
   if (protocol && typeof protocol === 'object' && protocol.name) {
@@ -351,8 +361,8 @@ export function renderProtocolLiquid({ protocol, practiceName = '', isLoggedInPr
   // Common robots meta tag required on all states
   const robotsMeta = '<meta name="robots" content="noindex, nofollow">';
 
-  // Practitioner banner when signed in as professional
-  const practitionerBanner = isLoggedInPractitioner
+  // Practitioner banner when signed in as professional (suppressed in handout mode)
+  const practitionerBanner = (!isHandout && isLoggedInPractitioner)
     ? `
   <div class="protocol-practitioner-banner" role="status">
     <div class="protocol-banner-content">
@@ -587,6 +597,50 @@ export function renderProtocolLiquid({ protocol, practiceName = '', isLoggedInPr
       width: 100%;
     }
   }
+  .protocol-handout-text {
+    margin-top: 1.5rem;
+    padding: 1rem 1.25rem;
+    background-color: #f9fafb;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    font-size: 0.9375rem;
+    color: #374151;
+    white-space: pre-line;
+  }
+  .protocol-footer-disclaimer {
+    margin-top: 2rem;
+    padding-top: 1rem;
+    border-top: 1px solid #e5e7eb;
+    font-size: 0.8125rem;
+    color: #6b7280;
+    font-style: italic;
+    white-space: pre-line;
+  }
+  @media print {
+    body {
+      background: #ffffff !important;
+      color: #000000 !important;
+    }
+    .no-print,
+    .protocol-practitioner-banner,
+    .protocol-line-actions,
+    header,
+    footer,
+    #shopify-section-header,
+    #shopify-section-footer {
+      display: none !important;
+    }
+    .protocol-container {
+      max-width: 100% !important;
+      margin: 0 !important;
+      padding: 0 !important;
+    }
+    .protocol-line-card {
+      page-break-inside: avoid;
+      break-inside: avoid;
+      border: 1px solid #d1d5db;
+    }
+  }
 </style>`;
 
   // Handle Archived State
@@ -708,7 +762,7 @@ export function renderProtocolLiquid({ protocol, practiceName = '', isLoggedInPr
         ${safeUsage ? `<div class="protocol-line-usage"><strong>Instructions:</strong> ${safeUsage}</div>` : ''}
       </div>
       <div class="protocol-line-actions">
-        ${isAvailable ? `
+        ${!isHandout ? (isAvailable ? `
         <button type="button" class="protocol-btn protocol-btn-secondary protocol-line-add-btn"
           data-variant-id="${escapeHtml(normVariantId)}"
           data-quantity="${quantity}"
@@ -719,7 +773,7 @@ export function renderProtocolLiquid({ protocol, practiceName = '', isLoggedInPr
         </button>` : `
         <button type="button" class="protocol-btn protocol-btn-disabled" disabled aria-disabled="true">
           Unavailable
-        </button>`}
+        </button>`) : ''}
         <div class="protocol-line-error" style="display:none;" role="alert"></div>
       </div>
     </div>`;
@@ -730,9 +784,13 @@ export function renderProtocolLiquid({ protocol, practiceName = '', isLoggedInPr
   const hasPendingHydration = lines.some((l) => Boolean(l.productHandle));
   const addAllDisabled = inStockCount === 0 || hasPendingHydration;
 
+  const displayHandoutText = isHandout && handoutText ? escapeHtml(handoutText.trim()) : '';
+  const displayFooterDisclaimer = isHandout && footerDisclaimer ? escapeHtml(footerDisclaimer.trim()) : '';
+
   const protocolDataJson = JSON.stringify({
     protocolId: rawId,
     protocolToken: rawToken,
+    isHandout: Boolean(isHandout),
     items: clientItems
   })
     .replace(/</g, '\\u003c')
@@ -741,6 +799,27 @@ export function renderProtocolLiquid({ protocol, practiceName = '', isLoggedInPr
     .replace(/\{%/g, '\\u007b\\u0025')
     .replace(/%\}/g, '\\u0025\\u007d')
     .replace(/%/g, '\\u0025');
+
+  const topBarMarkup = isHandout
+    ? `
+  <div class="protocol-top-bar">
+    <div class="protocol-item-count">
+      ${totalLines} ${totalLines === 1 ? 'item' : 'items'} recommended
+    </div>
+    <button type="button" class="protocol-btn protocol-btn-primary no-print" onclick="window.print()">
+      Print Handout
+    </button>
+  </div>`
+    : `
+  <div class="protocol-top-bar">
+    <div class="protocol-item-count">
+      ${totalLines} ${totalLines === 1 ? 'item' : 'items'} recommended
+    </div>
+    <button type="button" class="protocol-btn protocol-btn-primary protocol-add-all-btn" id="protocol-add-all-btn"
+      ${addAllDisabled ? 'disabled aria-disabled="true"' : ''}>
+      Add all to cart
+    </button>
+  </div>`;
 
   return `${robotsMeta}${styles}
 <div class="protocol-container">
@@ -751,19 +830,14 @@ export function renderProtocolLiquid({ protocol, practiceName = '', isLoggedInPr
     ${displayIntro ? `<p class="protocol-intro-note">${displayIntro}</p>` : ''}
   </header>
 
-  <div class="protocol-top-bar">
-    <div class="protocol-item-count">
-      ${totalLines} ${totalLines === 1 ? 'item' : 'items'} recommended
-    </div>
-    <button type="button" class="protocol-btn protocol-btn-primary protocol-add-all-btn" id="protocol-add-all-btn"
-      ${addAllDisabled ? 'disabled aria-disabled="true"' : ''}>
-      Add all to cart
-    </button>
-  </div>
+  ${topBarMarkup}
 
   <div class="protocol-lines-list" role="list">
     ${linesMarkup}
   </div>
+
+  ${displayHandoutText ? `<div class="protocol-handout-text">${displayHandoutText}</div>` : ''}
+  ${displayFooterDisclaimer ? `<div class="protocol-footer-disclaimer">${displayFooterDisclaimer}</div>` : ''}
 </div>
 
 <script type="application/json" id="protocol-data-payload">
@@ -980,13 +1054,15 @@ ${protocolDataJson}
             if (badgeEl) badgeEl.textContent = 'Product no longer available';
             if (actionContainer) {
               clearElement(actionContainer);
-              var disBtn = document.createElement('button');
-              disBtn.type = 'button';
-              disBtn.className = 'protocol-btn protocol-btn-disabled';
-              disBtn.disabled = true;
-              disBtn.setAttribute('aria-disabled', 'true');
-              disBtn.textContent = 'Unavailable';
-              actionContainer.appendChild(disBtn);
+              if (!payload.isHandout) {
+                var disBtn = document.createElement('button');
+                disBtn.type = 'button';
+                disBtn.className = 'protocol-btn protocol-btn-disabled';
+                disBtn.disabled = true;
+                disBtn.setAttribute('aria-disabled', 'true');
+                disBtn.textContent = 'Unavailable';
+                actionContainer.appendChild(disBtn);
+              }
             }
             if (itemInPayload) itemInPayload.available = false;
             return;
@@ -1018,21 +1094,23 @@ ${protocolDataJson}
             if (badgeEl) badgeEl.remove();
             if (actionContainer) {
               clearElement(actionContainer);
-              var addBtn = document.createElement('button');
-              addBtn.type = 'button';
-              addBtn.className = 'protocol-btn protocol-btn-secondary protocol-line-add-btn';
-              addBtn.setAttribute('data-variant-id', String(varId));
-              addBtn.setAttribute('data-quantity', card.getAttribute('data-quantity') || (itemInPayload ? String(itemInPayload.quantity) : '1'));
-              addBtn.setAttribute('data-usage', card.getAttribute('data-usage') || (itemInPayload ? itemInPayload.usageNote : ''));
-              addBtn.setAttribute('aria-label', 'Add ' + fullTitle + ' to cart');
-              addBtn.textContent = 'Add';
-              actionContainer.appendChild(addBtn);
+              if (!payload.isHandout) {
+                var addBtn = document.createElement('button');
+                addBtn.type = 'button';
+                addBtn.className = 'protocol-btn protocol-btn-secondary protocol-line-add-btn';
+                addBtn.setAttribute('data-variant-id', String(varId));
+                addBtn.setAttribute('data-quantity', card.getAttribute('data-quantity') || (itemInPayload ? String(itemInPayload.quantity) : '1'));
+                addBtn.setAttribute('data-usage', card.getAttribute('data-usage') || (itemInPayload ? itemInPayload.usageNote : ''));
+                addBtn.setAttribute('aria-label', 'Add ' + fullTitle + ' to cart');
+                addBtn.textContent = 'Add';
+                actionContainer.appendChild(addBtn);
 
-              var errDiv = document.createElement('div');
-              errDiv.className = 'protocol-line-error';
-              errDiv.style.display = 'none';
-              errDiv.setAttribute('role', 'alert');
-              actionContainer.appendChild(errDiv);
+                var errDiv = document.createElement('div');
+                errDiv.className = 'protocol-line-error';
+                errDiv.style.display = 'none';
+                errDiv.setAttribute('role', 'alert');
+                actionContainer.appendChild(errDiv);
+              }
             }
           } else {
             card.classList.add('protocol-line-unavailable');
@@ -1044,13 +1122,15 @@ ${protocolDataJson}
             if (badgeEl) badgeEl.textContent = 'Out of stock';
             if (actionContainer) {
               clearElement(actionContainer);
-              var disBtn = document.createElement('button');
-              disBtn.type = 'button';
-              disBtn.className = 'protocol-btn protocol-btn-disabled';
-              disBtn.disabled = true;
-              disBtn.setAttribute('aria-disabled', 'true');
-              disBtn.textContent = 'Unavailable';
-              actionContainer.appendChild(disBtn);
+              if (!payload.isHandout) {
+                var disBtn = document.createElement('button');
+                disBtn.type = 'button';
+                disBtn.className = 'protocol-btn protocol-btn-disabled';
+                disBtn.disabled = true;
+                disBtn.setAttribute('aria-disabled', 'true');
+                disBtn.textContent = 'Unavailable';
+                actionContainer.appendChild(disBtn);
+              }
             }
           }
         });
@@ -1072,13 +1152,15 @@ ${protocolDataJson}
           var actionContainer = card.querySelector('.protocol-line-actions');
           if (actionContainer) {
             clearElement(actionContainer);
-            var disBtn = document.createElement('button');
-            disBtn.type = 'button';
-            disBtn.className = 'protocol-btn protocol-btn-disabled';
-            disBtn.disabled = true;
-            disBtn.setAttribute('aria-disabled', 'true');
-            disBtn.textContent = 'Unavailable';
-            actionContainer.appendChild(disBtn);
+            if (!payload.isHandout) {
+              var disBtn = document.createElement('button');
+              disBtn.type = 'button';
+              disBtn.className = 'protocol-btn protocol-btn-disabled';
+              disBtn.disabled = true;
+              disBtn.setAttribute('aria-disabled', 'true');
+              disBtn.textContent = 'Unavailable';
+              actionContainer.appendChild(disBtn);
+            }
           }
           var varId = card.getAttribute('data-variant-id');
           var varGid = card.getAttribute('data-variant-gid');

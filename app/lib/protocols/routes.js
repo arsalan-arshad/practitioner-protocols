@@ -733,23 +733,83 @@ export async function handleAppProxyRequest(db, request, options = {}) {
 
     if (db && typeof db.query === 'function') {
       try {
+        const mapProtocolRows = (rows) => (rows || []).map((row) => ({
+          ...row,
+          lines: typeof row.lines === 'string' ? JSON.parse(row.lines) : (Array.isArray(row.lines) ? row.lines : []),
+          linesCount: typeof row.linesCount === 'number' ? row.linesCount : (Array.isArray(row.lines) ? row.lines.length : parseInt(row.linesCount || '0', 10) || 0)
+        }));
+
         const activeRes = await db.query(
-          'SELECT * FROM "Protocol" WHERE "shop" = $1 AND ("ownerId" = $2 OR "createdBy" = $2) AND "status" = $3 ORDER BY "updatedAt" DESC',
+          `SELECT p.*,
+            COALESCE(
+              json_agg(
+                json_build_object(
+                  'id', pl.id,
+                  'position', pl.position,
+                  'variantGid', pl."variantGid",
+                  'productHandle', pl."productHandle",
+                  'quantity', pl.quantity,
+                  'usageNote', pl."usageNote"
+                ) ORDER BY pl.position ASC
+              ) FILTER (WHERE pl.id IS NOT NULL), '[]'
+            ) as lines,
+            COUNT(pl.id)::int as "linesCount"
+          FROM "Protocol" p
+          LEFT JOIN "ProtocolLine" pl ON p.id = pl."protocolId"
+          WHERE p."shop" = $1 AND (p."ownerId" = $2 OR p."createdBy" = $2) AND p."status" = $3
+          GROUP BY p.id
+          ORDER BY p."updatedAt" DESC`,
           [shop, customerGid, 'active']
         );
-        activeProtocols = activeRes?.rows || [];
+        activeProtocols = mapProtocolRows(activeRes?.rows);
 
         const startersRes = await db.query(
-          'SELECT * FROM "Protocol" WHERE "shop" = $1 AND "isStarter" = true AND "status" = $2 ORDER BY "updatedAt" DESC',
+          `SELECT p.*,
+            COALESCE(
+              json_agg(
+                json_build_object(
+                  'id', pl.id,
+                  'position', pl.position,
+                  'variantGid', pl."variantGid",
+                  'productHandle', pl."productHandle",
+                  'quantity', pl.quantity,
+                  'usageNote', pl."usageNote"
+                ) ORDER BY pl.position ASC
+              ) FILTER (WHERE pl.id IS NOT NULL), '[]'
+            ) as lines,
+            COUNT(pl.id)::int as "linesCount"
+          FROM "Protocol" p
+          LEFT JOIN "ProtocolLine" pl ON p.id = pl."protocolId"
+          WHERE p."shop" = $1 AND p."isStarter" = true AND p."status" = $2
+          GROUP BY p.id
+          ORDER BY p."updatedAt" DESC`,
           [shop, 'active']
         );
-        starterProtocols = startersRes?.rows || [];
+        starterProtocols = mapProtocolRows(startersRes?.rows);
 
         const archivedRes = await db.query(
-          'SELECT * FROM "Protocol" WHERE "shop" = $1 AND ("ownerId" = $2 OR "createdBy" = $2) AND "status" = $3 ORDER BY "updatedAt" DESC',
+          `SELECT p.*,
+            COALESCE(
+              json_agg(
+                json_build_object(
+                  'id', pl.id,
+                  'position', pl.position,
+                  'variantGid', pl."variantGid",
+                  'productHandle', pl."productHandle",
+                  'quantity', pl.quantity,
+                  'usageNote', pl."usageNote"
+                ) ORDER BY pl.position ASC
+              ) FILTER (WHERE pl.id IS NOT NULL), '[]'
+            ) as lines,
+            COUNT(pl.id)::int as "linesCount"
+          FROM "Protocol" p
+          LEFT JOIN "ProtocolLine" pl ON p.id = pl."protocolId"
+          WHERE p."shop" = $1 AND (p."ownerId" = $2 OR p."createdBy" = $2) AND p."status" = $3
+          GROUP BY p.id
+          ORDER BY p."updatedAt" DESC`,
           [shop, customerGid, 'archived']
         );
-        archivedProtocols = archivedRes?.rows || [];
+        archivedProtocols = mapProtocolRows(archivedRes?.rows);
       } catch {
         // Non-fatal fallback
       }
@@ -833,11 +893,27 @@ export async function handleAppProxyRequest(db, request, options = {}) {
     }
   }
 
+  const isHandout = urlObj.searchParams.get('handout') === '1';
+  let handoutText = '';
+  let footerDisclaimer = '';
+  if (isHandout && shop && db) {
+    try {
+      const settings = await getSettings(db, { shop });
+      handoutText = settings?.handoutText || '';
+      footerDisclaimer = settings?.footerDisclaimer || '';
+    } catch {
+      // Non-fatal fallback
+    }
+  }
+
   // 6. Render Liquid template
   const liquid = renderProtocolLiquid({
     protocol,
     practiceName: protocol?.practiceName || '',
-    isLoggedInPractitioner
+    isLoggedInPractitioner: isHandout ? false : isLoggedInPractitioner,
+    isHandout,
+    handoutText,
+    footerDisclaimer
   });
 
   return new Response(liquid, {

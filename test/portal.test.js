@@ -697,7 +697,6 @@ describe('Practitioner Portal (app/lib/protocols/portal.js)', () => {
           name: 'Gut Healing Routine',
           introNote: 'Take with lunch',
           linesCount: 3,
-          retailTotal: '$75.00',
           updatedAt: '2026-10-27T00:00:00Z'
         }
       ];
@@ -712,7 +711,10 @@ describe('Practitioner Portal (app/lib/protocols/portal.js)', () => {
       assert.ok(liquid.includes('Elite Naturopathic Clinic'));
       assert.ok(liquid.includes('Gut Healing Routine'));
       assert.ok(liquid.includes('tok_active_12345678'));
-      assert.ok(liquid.includes('$75.00'));
+      assert.ok(liquid.includes('3 items'));
+      assert.ok(!liquid.includes('Total:'));
+      assert.ok(!liquid.includes('$75.00'));
+      assert.ok(!liquid.includes('$0.00'));
       assert.ok(liquid.includes('Copy Link'));
       assert.ok(liquid.includes('Print Handout'));
       assert.ok(liquid.includes('protocol-editor-modal'));
@@ -720,6 +722,30 @@ describe('Practitioner Portal (app/lib/protocols/portal.js)', () => {
       assert.ok(liquid.includes('protocol-selected-lines'));
       assert.ok(liquid.includes('protocol-save-btn'));
       assert.ok(liquid.includes('portal-edit-btn'));
+    });
+
+    it('card shows "2 items" for a 2-line protocol and contains no "$0.00"', () => {
+      const activeProtocols = [
+        {
+          id: 'p_2lines',
+          token: 'tok_2lines_123',
+          name: 'Two Line Protocol',
+          lines: [
+            { variantGid: 'gid://shopify/ProductVariant/101', quantity: 1 },
+            { variantGid: 'gid://shopify/ProductVariant/102', quantity: 2 }
+          ]
+        }
+      ];
+
+      const liquid = renderPortalLiquid({
+        isLoggedIn: true,
+        isApproved: true,
+        activeProtocols
+      });
+
+      assert.ok(liquid.includes('2 items'), 'Must display "2 items" for 2-line protocol');
+      assert.ok(!liquid.includes('$0.00'), 'Must NOT contain hardcoded "$0.00" fallback');
+      assert.ok(!liquid.includes('Total:'), 'Must NOT contain fake "Total:" string');
     });
 
     it('neutralizes Liquid delimiters in protocol names and practice names', () => {
@@ -732,8 +758,7 @@ describe('Practitioner Portal (app/lib/protocols/portal.js)', () => {
             id: 'p_2',
             token: 'tok_escape_12345678',
             name: 'Hack {% assign x = 1 %}',
-            linesCount: 1,
-            retailTotal: '$10.00'
+            linesCount: 1
           }
         ]
       });

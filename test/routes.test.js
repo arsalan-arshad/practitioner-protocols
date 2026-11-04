@@ -128,7 +128,44 @@ describe('HTTP Routes & Request Handlers (app/lib/protocols/routes.js)', () => {
           };
         }
 
-        // 3. SELECT p.* ... FROM "Protocol" p WHERE p.shop = $1 ... (listProtocols)
+        // 3a. Portal query: SELECT p.* ... FROM "Protocol" p LEFT JOIN "ProtocolLine" pl ... WHERE p."shop" = $1 AND (p."ownerId" = $2 OR p."createdBy" = $2) AND p."status" = $3
+        if (sql.includes('p."ownerId" = $2 OR p."createdBy" = $2')) {
+          const shop = params[0];
+          const customerGid = params[1];
+          const status = params[2];
+          const filtered = state.protocols.filter(p =>
+            p.shop === shop &&
+            (p.ownerId === customerGid || p.createdBy === customerGid) &&
+            p.status === status
+          );
+          const rows = filtered.map(proto => {
+            const lines = state.lines
+              .filter(l => l.protocolId === proto.id)
+              .sort((a, b) => a.position - b.position);
+            return { ...proto, lines, linesCount: lines.length };
+          });
+          return { rows };
+        }
+
+        // 3b. Portal starters query: WHERE p."shop" = $1 AND p."isStarter" = true AND p."status" = $2
+        if (sql.includes('p."isStarter" = true AND p."status" = $2')) {
+          const shop = params[0];
+          const status = params[1];
+          const filtered = state.protocols.filter(p =>
+            p.shop === shop &&
+            Boolean(p.isStarter) &&
+            p.status === status
+          );
+          const rows = filtered.map(proto => {
+            const lines = state.lines
+              .filter(l => l.protocolId === proto.id)
+              .sort((a, b) => a.position - b.position);
+            return { ...proto, lines, linesCount: lines.length };
+          });
+          return { rows };
+        }
+
+        // 3c. SELECT p.* ... FROM "Protocol" p WHERE p.shop = $1 ... (listProtocols)
         if (sql.includes('FROM "Protocol" p') && sql.includes('LEFT JOIN "ProtocolLine" pl')) {
           const shop = params[0];
           let filtered = state.protocols.filter(p => p.shop === shop);
@@ -155,7 +192,7 @@ describe('HTTP Routes & Request Handlers (app/lib/protocols/routes.js)', () => {
             const lines = state.lines
               .filter(l => l.protocolId === proto.id)
               .sort((a, b) => a.position - b.position);
-            return { ...proto, lines };
+            return { ...proto, lines, linesCount: lines.length };
           });
 
           return { rows };
@@ -2654,6 +2691,194 @@ describe('HTTP Routes & Request Handlers (app/lib/protocols/routes.js)', () => {
 
         const res = await handleAppProxyRequest(db, req, { apiSecret });
         assert.equal(res.status, 404);
+      });
+
+      it('portal embedded JSON (#portal-protocols-data) contains owner protocol lines including productHandle and isolates other owners and shops (Rule 4)', async () => {
+        const ownerProto = {
+          id: 'proto_owner_1',
+          shop: testShop,
+          token: 'tok_owner_111',
+          name: 'Owner Regimen',
+          ownerType: 'customer',
+          ownerId: customerGid,
+          createdBy: customerGid,
+          status: 'active'
+        };
+        const otherOwnerProto = {
+          id: 'proto_other_2',
+          shop: testShop,
+          token: 'tok_other_222',
+          name: 'Other Practitioner Regimen',
+          ownerType: 'customer',
+          ownerId: 'gid://shopify/Customer/someone_else',
+          createdBy: 'gid://shopify/Customer/someone_else',
+          status: 'active'
+        };
+        const otherShopProto = {
+          id: 'proto_other_shop_3',
+          shop: 'other-brand.myshopify.com',
+          token: 'tok_other_shop_333',
+          name: 'Other Shop Regimen',
+          ownerType: 'customer',
+          ownerId: customerGid,
+          createdBy: customerGid,
+          status: 'active'
+        };
+
+        db.state.protocols.push(ownerProto, otherOwnerProto, otherShopProto);
+        db.state.lines.push({
+          id: 'line_owner_1',
+          protocolId: ownerProto.id,
+          position: 0,
+          variantGid: 'gid://shopify/ProductVariant/7777',
+          productHandle: 'cleanser-glow',
+          quantity: 2,
+          usageNote: 'Morning and night'
+        });
+        db.state.lines.push({
+          id: 'line_other_2',
+          protocolId: otherOwnerProto.id,
+          position: 0,
+          variantGid: 'gid://shopify/ProductVariant/8888',
+          productHandle: 'other-secret-tonic',
+          quantity: 1
+        });
+
+        const url = makeSignedProxyUrl({ logged_in_customer_id: testCustomerId });
+        const res = await handleAppProxyRequest(db, new Request(url), { apiSecret });
+        assert.equal(res.status, 200);
+        const html = await res.text();
+
+        // Extract JSON from #portal-protocols-data
+        const match = html.match(/<script type="application\/json" id="portal-protocols-data">\s*([\s\S]*?)\s*<\/script>/);
+        assert.ok(match, 'portal-protocols-data element must exist in response HTML');
+        const protocolsData = JSON.parse(match[1]);
+
+        // Assert owner protocol is present with lines including productHandle
+        const foundOwner = protocolsData.find(p => p.id === ownerProto.id);
+        assert.ok(foundOwner, 'Owner protocol must be included');
+        assert.equal(foundOwner.lines.length, 1);
+        assert.equal(foundOwner.lines[0].productHandle, 'cleanser-glow');
+        assert.equal(foundOwner.lines[0].variantGid, 'gid://shopify/ProductVariant/7777');
+        assert.equal(foundOwner.linesCount, 1);
+
+        // Rule-4 isolation assertions:
+        const foundOtherOwner = protocolsData.find(p => p.id === otherOwnerProto.id);
+        assert.equal(foundOtherOwner, undefined, 'Rule 4: Other owner protocol must NOT be in portal-protocols-data');
+        assert.ok(!html.includes('other-secret-tonic'), 'Other owner product handle must not appear');
+
+        const foundOtherShop = protocolsData.find(p => p.id === otherShopProto.id);
+        assert.equal(foundOtherShop, undefined, 'Rule 4: Other shop protocol must NOT be in portal-protocols-data');
+      });
+
+      it('update safety: POST update with lines: [] is rejected (400 validation error) and existing lines remain unchanged in DB', async () => {
+        const proto = {
+          id: 'proto_safe_update',
+          shop: testShop,
+          token: 'tok_safe_update_123',
+          name: 'Safe Routine',
+          ownerType: 'customer',
+          ownerId: customerGid,
+          createdBy: customerGid,
+          status: 'active'
+        };
+        db.state.protocols.push(proto);
+        const originalLine = {
+          id: 'line_must_stay',
+          protocolId: proto.id,
+          position: 0,
+          variantGid: 'gid://shopify/ProductVariant/9999',
+          productHandle: 'vital-serum',
+          quantity: 1,
+          usageNote: 'Do not delete'
+        };
+        db.state.lines.push(originalLine);
+
+        const url = makeSignedProxyUrl({ action: 'update', id: proto.id, logged_in_customer_id: testCustomerId });
+        const req = new Request(url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+          },
+          body: JSON.stringify({
+            name: 'Attempted Empty Lines',
+            lines: []
+          })
+        });
+
+        const res = await handleAppProxyRequest(db, req, { apiSecret });
+        assert.equal(res.status, 400);
+        const data = await res.json();
+        assert.ok(data.error.includes('at least 1 product line') || data.code === 'MIN_ITEMS');
+
+        // Verify DB lines for this protocol were untouched
+        const linesInDb = db.state.lines.filter(l => l.protocolId === proto.id);
+        assert.equal(linesInDb.length, 1);
+        assert.equal(linesInDb[0].id, 'line_must_stay');
+        assert.equal(linesInDb[0].variantGid, 'gid://shopify/ProductVariant/9999');
+      });
+
+      it('GET /apps/protocols/<token>?handout=1 renders print-friendly handout layout with window.print(), no-print, settings disclaimer and no Add buttons', async () => {
+        db.state.settings = [{
+          shop: testShop,
+          identityMode: 'tag',
+          allowSelfEnrol: true,
+          handoutText: 'Take daily as directed by Dr. Smith.',
+          footerDisclaimer: 'These statements have not been evaluated by the FDA.'
+        }];
+
+        const handoutProto = {
+          id: 'proto_handout_1',
+          shop: testShop,
+          token: 'tok_handout_test',
+          name: 'Morning Skincare Handout Protocol',
+          ownerType: 'customer',
+          ownerId: customerGid,
+          createdBy: customerGid,
+          status: 'active'
+        };
+        db.state.protocols.push(handoutProto);
+        db.state.lines.push({
+          id: 'line_handout_1',
+          protocolId: handoutProto.id,
+          position: 0,
+          variantGid: 'gid://shopify/ProductVariant/54321',
+          productHandle: 'restorative-oil',
+          quantity: 1,
+          usageNote: '2 drops morning'
+        });
+
+        const proxyParams = {
+          shop: testShop,
+          token: handoutProto.token,
+          handout: '1',
+          path_prefix: '/apps/protocols',
+          timestamp: '1729500000'
+        };
+        const sig = calculateAppProxySignature(proxyParams, apiSecret);
+        const url = `https://${testShop}/apps/protocols?shop=${testShop}&token=${handoutProto.token}&handout=1&path_prefix=%2Fapps%2Fprotocols&timestamp=1729500000&signature=${sig}`;
+
+        const res = await handleAppProxyRequest(db, new Request(url), { apiSecret });
+        assert.equal(res.status, 200);
+        const html = await res.text();
+
+        // Print button and print media stylesheet
+        assert.ok(html.includes('window.print()'), 'Must contain window.print()');
+        assert.ok(html.includes('no-print'), 'Must contain .no-print utility class');
+        assert.ok(html.includes('@media print'), 'Must contain @media print stylesheet');
+
+        // Titles and notes
+        assert.ok(html.includes('Morning Skincare Handout Protocol'));
+        assert.ok(html.includes('Take daily as directed by Dr. Smith.'));
+        assert.ok(html.includes('These statements have not been evaluated by the FDA.'));
+
+        // No Add buttons or practitioner banner in handout markup
+        assert.ok(!html.includes('Add all to cart'), 'Handout must not have Add all to cart text');
+        assert.ok(!html.includes('id="protocol-add-all-btn"'), 'Handout must not have protocol-add-all-btn in markup');
+        assert.ok(!html.includes('<button type="button" class="protocol-btn protocol-btn-secondary protocol-line-add-btn"'), 'Handout must not have line Add buttons in markup');
+        assert.ok(!html.includes('<div class="protocol-practitioner-banner"'), 'Handout must not show professional banner in markup');
+        assert.ok(!html.includes("You're signed in as a professional"), 'Handout must not show professional message');
       });
     });
   });

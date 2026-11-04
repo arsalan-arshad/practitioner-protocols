@@ -1,6 +1,6 @@
 # Practitioner Protocols — Project Context (for Claude)
 
-_Snapshot: 2026-11-05 · Live Railway deployment active (`practitioner-protocols-production.up.railway.app`) with internal Postgres & ledger migrations · Production app record "Practitioner Protocols" released (v2, Public distribution) · Production hardening complete · Milestones M9a (Embedded Merchant Admin), M9b-1 (allowSelfEnrol Setting, Migration & Pending-Practitioner Admin Review) & M9b-2 (Storefront Self-Enrolment Flow, Portal States, and App Proxy CSRF Protection) verified live on dev store · Milestone M9b-3a (Catalog Search, Production Authoring & Client Page Hydration) implemented; live verification: editor save, client page hydration and add-all verified live, edit/list/handout fixed in follow-up, pending re-check · Spikes S2, S3, S4, S5, S6 resolved; S1 resolved on the Plus dev store only · Brand assets v2 produced and verified (text-free App Store icon & feature image; code-composited README hero banner & social thumbnail; shopping-bag glyph eliminated) · 477 tests passing across 107 suites._
+_Snapshot: 2026-11-05 · Live Railway deployment active (`practitioner-protocols-production.up.railway.app`) with internal Postgres & ledger migrations · Production app record "Practitioner Protocols" released (v2, Public distribution) · Production hardening complete · Milestones M9a (Embedded Merchant Admin), M9b-1 (allowSelfEnrol Setting, Migration & Pending-Practitioner Admin Review), M9b-2 (Storefront Self-Enrolment Flow, Portal States, and App Proxy CSRF Protection) & M9b-3a (Catalog Search, Production Authoring & Client Page Hydration) verified live on dev store · Spikes S2, S3, S4, S5, S6 resolved; S1 resolved on the Plus dev store only · Brand assets v2 produced and verified (text-free App Store icon & feature image; code-composited README hero banner & social thumbnail; shopping-bag glyph eliminated) · 477 tests passing across 107 suites._
 _Contains NO secrets. Never paste `.env` values or tokens into chat or docs._
 
 ## 1. What this is
@@ -912,6 +912,26 @@ Run the five spikes in a day or two on a dev store; write the answers into secti
      - **Bug 1 (blocker, data loss):** Portal GET in `app/lib/protocols/routes.js` loaded protocols with `SELECT * FROM "Protocol"` without querying lines. Clicking "Edit" opened with 0 lines, and saving with 1 new product replaced previous lines. Fixed by joining `ProtocolLine` with `json_agg` and `linesCount` matching `service.js` shape while strictly preserving customer and starter shop scoping.
      - **Bug 2:** Portal cards displayed `"0 items · Total: $0.00"` using a hardcoded `'$0.00'` fallback in `portal.js` `renderCards`. Prices are not stored in Option A, so the total was removed completely: cards now show only `"N item(s)"`. In addition, all hard-coded `$` currency symbols were purged across `portal.js` and `proxy.js`.
      - **Bug 3:** "Print Handout" (`?handout=1`) opened the normal client share page. Implemented the print-friendly layout directly in `renderProtocolLiquid`: hides the practitioner banner and Add buttons, shows practice name, protocol name, client-hydrated line titles, variants, quantities, and usage notes, renders shop's `handoutText` and `footerDisclaimer` from `Setting`, includes an `@media print` stylesheet, and provides a "Print Handout" button calling `window.print()`. (Handout option chosen: direct print layout in `renderProtocolLiquid` rather than hiding the link, because Milestone M4 already implemented handout/QR modules and theme-native client hydration provides a superior print experience).
+
+## 43. Milestone M9b-3a: Dev Store Live Verification (2026-11-05)
+
+- **Verification Summary:**
+  Milestone M9b-3a was re-checked and verified live on dev store `ai-agent-app-h9qwnwd8.myshopify.com` following hotfix PR #18.
+- **VERIFIED LIVE:**
+  - Editor search with real products and CAD prices (`/search/suggest.json` -> `/products/<handle>.js`).
+  - Protocol creation and saving (`action=create` via JSON App Proxy POST).
+  - Share-page hydration from storefront catalog (`/apps/protocols/<token>`).
+  - Add all to cart with `_protocol_token`, `_protocol_id`, and `_protocol_usage` in the cart batch payload.
+  - Edit round trip: modifying quantity (to 2) and adding a usage note persisted cleanly to the database with the share token unchanged.
+  - List card item count: accurately shows `"2 items"` without fake totals.
+  - Handout page layout: clean print layout with `@media print`, "Print Handout" button calling `window.print()`, showing quantities and usage notes without professional banner or Add buttons.
+- **NOT Verified Live (Explicitly Stated):**
+  - Checkout completing to `orders/paid` (live payment credentials not entered).
+  - Logged-out guest view.
+  - Handout settings text (setting is empty on the dev store).
+  - An actual print dialog execution.
+  - Non-Latin product handles (known validator limitation).
+- **Claim Nothing Else:** Only the items above are live-verified; all others remain covered by automated unit/integration tests.
 
 
 

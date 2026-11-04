@@ -1048,6 +1048,77 @@ describe('Practitioner Portal (app/lib/protocols/portal.js)', () => {
       });
     });
 
+    describe('Lifecycle Card Actions (M9b-3b)', () => {
+      it('renders Archive button and inline confirmation UI on active cards', () => {
+        const html = renderPortalLiquid({
+          isLoggedIn: true,
+          isApproved: true,
+          hasProfile: true,
+          activeProtocols: [
+            { id: 'proto_act_1', token: 'tok_act_1', name: 'Active Regimen', lines: [] }
+          ]
+        });
+
+        assert.ok(html.includes('portal-archive-btn'), 'Must have .portal-archive-btn on active card');
+        assert.ok(html.includes('portal-archive-confirm'), 'Must have .portal-archive-confirm on active card');
+        assert.ok(html.includes('portal-cancel-archive-btn'), 'Must have cancel button');
+        assert.ok(html.includes('portal-confirm-archive-btn'), 'Must have confirm button');
+        assert.ok(html.includes('Archive this protocol?'), 'Must have confirmation question text');
+        assert.ok(html.includes('portal-global-error'), 'Must have #portal-global-error element');
+      });
+
+      it('renders "Use as template" button on starter cards', () => {
+        const html = renderPortalLiquid({
+          isLoggedIn: true,
+          isApproved: true,
+          hasProfile: true,
+          activeProtocols: [],
+          starterProtocols: [
+            { id: 'starter_1', token: 'tok_start_1', name: 'Starter Template', isStarter: true, lines: [] }
+          ]
+        });
+
+        assert.ok(html.includes('portal-duplicate-btn'), 'Must have .portal-duplicate-btn on starter card');
+        assert.ok(html.includes('Use as template'), 'Must show "Use as template" label');
+        assert.ok(!html.includes('class="portal-btn portal-btn-secondary portal-archive-btn"'), 'Starter card must not have Archive button');
+      });
+
+      it('renders Restore button on archived cards', () => {
+        const html = renderPortalLiquid({
+          isLoggedIn: true,
+          isApproved: true,
+          hasProfile: true,
+          activeProtocols: [],
+          archivedProtocols: [
+            { id: 'arch_1', token: 'tok_arch_1', name: 'Archived Regimen', status: 'archived', lines: [] }
+          ]
+        });
+
+        assert.ok(html.includes('portal-restore-btn'), 'Must have .portal-restore-btn on archived card');
+        assert.ok(html.includes('Restore'), 'Must show "Restore" label');
+        assert.ok(!html.includes('class="portal-btn portal-btn-secondary portal-archive-btn"'), 'Archived card must not have Archive button');
+        assert.ok(!html.includes('class="portal-btn portal-btn-secondary portal-edit-btn"'), 'Archived card must not have Edit button');
+      });
+
+      it('contains zero window.confirm, window.alert, or window.prompt calls', () => {
+        const html = renderPortalLiquid({
+          isLoggedIn: true,
+          isApproved: true,
+          hasProfile: true,
+          activeProtocols: [{ id: 'p1', token: 't1', name: 'P1', lines: [] }],
+          starterProtocols: [{ id: 's1', token: 't2', name: 'S1', isStarter: true, lines: [] }],
+          archivedProtocols: [{ id: 'a1', token: 't3', name: 'A1', status: 'archived', lines: [] }]
+        });
+
+        assert.ok(!html.includes('window.confirm'), 'Must not call window.confirm');
+        assert.ok(!html.includes('window.alert'), 'Must not call window.alert');
+        assert.ok(!html.includes('window.prompt'), 'Must not call window.prompt');
+        assert.ok(!html.includes('confirm('), 'Must not call confirm()');
+        assert.ok(!html.includes('alert('), 'Must not call alert()');
+        assert.ok(!html.includes('prompt('), 'Must not call prompt()');
+      });
+    });
+
     describe('Client Script Syntax & Parser Regression Guards (vm.Script)', () => {
       function assertScriptsParse(html, label) {
         const matches = [...html.matchAll(/<script(?![^>]*type=["']application\/json["'])>([\s\S]*?)<\/script>/gi)];

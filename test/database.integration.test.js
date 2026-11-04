@@ -560,7 +560,7 @@ describe('PostgreSQL Database Integration (app/lib/protocols/service.js)', () =>
     assert.notEqual(duplicated.token, starter.token);
     assert.equal(duplicated.ownerId, practitionerB.ownerId);
     assert.equal(duplicated.sourceProtocolId, starter.id);
-    assert.equal(duplicated.name, 'Brand Foundation Starter (Copy)');
+    assert.equal(duplicated.name, 'Copy of Brand Foundation Starter');
   });
 
   it('records monthly aggregate order attribution without individual shopper PII', async (t) => {

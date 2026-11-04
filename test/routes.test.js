@@ -1195,7 +1195,7 @@ describe('HTTP Routes & Request Handlers (app/lib/protocols/routes.js)', () => {
       assert.equal(res.status, 201);
       const data = await res.json();
 
-      assert.equal(data.name, 'Starter Vitamin Routine (Copy)');
+      assert.equal(data.name, 'Copy of Starter Vitamin Routine');
       assert.equal(data.ownerId, practitionerUser.ownerId);
       assert.equal(data.isStarter, false);
       assert.equal(data.sourceProtocolId, starterProto.id);
@@ -2879,6 +2879,350 @@ describe('HTTP Routes & Request Handlers (app/lib/protocols/routes.js)', () => {
         assert.ok(!html.includes('<button type="button" class="protocol-btn protocol-btn-secondary protocol-line-add-btn"'), 'Handout must not have line Add buttons in markup');
         assert.ok(!html.includes('<div class="protocol-practitioner-banner"'), 'Handout must not show professional banner in markup');
         assert.ok(!html.includes("You're signed in as a professional"), 'Handout must not show professional message');
+      });
+
+      describe('Protocol Lifecycle Actions via App Proxy: archive, restore, duplicate (M9b-3b)', () => {
+        let lifecycleProto;
+        let starterTemplate;
+        let foreignCustomerProto;
+        let foreignShopProto;
+
+        beforeEach(() => {
+          lifecycleProto = {
+            id: 'proto_life_own_1',
+            shop: testShop,
+            token: 'tok_life_own_1',
+            name: 'Hydration Protocol',
+            introNote: 'Drink plenty of water',
+            ownerType: 'customer',
+            ownerId: customerGid,
+            createdBy: customerGid,
+            status: 'active'
+          };
+
+          starterTemplate = {
+            id: 'proto_starter_tmpl_1',
+            shop: testShop,
+            token: 'tok_starter_tmpl_1',
+            name: 'Essential Routine Template',
+            introNote: 'Core starter routine',
+            isStarter: true,
+            status: 'active'
+          };
+
+          foreignCustomerProto = {
+            id: 'proto_foreign_cust_1',
+            shop: testShop,
+            token: 'tok_foreign_cust_1',
+            name: 'Private Regimen',
+            ownerType: 'customer',
+            ownerId: 'gid://shopify/Customer/other_user_99',
+            createdBy: 'gid://shopify/Customer/other_user_99',
+            status: 'active'
+          };
+
+          foreignShopProto = {
+            id: 'proto_foreign_shop_1',
+            shop: 'other-brand.myshopify.com',
+            token: 'tok_foreign_shop_1',
+            name: 'Other Shop Protocol',
+            ownerType: 'customer',
+            ownerId: customerGid,
+            createdBy: customerGid,
+            status: 'active'
+          };
+
+          db.state.protocols.push(lifecycleProto, starterTemplate, foreignCustomerProto, foreignShopProto);
+          db.state.lines.push(
+            {
+              id: 'line_life_1',
+              protocolId: lifecycleProto.id,
+              position: 0,
+              variantGid: 'gid://shopify/ProductVariant/1111',
+              productHandle: 'electrolyte-powder',
+              quantity: 2,
+              usageNote: '1 scoop daily'
+            },
+            {
+              id: 'line_starter_1',
+              protocolId: starterTemplate.id,
+              position: 0,
+              variantGid: 'gid://shopify/ProductVariant/2222',
+              productHandle: 'daily-vitamins',
+              quantity: 1,
+              usageNote: 'With breakfast'
+            }
+          );
+        });
+
+        it('POST action=archive archives owner protocol and returns 200 JSON', async () => {
+          const url = makeSignedProxyUrl({ action: 'archive', id: lifecycleProto.id, logged_in_customer_id: testCustomerId });
+          const req = new Request(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: '{}'
+          });
+
+          const res = await handleAppProxyRequest(db, req, { apiSecret });
+          assert.equal(res.status, 200);
+          const data = await res.json();
+          assert.equal(data.status, 'archived');
+
+          // Verify DB state updated
+          const inDb = db.state.protocols.find(p => p.id === lifecycleProto.id);
+          assert.equal(inDb.status, 'archived');
+        });
+
+        it('POST action=archive enforces CSRF application/json (415) and Sec-Fetch-Site (403)', async () => {
+          const url = makeSignedProxyUrl({ action: 'archive', id: lifecycleProto.id, logged_in_customer_id: testCustomerId });
+
+          // Non-JSON media type -> 415
+          const textReq = new Request(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'text/plain' },
+            body: '{}'
+          });
+          const textRes = await handleAppProxyRequest(db, textReq, { apiSecret });
+          assert.equal(textRes.status, 415);
+
+          // Cross-site Sec-Fetch-Site -> 403
+          const csrfReq = new Request(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Sec-Fetch-Site': 'cross-site' },
+            body: '{}'
+          });
+          const csrfRes = await handleAppProxyRequest(db, csrfReq, { apiSecret });
+          assert.equal(csrfRes.status, 403);
+        });
+
+        it('POST action=archive requires authenticated customer (401) and approved profile (403)', async () => {
+          // Unauthenticated (no customer ID) -> 401
+          const unauthUrl = makeSignedProxyUrl({ action: 'archive', id: lifecycleProto.id });
+          const unauthReq = new Request(unauthUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: '{}'
+          });
+          const unauthRes = await handleAppProxyRequest(db, unauthReq, { apiSecret });
+          assert.equal(unauthRes.status, 401);
+
+          // Unapproved customer -> 403
+          db.state.profiles.forEach(p => { p.isApproved = false; });
+          const unapprovedUrl = makeSignedProxyUrl({ action: 'archive', id: lifecycleProto.id, logged_in_customer_id: testCustomerId });
+          const unapprovedReq = new Request(unapprovedUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: '{}'
+          });
+          const unapprovedRes = await handleAppProxyRequest(db, unapprovedReq, { apiSecret });
+          assert.equal(unapprovedRes.status, 403);
+        });
+
+        it('POST action=archive returns 404 for another customer protocol and cross-shop (Rule 4)', async () => {
+          // Other customer's protocol -> 404 (prevents ID enumeration)
+          const otherUrl = makeSignedProxyUrl({ action: 'archive', id: foreignCustomerProto.id, logged_in_customer_id: testCustomerId });
+          const otherReq = new Request(otherUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: '{}'
+          });
+          const otherRes = await handleAppProxyRequest(db, otherReq, { apiSecret });
+          assert.equal(otherRes.status, 404);
+
+          // Cross-shop protocol -> 404
+          const crossUrl = makeSignedProxyUrl({ action: 'archive', id: foreignShopProto.id, logged_in_customer_id: testCustomerId });
+          const crossReq = new Request(crossUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: '{}'
+          });
+          const crossRes = await handleAppProxyRequest(db, crossReq, { apiSecret });
+          assert.equal(crossRes.status, 404);
+        });
+
+        it('POST action=archive returns 403 when attempting to archive a brand starter template', async () => {
+          const starterUrl = makeSignedProxyUrl({ action: 'archive', id: starterTemplate.id, logged_in_customer_id: testCustomerId });
+          const starterReq = new Request(starterUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: '{}'
+          });
+          const starterRes = await handleAppProxyRequest(db, starterReq, { apiSecret });
+          assert.equal(starterRes.status, 403);
+          const data = await starterRes.json();
+          assert.equal(data.code, 'STARTER_MODIFICATION_FORBIDDEN');
+        });
+
+        it('POST action=restore restores archived protocol back to active and returns 200 JSON', async () => {
+          lifecycleProto.status = 'archived';
+
+          const url = makeSignedProxyUrl({ action: 'restore', id: lifecycleProto.id, logged_in_customer_id: testCustomerId });
+          const req = new Request(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: '{}'
+          });
+
+          const res = await handleAppProxyRequest(db, req, { apiSecret });
+          assert.equal(res.status, 200);
+          const data = await res.json();
+          assert.equal(data.status, 'active');
+
+          const inDb = db.state.protocols.find(p => p.id === lifecycleProto.id);
+          assert.equal(inDb.status, 'active');
+        });
+
+        it('POST action=restore returns 404 for another customer protocol or cross-shop (Rule 4)', async () => {
+          foreignCustomerProto.status = 'archived';
+          const otherUrl = makeSignedProxyUrl({ action: 'restore', id: foreignCustomerProto.id, logged_in_customer_id: testCustomerId });
+          const otherReq = new Request(otherUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: '{}'
+          });
+          const otherRes = await handleAppProxyRequest(db, otherReq, { apiSecret });
+          assert.equal(otherRes.status, 404);
+
+          foreignShopProto.status = 'archived';
+          const crossUrl = makeSignedProxyUrl({ action: 'restore', id: foreignShopProto.id, logged_in_customer_id: testCustomerId });
+          const crossReq = new Request(crossUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: '{}'
+          });
+          const crossRes = await handleAppProxyRequest(db, crossReq, { apiSecret });
+          assert.equal(crossRes.status, 404);
+        });
+
+        it('POST action=duplicate duplicates own protocol with "Copy of <name>", new ID and token', async () => {
+          const url = makeSignedProxyUrl({ action: 'duplicate', id: lifecycleProto.id, logged_in_customer_id: testCustomerId });
+          const req = new Request(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: '{}'
+          });
+
+          const res = await handleAppProxyRequest(db, req, { apiSecret });
+          assert.equal(res.status, 201);
+          const data = await res.json();
+
+          assert.equal(data.name, 'Copy of Hydration Protocol');
+          assert.equal(data.ownerId, customerGid);
+          assert.equal(data.isStarter, false);
+          assert.equal(data.status, 'active');
+          assert.notEqual(data.id, lifecycleProto.id);
+          assert.notEqual(data.token, lifecycleProto.token);
+
+          // Lines copied with productHandle, quantity, usageNote
+          assert.equal(data.lines.length, 1);
+          assert.equal(data.lines[0].variantGid, 'gid://shopify/ProductVariant/1111');
+          assert.equal(data.lines[0].productHandle, 'electrolyte-powder');
+          assert.equal(data.lines[0].quantity, 2);
+          assert.equal(data.lines[0].usageNote, '1 scoop daily');
+        });
+
+        it('POST action=duplicate duplicates a brand starter template into practitioner library', async () => {
+          const url = makeSignedProxyUrl({ action: 'duplicate', id: starterTemplate.id, logged_in_customer_id: testCustomerId });
+          const req = new Request(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: '{}'
+          });
+
+          const res = await handleAppProxyRequest(db, req, { apiSecret });
+          assert.equal(res.status, 201);
+          const data = await res.json();
+
+          assert.equal(data.name, 'Copy of Essential Routine Template');
+          assert.equal(data.ownerId, customerGid);
+          assert.equal(data.isStarter, false);
+          assert.equal(data.sourceProtocolId, starterTemplate.id);
+          assert.notEqual(data.id, starterTemplate.id);
+          assert.notEqual(data.token, starterTemplate.token);
+
+          assert.equal(data.lines.length, 1);
+          assert.equal(data.lines[0].variantGid, 'gid://shopify/ProductVariant/2222');
+          assert.equal(data.lines[0].productHandle, 'daily-vitamins');
+          assert.equal(data.lines[0].quantity, 1);
+        });
+
+        it('POST action=duplicate returns 404 for another customer non-starter protocol and cross-shop', async () => {
+          const otherUrl = makeSignedProxyUrl({ action: 'duplicate', id: foreignCustomerProto.id, logged_in_customer_id: testCustomerId });
+          const otherReq = new Request(otherUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: '{}'
+          });
+          const otherRes = await handleAppProxyRequest(db, otherReq, { apiSecret });
+          assert.equal(otherRes.status, 404);
+
+          const crossUrl = makeSignedProxyUrl({ action: 'duplicate', id: foreignShopProto.id, logged_in_customer_id: testCustomerId });
+          const crossReq = new Request(crossUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: '{}'
+          });
+          const crossRes = await handleAppProxyRequest(db, crossReq, { apiSecret });
+          assert.equal(crossRes.status, 404);
+        });
+
+        it('POST unknown action returns 400 and never falls through', async () => {
+          const url = makeSignedProxyUrl({ action: 'delete', id: lifecycleProto.id, logged_in_customer_id: testCustomerId });
+          const req = new Request(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: '{}'
+          });
+
+          const res = await handleAppProxyRequest(db, req, { apiSecret });
+          assert.equal(res.status, 400);
+          const data = await res.json();
+          assert.ok(data.error.includes('Invalid or unknown action'));
+        });
+
+        it('Client link renders inactive state for archived protocol, and becomes active again when restored with same token', async () => {
+          // 1. Initially active
+          const clientUrl = makeSignedProxyUrl({ token: lifecycleProto.token });
+          const activeRes = await handleAppProxyRequest(db, new Request(clientUrl), { apiSecret });
+          assert.equal(activeRes.status, 200);
+          const activeHtml = await activeRes.text();
+          assert.ok(activeHtml.includes('Hydration Protocol'));
+          assert.ok(activeHtml.includes('Add all to cart'));
+
+          // 2. Archive the protocol
+          const archiveUrl = makeSignedProxyUrl({ action: 'archive', id: lifecycleProto.id, logged_in_customer_id: testCustomerId });
+          const archiveRes = await handleAppProxyRequest(db, new Request(archiveUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: '{}'
+          }), { apiSecret });
+          assert.equal(archiveRes.status, 200);
+
+          // 3. Client link now renders inactive page
+          const archivedClientRes = await handleAppProxyRequest(db, new Request(clientUrl), { apiSecret });
+          assert.equal(archivedClientRes.status, 200);
+          const archivedHtml = await archivedClientRes.text();
+          assert.ok(archivedHtml.includes('Protocol No Longer Active'));
+          assert.ok(archivedHtml.includes('This recommendation is no longer active'));
+          assert.ok(!archivedHtml.includes('Add all to cart'));
+          assert.ok(!archivedHtml.includes('protocol-add-all-btn'));
+
+          // 4. Restore the protocol
+          const restoreUrl = makeSignedProxyUrl({ action: 'restore', id: lifecycleProto.id, logged_in_customer_id: testCustomerId });
+          const restoreRes = await handleAppProxyRequest(db, new Request(restoreUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: '{}'
+          }), { apiSecret });
+          assert.equal(restoreRes.status, 200);
+
+          // 5. Client link works again with the SAME token
+          const restoredClientRes = await handleAppProxyRequest(db, new Request(clientUrl), { apiSecret });
+          assert.equal(restoredClientRes.status, 200);
+          const restoredHtml = await restoredClientRes.text();
+          assert.ok(restoredHtml.includes('Hydration Protocol'));
+          assert.ok(restoredHtml.includes('Add all to cart'));
+        });
       });
     });
   });

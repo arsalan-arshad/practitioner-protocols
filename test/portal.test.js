@@ -1,5 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import vm from 'node:vm';
 import {
   formatMoney,
   calculateProtocolRetailTotal,
@@ -1019,6 +1020,113 @@ describe('Practitioner Portal (app/lib/protocols/portal.js)', () => {
         assert.ok(!enrolHtml.includes('name="firstName"'));
         assert.ok(!enrolHtml.includes('name="lastName"'));
         assert.ok(!enrolHtml.includes('name="patientName"'));
+      });
+    });
+
+    describe('Client Script Syntax & Parser Regression Guards (vm.Script)', () => {
+      function assertScriptsParse(html, label) {
+        const matches = [...html.matchAll(/<script(?![^>]*type=["']application\/json["'])>([\s\S]*?)<\/script>/gi)];
+        for (let i = 0; i < matches.length; i++) {
+          const scriptBody = matches[i][1];
+          assert.doesNotThrow(
+            () => new vm.Script(scriptBody),
+            `Script index ${i} in ${label} must be valid JavaScript syntax`
+          );
+        }
+      }
+
+      it('parses approved state with zero protocols without SyntaxError', () => {
+        const html = renderPortalLiquid({
+          isLoggedIn: true,
+          isApproved: true,
+          hasProfile: true,
+          practiceName: 'Elite Naturopathic Clinic',
+          activeProtocols: []
+        });
+        assertScriptsParse(html, 'approved state with zero protocols');
+      });
+
+      it('parses approved state with protocols that have lines including productHandle', () => {
+        const html = renderPortalLiquid({
+          isLoggedIn: true,
+          isApproved: true,
+          hasProfile: true,
+          practiceName: 'Elite Naturopathic Clinic',
+          activeProtocols: [
+            {
+              id: 'proto_1',
+              token: 'tok_active_123456789',
+              name: 'Digestive Regimen',
+              lines: [
+                {
+                  variantGid: 'gid://shopify/ProductVariant/202',
+                  productHandle: 'digest-enzymes',
+                  quantity: 1,
+                  usageNote: 'Take with meal'
+                }
+              ]
+            }
+          ]
+        });
+        assertScriptsParse(html, 'approved state with lines including productHandle');
+      });
+
+      it('parses approved state with archived and starter protocols list', () => {
+        const html = renderPortalLiquid({
+          isLoggedIn: true,
+          isApproved: true,
+          hasProfile: true,
+          practiceName: 'Elite Naturopathic Clinic',
+          activeProtocols: [],
+          starterProtocols: [
+            {
+              id: 'proto_starter',
+              token: 'tok_starter_12345678',
+              name: 'Starter Protocol',
+              isStarter: true,
+              lines: []
+            }
+          ],
+          archivedProtocols: [
+            {
+              id: 'proto_archived',
+              token: 'tok_archived_1234567',
+              name: 'Archived Protocol',
+              status: 'archived',
+              lines: []
+            }
+          ]
+        });
+        assertScriptsParse(html, 'approved state with archived/starter list');
+      });
+
+      it('parses guest, pending, invite-only, and request-access states without SyntaxError', () => {
+        const guestHtml = renderPortalLiquid({ isLoggedIn: false });
+        assertScriptsParse(guestHtml, 'guest state');
+
+        const pendingHtml = renderPortalLiquid({
+          isLoggedIn: true,
+          hasProfile: true,
+          isApproved: false,
+          practiceName: 'Pending Practice'
+        });
+        assertScriptsParse(pendingHtml, 'pending state');
+
+        const inviteOnlyHtml = renderPortalLiquid({
+          isLoggedIn: true,
+          hasProfile: false,
+          allowSelfEnrol: false,
+          identityMode: 'tag'
+        });
+        assertScriptsParse(inviteOnlyHtml, 'invite-only state');
+
+        const requestAccessHtml = renderPortalLiquid({
+          isLoggedIn: true,
+          hasProfile: false,
+          allowSelfEnrol: true,
+          identityMode: 'tag'
+        });
+        assertScriptsParse(requestAccessHtml, 'request-access state');
       });
     });
   });

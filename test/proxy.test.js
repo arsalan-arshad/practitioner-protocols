@@ -1,5 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import vm from 'node:vm';
 import {
   verifyAppProxyHmac,
   calculateAppProxySignature,
@@ -469,6 +470,71 @@ describe('Shopify App Proxy & Storefront (app/lib/protocols/proxy.js)', () => {
       assert.ok(lineAddMatch, 'Per-line add button must exist');
       assert.ok(!lineAddMatch[1].includes('disabled'), 'Per-line add button must not be disabled');
       assert.ok(!lineAddMatch[1].includes('aria-disabled'), 'Per-line add button must not have aria-disabled');
+    });
+
+    describe('Client Script Syntax & Parser Regression Guards (vm.Script)', () => {
+      function assertScriptsParse(html, label) {
+        const matches = [...html.matchAll(/<script(?![^>]*type=["']application\/json["'])>([\s\S]*?)<\/script>/gi)];
+        for (let i = 0; i < matches.length; i++) {
+          const scriptBody = matches[i][1];
+          assert.doesNotThrow(
+            () => new vm.Script(scriptBody),
+            `Script index ${i} in ${label} must be valid JavaScript syntax`
+          );
+        }
+      }
+
+      it('parses client script with handle lines without SyntaxError', () => {
+        const liquid = renderProtocolLiquid({
+          protocol: {
+            ...mockProtocol,
+            lines: [
+              {
+                variantGid: 'gid://shopify/ProductVariant/1001',
+                productHandle: 'omega-3',
+                quantity: 1,
+                available: true
+              }
+            ]
+          }
+        });
+        assertScriptsParse(liquid, 'client page with handle lines');
+      });
+
+      it('parses client script without handle lines without SyntaxError', () => {
+        const liquid = renderProtocolLiquid({
+          protocol: {
+            ...mockProtocol,
+            lines: [
+              {
+                variantGid: 'gid://shopify/ProductVariant/1001',
+                quantity: 1,
+                available: false
+              }
+            ]
+          }
+        });
+        assertScriptsParse(liquid, 'client page without handle lines');
+      });
+
+      it('parses client script with enriched lines without SyntaxError', () => {
+        const liquid = renderProtocolLiquid({
+          protocol: {
+            ...mockProtocol,
+            lines: [
+              {
+                variantGid: 'gid://shopify/ProductVariant/1001',
+                title: 'Enriched Zinc Picolinate',
+                variantTitle: '50mg',
+                priceFormatted: '$18.00',
+                quantity: 1,
+                available: true
+              }
+            ]
+          }
+        });
+        assertScriptsParse(liquid, 'client page with enriched lines');
+      });
     });
   });
 });

@@ -1,6 +1,6 @@
 # Practitioner Protocols — Project Context (for Claude)
 
-_Snapshot: 2026-11-05 · Live Railway deployment active (`practitioner-protocols-production.up.railway.app`) with internal Postgres & ledger migrations · Production app record "Practitioner Protocols" released (v2, Public distribution) · Production hardening complete · Milestones M9a (Embedded Merchant Admin), M9b-1 (allowSelfEnrol Setting, Migration & Pending-Practitioner Admin Review), M9b-2 (Storefront Self-Enrolment Flow, Portal States, and App Proxy CSRF Protection) & M9b-3a (Catalog Search, Production Authoring & Client Page Hydration) verified live on dev store · Spikes S2, S3, S4, S5, S6 resolved; S1 resolved on the Plus dev store only · Brand assets v2 produced and verified (text-free App Store icon & feature image; code-composited README hero banner & social thumbnail; shopping-bag glyph eliminated) · 477 tests passing across 107 suites._
+_Snapshot: 2026-11-05 · Live Railway deployment active (`practitioner-protocols-production.up.railway.app`) with internal Postgres & ledger migrations · Production app record "Practitioner Protocols" released (v2, Public distribution) · Production hardening complete · Milestones M9a (Embedded Merchant Admin), M9b-1 (allowSelfEnrol Setting, Migration & Pending-Practitioner Admin Review), M9b-2 (Storefront Self-Enrolment Flow, Portal States, and App Proxy CSRF Protection) & M9b-3a (Catalog Search, Production Authoring & Client Page Hydration) verified live on dev store · Milestone M9b-3b (Protocol Lifecycle: Archive, Restore, Duplicate) implemented, pending live dev-store verification · Spikes S2, S3, S4, S5, S6 resolved; S1 resolved on the Plus dev store only · Brand assets v2 produced and verified (text-free App Store icon & feature image; code-composited README hero banner & social thumbnail; shopping-bag glyph eliminated) · 493 tests passing across 109 suites._
 _Contains NO secrets. Never paste `.env` values or tokens into chat or docs._
 
 ## 1. What this is
@@ -933,7 +933,16 @@ Run the five spikes in a day or two on a dev store; write the answers into secti
   - Non-Latin product handles (known validator limitation).
 - **Claim Nothing Else:** Only the items above are live-verified; all others remain covered by automated unit/integration tests.
 
+## 44. Milestone M9b-3b: Protocol Lifecycle (Archive, Restore, Duplicate) — Implemented (2026-11-05)
 
-
-
+- **Implementation Summary (Implemented, Pending Live Dev-Store Verification):**
+  Full lifecycle actions built and tested across the App Proxy, service layer, and portal UI.
+- **Scope & Verified Behavior (via 493 Automated Tests across 109 Suites):**
+  1. **Mutating App Proxy Endpoints:** `POST /apps/protocols?action=archive&id=<id>`, `POST /apps/protocols?action=restore&id=<id>`, and `POST /apps/protocols?action=duplicate&id=<id>`.
+  2. **CSRF & Security Enforcement:** Requires exact `application/json` Content-Type (rejects non-JSON with 415), validates `Sec-Fetch-Site: same-origin` when present (403 otherwise), rejects unauthenticated requests (401), rejects unapproved practitioners (403), and rejects unknown actions (400) without falling through.
+  3. **Rule 4 Tenant & Ownership Isolation:** Cross-owner or cross-shop requests return 404 (preventing existence enumeration). Starter templates cannot be archived or modified (403 `STARTER_MODIFICATION_FORBIDDEN`).
+  4. **Duplication Rules:** Duplicating own active protocols or brand starter templates produces a fresh protocol owned by the caller (`ownerType: 'customer'`), `isStarter: false`, status `active`, name prefixed with `"Copy of <name>"` (trimmed to $\le 60$), with a new ID, new unique share token, and all lines copied (`variantGid`, `productHandle`, `quantity`, `usageNote`). Never copies ownership or starter flags.
+  5. **Client Link Behavior:** Archived protocol renders inactive state ("Protocol No Longer Active" / "This recommendation is no longer active" with zero Add buttons); restoring returns it to active state under the exact same share token.
+  6. **Practitioner Portal UI:** Active cards include an "Archive" button and in-page confirmation box (inline Confirm/Cancel buttons with zero `window.confirm`, `window.alert`, or `window.prompt` dialogs); starter cards include a "Use as template" button; a dedicated "Archived Protocols (n)" section provides one-click "Restore"; and failures report cleanly via an in-page `#portal-global-error` alert box using `textContent`.
+- **Status:** Implemented and covered by automated test suites; pending live dev-store verification.
 

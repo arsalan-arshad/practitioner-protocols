@@ -73,7 +73,8 @@
     - CSRF media-type rejections: form-encoded and `text/plain; application/json` POSTs return HTTP 415.
     - Unknown action returns HTTP 400.
   - Note: The per-customer rate limit (5/hr), the pending cap (200), `customers/redact` profile deletion, and `Sec-Fetch-Site` handling are covered by unit tests and were NOT exercised live.
-- [x] **M9b-3a: Catalog Search, Production Authoring & Client Page Hydration (IMPLEMENTED; LIVE VERIFICATION: EDITOR SAVE, CLIENT PAGE HYDRATION AND ADD-ALL VERIFIED LIVE, EDIT/LIST/HANDOUT FIXED IN FOLLOW-UP, PENDING RE-CHECK)**:
+- [x] **M9b-3a: Catalog Search, Production Authoring & Client Page Hydration (VERIFIED LIVE on the dev store)**:
+  - Live Dev Store Verification: VERIFIED: editor search with real products and CAD prices, protocol save, share-page hydration, Add all with `_protocol_token`/`_protocol_id`/`_protocol_usage` in the cart, edit round trip (qty and note persisted, token unchanged), list card item count, handout page layout. NOT verified: checkout to orders/paid, logged-out guest view, handout settings text, real printing, non-Latin product handles (known limitation).
   - Migration `20261104_add_product_handle_to_protocol_line/migration.sql` adding nullable `productHandle TEXT` to `ProtocolLine` table; updated `prisma/schema.prisma` and registered in `scripts/migrate.js`.
   - Validation: `productHandle` format (`^[a-z0-9][a-z0-9-]{0,254}$`), variant GID format, payload sanitization. Handled null handles gracefully (rendered "Product no longer available").
   - Practitioner editor (approved state): client-side debounced (300ms, $\ge 2$ chars) `/search/suggest.json` with `resources[options][unavailable_products]=show`, on-select `/products/<handle>.js` variant hydration converting prices from minor units and disabling out-of-stock variants, quantity 1-10, usage notes $\le 200$ chars, saving via POST JSON `action=create` and `action=update` with strict `textContent` rendering (zero `innerHTML`) and no stored prices.
@@ -83,9 +84,14 @@
     - Bug 1 (data loss on edit): Portal queries now join `ProtocolLine` with `json_agg` and `linesCount` matching `service.js` shape, preserving exact customer/starter shop scoping so editing loads all existing lines.
     - Bug 2 (fake `$0.00` total): Removed total retail price display from portal cards (shows `"N item(s)"`), and eliminated all hardcoded `$` symbols in `portal.js` and `proxy.js`.
     - Bug 3 (print handout): Implemented print-friendly layout in `renderProtocolLiquid` when `?handout=1` (with `@media print`, `window.print()` trigger, hidden banner/Add buttons, and settings `handoutText` and `footerDisclaimer`). Chosen over hiding the link because M4 already built handout/QR modules and theme-native client hydration provides a superior print experience.
-  - Automated unit test coverage: 477 passing tests across 107 suites (including node:vm script parse regression guards).
-- [ ] **M9b-3b: Protocol Lifecycle Management (Archive, Restore, Duplicate)**:
-  - Portal actions for archiving, restoring, and duplicating protocols in production mode with ownership and status guards.
+  - Automated unit test coverage: 493 passing tests across 109 suites (including node:vm script parse regression guards).
+- [x] **M9b-3b: Protocol Lifecycle Management (Archive, Restore, Duplicate) (IMPLEMENTED, PENDING LIVE DEV-STORE VERIFICATION)**:
+  - App Proxy mutating JSON POST actions (`action=archive&id=<id>`, `action=restore&id=<id>`, `action=duplicate&id=<id>`) with CSRF protection (exact `application/json` Content-Type, `Sec-Fetch-Site: same-origin` check) and unknown action rejection (400).
+  - Strict Rule 4 tenant and ownership isolation: cross-owner and cross-shop archive/restore/duplicate requests return 404 without leaking existence; starter templates cannot be modified or archived (403).
+  - Duplicating own protocols or starter templates creates a practitioner-owned active copy (`ownerType: 'customer'`, `isStarter: false`) prefixed with `"Copy of <name>"` (trimmed to $\le 60$), copying all lines (`variantGid`, `productHandle`, `quantity`, `usageNote`), with a fresh ID and unique share token.
+  - Client link lifecycle: archived protocols render inactive client state ("Protocol No Longer Active" / "This recommendation is no longer active" with zero Add buttons), and restoring brings back the active client page under the exact same share token.
+  - Practitioner portal UI: in-page confirmation UI for archiving (inline Confirm/Cancel, strictly zero `window.confirm`, `window.alert`, or `window.prompt` dialogs), dedicated "Archived Protocols (n)" section with Restore buttons, "Use as template" buttons on brand starter templates, and `#portal-global-error` in-page error reporting with `textContent`.
+  - Automated unit test coverage: 493 passing tests across 109 suites (`npm test`).
 
 ## Later
 Practitioner application form · aggregate "client orders" count on protocol cards · protocol version history · Salesforce rollup via Bridge Recipes.

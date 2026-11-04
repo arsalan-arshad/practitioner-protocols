@@ -559,7 +559,7 @@ export async function handleAppProxyRequest(db, request, options = {}) {
 
     // 3. Unknown POST/PUT actions -> 400, never fall through to create
     if (method === 'POST') {
-      if (!['enrol', 'create', 'update'].includes(action)) {
+      if (!['enrol', 'create', 'update', 'archive', 'restore', 'duplicate'].includes(action)) {
         return Response.json(
           { error: 'Invalid or unknown action' },
           { status: 400, headers: { 'Content-Type': 'application/json' } }
@@ -646,6 +646,54 @@ export async function handleAppProxyRequest(db, request, options = {}) {
           shop
         };
         return handleUpdateProtocolRequest(db, user, protocolId, body, { shop });
+      } catch (err) {
+        return handleErrorResponse(err);
+      }
+    }
+
+    if (method === 'POST' && action === 'archive') {
+      try {
+        const protocolId = urlObj.searchParams.get('id');
+        const user = {
+          id: customerGid,
+          role: 'practitioner',
+          ownerType: 'customer',
+          ownerId: customerGid,
+          shop
+        };
+        return handleArchiveProtocolRequest(db, user, protocolId, { shop });
+      } catch (err) {
+        return handleErrorResponse(err);
+      }
+    }
+
+    if (method === 'POST' && action === 'restore') {
+      try {
+        const protocolId = urlObj.searchParams.get('id');
+        const user = {
+          id: customerGid,
+          role: 'practitioner',
+          ownerType: 'customer',
+          ownerId: customerGid,
+          shop
+        };
+        return handleRestoreProtocolRequest(db, user, protocolId, { shop });
+      } catch (err) {
+        return handleErrorResponse(err);
+      }
+    }
+
+    if (method === 'POST' && action === 'duplicate') {
+      try {
+        const protocolId = urlObj.searchParams.get('id');
+        const user = {
+          id: customerGid,
+          role: 'practitioner',
+          ownerType: 'customer',
+          ownerId: customerGid,
+          shop
+        };
+        return handleDuplicateProtocolRequest(db, user, protocolId, { shop });
       } catch (err) {
         return handleErrorResponse(err);
       }

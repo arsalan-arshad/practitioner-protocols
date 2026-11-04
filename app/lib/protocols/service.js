@@ -348,7 +348,7 @@ export async function duplicateProtocol(db, { shop, user, protocolId }) {
   }
 
   const copyInput = {
-    name: `${existing.name} (Copy)`.slice(0, 60),
+    name: `Copy of ${existing.name}`.slice(0, 60),
     introNote: existing.introNote || '',
     displayName: existing.displayName || '',
     sourceProtocolId: existing.id,

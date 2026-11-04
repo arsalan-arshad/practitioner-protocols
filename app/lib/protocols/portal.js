@@ -1331,7 +1331,7 @@ export function renderPortalLiquid(options = {}) {
   }
 
   // 3. Approved practitioner: render full portal library
-  const renderCards = (protocols, isStarter = false) => {
+  const renderCards = (protocols, isStarter = false, isArchived = false) => {
     if (!protocols || protocols.length === 0) {
       return `<p style="color: #6b7280; font-style: italic;">No protocols found.</p>`;
     }
@@ -1345,6 +1345,33 @@ export function renderPortalLiquid(options = {}) {
         const shareUrl = `/apps/protocols/${token}`;
         const handoutUrl = `/apps/protocols/${token}?handout=1`;
 
+        let actionButtons = '';
+        let confirmHtml = '';
+
+        if (isStarter) {
+          actionButtons = `
+            <a href="${shareUrl}" class="portal-btn portal-btn-secondary" style="font-size: 0.8125rem; padding: 0.375rem 0.75rem;">Copy Link</a>
+            <a href="${handoutUrl}" target="_blank" rel="noopener" class="portal-btn portal-btn-secondary" style="font-size: 0.8125rem; padding: 0.375rem 0.75rem;">Print Handout</a>
+            <button type="button" class="portal-btn portal-btn-secondary portal-duplicate-btn" data-protocol-id="${protoId}" style="font-size: 0.8125rem; padding: 0.375rem 0.75rem;">Use as template</button>`;
+        } else if (isArchived) {
+          actionButtons = `
+            <button type="button" class="portal-btn portal-btn-secondary portal-restore-btn" data-protocol-id="${protoId}" style="font-size: 0.8125rem; padding: 0.375rem 0.75rem;">Restore</button>`;
+        } else {
+          actionButtons = `
+            <a href="${shareUrl}" class="portal-btn portal-btn-secondary" style="font-size: 0.8125rem; padding: 0.375rem 0.75rem;">Copy Link</a>
+            <a href="${handoutUrl}" target="_blank" rel="noopener" class="portal-btn portal-btn-secondary" style="font-size: 0.8125rem; padding: 0.375rem 0.75rem;">Print Handout</a>
+            <button type="button" class="portal-btn portal-btn-secondary portal-edit-btn" data-protocol-id="${protoId}" style="font-size: 0.8125rem; padding: 0.375rem 0.75rem;">Edit</button>
+            <button type="button" class="portal-btn portal-btn-secondary portal-archive-btn" data-protocol-id="${protoId}" style="font-size: 0.8125rem; padding: 0.375rem 0.75rem; color: #dc2626;">Archive</button>`;
+          confirmHtml = `
+          <div class="portal-archive-confirm" style="display: none; margin-top: 0.75rem; padding: 0.5rem; background: #fef2f2; border: 1px solid #fecaca; border-radius: 0.375rem; font-size: 0.8125rem; color: #991b1b; align-items: center; justify-content: space-between; gap: 0.5rem;">
+            <span>Archive this protocol?</span>
+            <div style="display: flex; gap: 0.25rem;">
+              <button type="button" class="portal-btn portal-btn-secondary portal-cancel-archive-btn" data-protocol-id="${protoId}" style="font-size: 0.75rem; padding: 0.25rem 0.5rem;">Cancel</button>
+              <button type="button" class="portal-btn portal-confirm-archive-btn" data-protocol-id="${protoId}" style="font-size: 0.75rem; padding: 0.25rem 0.5rem; background: #dc2626; color: #fff; border: 1px solid #dc2626;">Confirm</button>
+            </div>
+          </div>`;
+        }
+
         return `
         <div class="portal-card" data-protocol-id="${protoId}">
           <div>
@@ -1355,10 +1382,9 @@ export function renderPortalLiquid(options = {}) {
             </div>
           </div>
           <div class="portal-card-actions">
-            <a href="${shareUrl}" class="portal-btn portal-btn-secondary" style="font-size: 0.8125rem; padding: 0.375rem 0.75rem;">Copy Link</a>
-            <a href="${handoutUrl}" target="_blank" rel="noopener" class="portal-btn portal-btn-secondary" style="font-size: 0.8125rem; padding: 0.375rem 0.75rem;">Print Handout</a>
-            ${!isStarter ? `<button type="button" class="portal-btn portal-btn-secondary portal-edit-btn" data-protocol-id="${protoId}" style="font-size: 0.8125rem; padding: 0.375rem 0.75rem;">Edit</button>` : ''}
+            ${actionButtons}
           </div>
+          ${confirmHtml}
         </div>`;
       }).join('\n')}
     </div>`;
@@ -1374,6 +1400,8 @@ export function renderPortalLiquid(options = {}) {
 
   return `${robotsMeta}${styles}
 <div class="portal-container">
+  <div id="portal-global-error" class="portal-editor-error" style="display:none; margin-bottom: 1rem;" role="alert"></div>
+
   <header class="portal-header">
     <div>
       ${safePractice ? `<div class="portal-practice-badge">${safePractice}</div>` : ''}
@@ -1387,19 +1415,19 @@ export function renderPortalLiquid(options = {}) {
 
   <section>
     <h2 class="portal-section-heading">My Active Protocols (${activeProtocols.length})</h2>
-    ${renderCards(activeProtocols, false)}
+    ${renderCards(activeProtocols, false, false)}
   </section>
 
   ${starterProtocols.length > 0 ? `
   <section>
     <h2 class="portal-section-heading">Brand Starter Templates (${starterProtocols.length})</h2>
-    ${renderCards(starterProtocols, true)}
+    ${renderCards(starterProtocols, true, false)}
   </section>` : ''}
 
   ${archivedProtocols.length > 0 ? `
   <section>
     <h2 class="portal-section-heading">Archived Protocols (${archivedProtocols.length})</h2>
-    ${renderCards(archivedProtocols, false)}
+    ${renderCards(archivedProtocols, false, true)}
   </section>` : ''}
 </div>
 
@@ -1521,6 +1549,16 @@ ${protocolsJson}
     if (!errorBox) return;
     errorBox.textContent = '';
     errorBox.style.display = 'none';
+  }
+
+  var globalErrorBox = document.getElementById('portal-global-error');
+  function showGlobalError(msg) {
+    if (!globalErrorBox) return;
+    globalErrorBox.textContent = msg;
+    globalErrorBox.style.display = 'block';
+    try {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    } catch (e) {}
   }
 
   function openEditor(proto) {
@@ -1681,6 +1719,140 @@ ${protocolsJson}
       var id = btn.getAttribute('data-protocol-id');
       var found = existingProtocols.find(function(p) { return p.id === id; });
       openEditor(found || { id: id });
+    });
+  });
+
+  // Archive button handlers (toggle inline confirmation)
+  var archiveButtons = document.querySelectorAll('.portal-archive-btn');
+  archiveButtons.forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      var card = btn.closest('.portal-card');
+      if (!card) return;
+      var confirmBox = card.querySelector('.portal-archive-confirm');
+      if (confirmBox) {
+        confirmBox.style.display = 'flex';
+      }
+    });
+  });
+
+  // Cancel archive button handlers
+  var cancelArchiveButtons = document.querySelectorAll('.portal-cancel-archive-btn');
+  cancelArchiveButtons.forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      var card = btn.closest('.portal-card');
+      if (!card) return;
+      var confirmBox = card.querySelector('.portal-archive-confirm');
+      if (confirmBox) {
+        confirmBox.style.display = 'none';
+      }
+    });
+  });
+
+  // Confirm archive button handlers
+  var confirmArchiveButtons = document.querySelectorAll('.portal-confirm-archive-btn');
+  confirmArchiveButtons.forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      var protoId = btn.getAttribute('data-protocol-id');
+      if (!protoId) return;
+      btn.disabled = true;
+      btn.textContent = '...';
+      fetch('/apps/protocols?action=archive&id=' + encodeURIComponent(protoId), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
+        body: '{}'
+      })
+      .then(function(res) {
+        return res.json().catch(function() { return null; }).then(function(data) {
+          if (!res.ok) {
+            var msg = (data && (data.error || data.message)) || ('Archive failed (' + res.status + ')');
+            throw new Error(msg);
+          }
+          return data;
+        });
+      })
+      .then(function() {
+        window.location.reload();
+      })
+      .catch(function(err) {
+        btn.disabled = false;
+        btn.textContent = 'Confirm';
+        showGlobalError(err.message || 'Unable to archive protocol.');
+      });
+    });
+  });
+
+  // Restore protocol handlers
+  var restoreButtons = document.querySelectorAll('.portal-restore-btn');
+  restoreButtons.forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      var protoId = btn.getAttribute('data-protocol-id');
+      if (!protoId) return;
+      btn.disabled = true;
+      btn.textContent = '...';
+      fetch('/apps/protocols?action=restore&id=' + encodeURIComponent(protoId), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
+        body: '{}'
+      })
+      .then(function(res) {
+        return res.json().catch(function() { return null; }).then(function(data) {
+          if (!res.ok) {
+            var msg = (data && (data.error || data.message)) || ('Restore failed (' + res.status + ')');
+            throw new Error(msg);
+          }
+          return data;
+        });
+      })
+      .then(function() {
+        window.location.reload();
+      })
+      .catch(function(err) {
+        btn.disabled = false;
+        btn.textContent = 'Restore';
+        showGlobalError(err.message || 'Unable to restore protocol.');
+      });
+    });
+  });
+
+  // Duplicate protocol handlers ("Use as template")
+  var duplicateButtons = document.querySelectorAll('.portal-duplicate-btn');
+  duplicateButtons.forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      var protoId = btn.getAttribute('data-protocol-id');
+      if (!protoId) return;
+      btn.disabled = true;
+      btn.textContent = '...';
+      fetch('/apps/protocols?action=duplicate&id=' + encodeURIComponent(protoId), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
+        body: '{}'
+      })
+      .then(function(res) {
+        return res.json().catch(function() { return null; }).then(function(data) {
+          if (!res.ok) {
+            var msg = (data && (data.error || data.message)) || ('Duplicate failed (' + res.status + ')');
+            throw new Error(msg);
+          }
+          return data;
+        });
+      })
+      .then(function() {
+        window.location.reload();
+      })
+      .catch(function(err) {
+        btn.disabled = false;
+        btn.textContent = 'Use as template';
+        showGlobalError(err.message || 'Unable to duplicate protocol.');
+      });
     });
   });
 

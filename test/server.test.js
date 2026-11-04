@@ -498,6 +498,11 @@ describe('Server & Configuration Hardening (server.js, shopify.app.toml, README.
   });
 
   describe('Database Migration Runner (scripts/migrate.js)', () => {
+    it('includes 20261104_add_product_handle_to_protocol_line migration in MIGRATION_FILES', () => {
+      const hasProductHandleMigration = MIGRATION_FILES.some(f => f.includes('20261104_add_product_handle_to_protocol_line'));
+      assert.equal(hasProductHandleMigration, true, '20261104_add_product_handle_to_protocol_line must be registered in MIGRATION_FILES');
+    });
+
     it('throws when DATABASE_URL is not set and no client is passed', async () => {
       await assert.rejects(
         () => runMigrations({ databaseUrl: '' }),
@@ -550,7 +555,7 @@ describe('Server & Configuration Hardening (server.js, shopify.app.toml, README.
             ledgerRows.push({ id: params[0] });
             return { rows: [] };
           }
-          if (typeof sql === 'string' && (sql.includes('CREATE TABLE "Protocol"') || sql.includes('ProcessedWebhook') || sql.includes('allowSelfEnrol'))) {
+          if (typeof sql === 'string' && (sql.includes('CREATE TABLE "Protocol"') || sql.includes('ProcessedWebhook') || sql.includes('allowSelfEnrol') || sql.includes('productHandle'))) {
             executedMigrations.push(sql);
           }
           return { rows: [] };

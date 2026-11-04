@@ -740,15 +740,17 @@ export function createRequestListener(options = {}) {
         const webReq = await toWebRequest(req);
         const webRes = await handleAppProxyRequest(pool, webReq, {
           apiSecret,
-          variantResolver: createFakeVariantResolver({
-            'gid://shopify/ProductVariant/101': {
-              productTitle: 'Hydrating Daily Cleanser',
-              variantTitle: '200ml Bottle',
-              price: '34.00',
-              currency: 'USD',
-              availableForSale: true,
-            },
-          }),
+          variantResolver: pool
+            ? undefined
+            : createFakeVariantResolver({
+                'gid://shopify/ProductVariant/101': {
+                  productTitle: 'Hydrating Daily Cleanser',
+                  variantTitle: '200ml Bottle',
+                  price: '34.00',
+                  currency: 'USD',
+                  availableForSale: true,
+                },
+              }),
         });
 
         res.writeHead(webRes.status, Object.fromEntries(webRes.headers.entries()));

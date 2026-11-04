@@ -584,6 +584,7 @@ export function prepareProtocolEditorPayload(input, { isUpdate = false, isAdmin 
   if (Array.isArray(payload.lines)) {
     payload.lines = payload.lines.map((line, idx) => ({
       variantGid: line.variantGid,
+      productHandle: line.productHandle || null,
       quantity: line.quantity,
       usageNote: line.usageNote || '',
       position: idx
@@ -1441,7 +1442,7 @@ export function renderPortalLiquid(options = {}) {
     </div>
     <div class="portal-modal-footer">
       <div id="protocol-editor-summary" style="font-size: 0.875rem; color: #4b5563; font-weight: 500;">
-        <span id="protocol-editor-count">0 / 20 items</span> &middot; <span id="protocol-editor-total">$0.00</span>
+        <span id="protocol-editor-count">0 / 20 items</span> &middot; <span id="protocol-editor-total"></span>
       </div>
       <div style="display: flex; gap: 0.5rem;">
         <button type="button" class="portal-btn portal-btn-secondary" id="protocol-editor-cancel-btn">Cancel</button>
@@ -1476,6 +1477,40 @@ ${protocolsJson}
 
   var currentEditingProtocolId = null;
   var selectedLines = [];
+  var searchDebounceTimer = null;
+
+  var liquidCurrency = (function() {
+    var raw = '{{ cart.currency.iso_code | json }}';
+    if (raw && raw.indexOf('{') === -1) {
+      try { return JSON.parse(raw); } catch (e) { return raw; }
+    }
+    return '';
+  })();
+
+  function formatMoney(minorUnits) {
+    var num = typeof minorUnits === 'number' ? minorUnits : parseFloat(minorUnits);
+    if (isNaN(num)) return '';
+    var major = num / 100;
+    var cur = (window.Shopify && window.Shopify.currency && window.Shopify.currency.active) || liquidCurrency || '';
+    if (cur) {
+      try {
+        var lang = (document.documentElement && document.documentElement.lang) || undefined;
+        return new Intl.NumberFormat(lang, { style: 'currency', currency: cur }).format(major);
+      } catch (e) {}
+    }
+    return major.toFixed(2);
+  }
+
+  if (totalEl) {
+    totalEl.textContent = formatMoney(0);
+  }
+
+  function clearElement(el) {
+    if (!el) return;
+    while (el.firstChild) {
+      el.removeChild(el.firstChild);
+    }
+  }
 
   function showError(msg) {
     if (!errorBox) return;
@@ -1497,18 +1532,44 @@ ${protocolsJson}
     introInput.value = proto ? (proto.introNote || '') : '';
     searchInput.value = '';
     searchDropdown.style.display = 'none';
-    searchDropdown.innerHTML = '';
+    clearElement(searchDropdown);
 
     selectedLines = [];
     if (proto && Array.isArray(proto.lines)) {
       selectedLines = proto.lines.map(function(l) {
         return {
           variantGid: l.variantGid,
-          title: l.title || l.productTitle || 'Product',
-          price: parseFloat(l.price || '0') || 0,
+          productHandle: l.productHandle || null,
+          title: l.title || l.productTitle || (l.productHandle ? l.productHandle : 'Product'),
+          price: typeof l.price === 'number' ? l.price : (parseFloat(l.price || '0') || 0),
           quantity: l.quantity || 1,
           usageNote: l.usageNote || ''
         };
+      });
+
+      // Hydrate missing line details in editor if productHandle is available
+      selectedLines.forEach(function(line) {
+        if (line.productHandle && (!line.title || line.title === 'Product' || line.title === line.productHandle)) {
+          fetch('/products/' + encodeURIComponent(line.productHandle) + '.js', {
+            headers: { 'Accept': 'application/json' }
+          })
+          .then(function(res) { return res.ok ? res.json() : null; })
+          .then(function(prod) {
+            if (!prod) return;
+            var normId = String(line.variantGid).replace(/^gid:\/\/shopify\/ProductVariant\//, '');
+            var v = (prod.variants || []).find(function(item) {
+              return String(item.id) === normId || ('gid://shopify/ProductVariant/' + item.id) === line.variantGid;
+            });
+            if (v) {
+              var vTitle = v.title && v.title !== 'Default Title' ? v.title : '';
+              line.title = (prod.title || 'Product') + (vTitle ? ' - ' + vTitle : '');
+              var priceCents = typeof v.price === 'number' ? v.price : (parseFloat(v.price || '0') * 100);
+              line.price = priceCents / 100;
+              renderSelectedLines();
+            }
+          })
+          .catch(function() {});
+        }
       });
     }
 
@@ -1522,32 +1583,66 @@ ${protocolsJson}
   }
 
   function renderSelectedLines() {
+    clearElement(linesContainer);
     if (selectedLines.length === 0) {
-      linesContainer.innerHTML = '';
       if (emptyMsg) {
         linesContainer.appendChild(emptyMsg);
         emptyMsg.style.display = 'block';
       }
     } else {
-      linesContainer.innerHTML = '';
       selectedLines.forEach(function(line, idx) {
         var card = document.createElement('div');
         card.className = 'portal-line-item';
         card.setAttribute('data-variant-gid', line.variantGid);
 
-        card.innerHTML = 
-          '<div class="portal-line-header">' +
-            '<span class="portal-line-title">' + (line.title || 'Product') + ' - $' + (line.price ? line.price.toFixed(2) : '0.00') + '</span>' +
-            '<button type="button" class="portal-line-remove-btn" data-index="' + idx + '" aria-label="Remove item">&times;</button>' +
-          '</div>' +
-          '<div class="portal-line-inputs">' +
-            '<div style="display:flex; align-items:center; gap:0.25rem;">' +
-              '<label style="font-size:0.75rem; color:#6b7280;">Qty:</label>' +
-              '<input type="number" min="1" max="10" value="' + (line.quantity || 1) + '" class="portal-form-input portal-line-qty" data-index="' + idx + '">' +
-            '</div>' +
-            '<input type="text" maxlength="200" value="' + (line.usageNote || '') + '" class="portal-form-input portal-line-note" data-index="' + idx + '" placeholder="Instructions (e.g. 1 with food)">' +
-          '</div>';
+        var header = document.createElement('div');
+        header.className = 'portal-line-header';
 
+        var titleSpan = document.createElement('span');
+        titleSpan.className = 'portal-line-title';
+        var priceStr = typeof line.price === 'number' ? ' - ' + formatMoney(Math.round(line.price * 100)) : '';
+        titleSpan.textContent = (line.title || 'Product') + priceStr;
+        header.appendChild(titleSpan);
+
+        var removeBtn = document.createElement('button');
+        removeBtn.type = 'button';
+        removeBtn.className = 'portal-line-remove-btn';
+        removeBtn.setAttribute('data-index', String(idx));
+        removeBtn.setAttribute('aria-label', 'Remove item');
+        removeBtn.textContent = '×';
+        header.appendChild(removeBtn);
+        card.appendChild(header);
+
+        var inputsDiv = document.createElement('div');
+        inputsDiv.className = 'portal-line-inputs';
+
+        var qtyWrap = document.createElement('div');
+        qtyWrap.style.cssText = 'display:flex; align-items:center; gap:0.25rem;';
+        var qtyLabel = document.createElement('label');
+        qtyLabel.style.cssText = 'font-size:0.75rem; color:#6b7280;';
+        qtyLabel.textContent = 'Qty:';
+        qtyWrap.appendChild(qtyLabel);
+
+        var qtyInput = document.createElement('input');
+        qtyInput.type = 'number';
+        qtyInput.min = '1';
+        qtyInput.max = '10';
+        qtyInput.value = String(line.quantity || 1);
+        qtyInput.className = 'portal-form-input portal-line-qty';
+        qtyInput.setAttribute('data-index', String(idx));
+        qtyWrap.appendChild(qtyInput);
+        inputsDiv.appendChild(qtyWrap);
+
+        var noteInput = document.createElement('input');
+        noteInput.type = 'text';
+        noteInput.maxLength = 200;
+        noteInput.value = line.usageNote || '';
+        noteInput.className = 'portal-form-input portal-line-note';
+        noteInput.setAttribute('data-index', String(idx));
+        noteInput.placeholder = 'Instructions (e.g. 1 with food)';
+        inputsDiv.appendChild(noteInput);
+
+        card.appendChild(inputsDiv);
         linesContainer.appendChild(card);
       });
     }
@@ -1563,7 +1658,7 @@ ${protocolsJson}
     selectedLines.forEach(function(l) {
       total += (l.price || 0) * (l.quantity || 1);
     });
-    totalEl.textContent = '$' + total.toFixed(2);
+    totalEl.textContent = formatMoney(Math.round(total * 100));
   }
 
   // Open Create Protocol
@@ -1618,72 +1713,265 @@ ${protocolsJson}
     }
   });
 
-  // Product Search handler
-  function performSearch() {
-    var query = (searchInput.value || '').trim();
-    if (!query) return;
+  // Product Search handler with debounce and suggest.json
+  function performSearch(query) {
+    var q = (typeof query === 'string' ? query : (searchInput.value || '')).trim();
+    if (q.length < 2) {
+      searchDropdown.style.display = 'none';
+      clearElement(searchDropdown);
+      return;
+    }
 
-    searchBtn.disabled = true;
-    searchBtn.textContent = '...';
+    if (searchBtn) {
+      searchBtn.disabled = true;
+      searchBtn.textContent = '...';
+    }
 
-    fetch('/apps/protocols?action=search&q=' + encodeURIComponent(query), {
+    clearElement(searchDropdown);
+    var loadingDiv = document.createElement('div');
+    loadingDiv.style.cssText = 'padding:0.75rem; color:#6b7280; font-size:0.875rem;';
+    loadingDiv.textContent = 'Searching...';
+    searchDropdown.appendChild(loadingDiv);
+    searchDropdown.style.display = 'block';
+
+    var suggestUrl = '/search/suggest.json?resources[type]=product&resources[limit]=10&resources[options][unavailable_products]=show&q=' + encodeURIComponent(q);
+
+    fetch(suggestUrl, {
       headers: { 'Accept': 'application/json' }
     })
     .then(function(res) {
-      if (!res.ok) throw new Error('Search failed');
+      if (!res.ok) {
+        throw new Error('Search failed');
+      }
       return res.json();
     })
     .then(function(data) {
-      searchBtn.disabled = false;
-      searchBtn.textContent = 'Search';
-      var products = data.products || [];
+      if (searchBtn) {
+        searchBtn.disabled = false;
+        searchBtn.textContent = 'Search';
+      }
+      clearElement(searchDropdown);
+
+      var products = [];
+      if (data && data.resources && data.resources.results && Array.isArray(data.resources.results.products)) {
+        products = data.resources.results.products;
+      } else if (data && Array.isArray(data.products)) {
+        products = data.products;
+      }
 
       if (products.length === 0) {
-        searchDropdown.innerHTML = '<div style="padding:0.75rem; color:#6b7280; font-size:0.875rem;">No matching products found.</div>';
+        var emptyDiv = document.createElement('div');
+        emptyDiv.style.cssText = 'padding:0.75rem; color:#6b7280; font-size:0.875rem;';
+        emptyDiv.textContent = 'No matching products found.';
+        searchDropdown.appendChild(emptyDiv);
         searchDropdown.style.display = 'block';
         return;
       }
 
-      searchDropdown.innerHTML = '';
       products.forEach(function(prod) {
-        (prod.variants || []).forEach(function(v) {
-          var item = document.createElement('div');
-          item.className = 'portal-search-item';
-          item.innerHTML = 
-            '<div>' +
-              '<div class="portal-search-item-title">' + (v.displayTitle || prod.title) + '</div>' +
-              '<div class="portal-search-item-meta">' + (v.priceFormatted || ('$' + v.price)) + '</div>' +
-            '</div>' +
-            '<button type="button" class="portal-btn portal-btn-secondary" style="font-size:0.75rem; padding:0.25rem 0.5rem;">+ Add</button>';
+        var item = document.createElement('div');
+        item.className = 'portal-search-item';
+        item.style.cursor = 'pointer';
 
-          item.addEventListener('click', function() {
-            addVariant(v, prod.title);
-          });
+        var infoDiv = document.createElement('div');
+        var titleDiv = document.createElement('div');
+        titleDiv.className = 'portal-search-item-title';
+        titleDiv.textContent = prod.title || 'Untitled Product';
+        infoDiv.appendChild(titleDiv);
 
-          searchDropdown.appendChild(item);
+        if (prod.price) {
+          var metaDiv = document.createElement('div');
+          metaDiv.className = 'portal-search-item-meta';
+          var minor = typeof prod.price === 'string' ? Math.round(parseFloat(prod.price) * 100) : prod.price;
+          metaDiv.textContent = formatMoney(minor);
+          infoDiv.appendChild(metaDiv);
+        }
+
+        item.appendChild(infoDiv);
+
+        var selectBtn = document.createElement('button');
+        selectBtn.type = 'button';
+        selectBtn.className = 'portal-btn portal-btn-secondary';
+        selectBtn.style.cssText = 'font-size:0.75rem; padding:0.25rem 0.5rem;';
+        selectBtn.textContent = 'Select';
+        item.appendChild(selectBtn);
+
+        item.addEventListener('click', function() {
+          selectProduct(prod);
         });
+
+        searchDropdown.appendChild(item);
       });
 
       searchDropdown.style.display = 'block';
     })
     .catch(function(err) {
-      searchBtn.disabled = false;
-      searchBtn.textContent = 'Search';
+      if (searchBtn) {
+        searchBtn.disabled = false;
+        searchBtn.textContent = 'Search';
+      }
+      clearElement(searchDropdown);
+      var errDiv = document.createElement('div');
+      errDiv.style.cssText = 'padding:0.75rem; color:#dc2626; font-size:0.875rem;';
+      errDiv.textContent = 'Search failed. Please try again.';
+      searchDropdown.appendChild(errDiv);
+      searchDropdown.style.display = 'block';
       console.error('[Protocol Portal] Search error:', err);
     });
   }
 
-  if (searchBtn) searchBtn.addEventListener('click', performSearch);
-  if (searchInput) {
-    searchInput.addEventListener('keydown', function(e) {
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        performSearch();
+  function selectProduct(prod) {
+    clearElement(searchDropdown);
+    var loadingDiv = document.createElement('div');
+    loadingDiv.style.cssText = 'padding:0.75rem; color:#6b7280; font-size:0.875rem;';
+    loadingDiv.textContent = 'Loading variants...';
+    searchDropdown.appendChild(loadingDiv);
+
+    var handle = prod.handle;
+    if (!handle) {
+      if (prod.variants && prod.variants.length > 0) {
+        displayVariants(prod, prod.variants, '');
+        return;
+      }
+      showError('Product handle not found.');
+      searchDropdown.style.display = 'none';
+      return;
+    }
+
+    fetch('/products/' + encodeURIComponent(handle) + '.js', {
+      headers: { 'Accept': 'application/json' }
+    })
+    .then(function(res) {
+      if (!res.ok) throw new Error('Failed to load product details');
+      return res.json();
+    })
+    .then(function(fullProd) {
+      displayVariants(fullProd, fullProd.variants || [], handle);
+    })
+    .catch(function() {
+      // Fallback: if product had variants attached
+      if (prod.variants && prod.variants.length > 0) {
+        displayVariants(prod, prod.variants, handle);
+      } else {
+        clearElement(searchDropdown);
+        var errDiv = document.createElement('div');
+        errDiv.style.cssText = 'padding:0.75rem; color:#dc2626; font-size:0.875rem;';
+        errDiv.textContent = 'Could not load variants for this product.';
+        searchDropdown.appendChild(errDiv);
       }
     });
   }
 
-  function addVariant(v, prodTitle) {
+  function displayVariants(fullProd, variants, handle) {
+    clearElement(searchDropdown);
+
+    var header = document.createElement('div');
+    header.style.cssText = 'padding:0.5rem 0.875rem; font-weight:600; font-size:0.8125rem; color:#374151; background:#f9fafb; border-bottom:1px solid #e5e7eb; display:flex; justify-content:space-between; align-items:center;';
+    var headerTitle = document.createElement('span');
+    headerTitle.textContent = fullProd.title || 'Select Variant';
+    header.appendChild(headerTitle);
+
+    var backBtn = document.createElement('button');
+    backBtn.type = 'button';
+    backBtn.style.cssText = 'background:none; border:none; color:#047857; cursor:pointer; font-size:0.75rem; padding:0;';
+    backBtn.textContent = '← Back';
+    backBtn.addEventListener('click', function(e) {
+      e.stopPropagation();
+      performSearch((searchInput.value || '').trim());
+    });
+    header.appendChild(backBtn);
+    searchDropdown.appendChild(header);
+
+    if (!variants || variants.length === 0) {
+      var noVarDiv = document.createElement('div');
+      noVarDiv.style.cssText = 'padding:0.75rem; color:#6b7280; font-size:0.875rem;';
+      noVarDiv.textContent = 'No variants found for this product.';
+      searchDropdown.appendChild(noVarDiv);
+      return;
+    }
+
+    variants.forEach(function(v) {
+      var item = document.createElement('div');
+      item.className = 'portal-search-item';
+
+      var info = document.createElement('div');
+      var vTitle = document.createElement('div');
+      vTitle.className = 'portal-search-item-title';
+      var titleText = v.title && v.title !== 'Default Title' ? v.title : (fullProd.title || 'Default');
+      vTitle.textContent = titleText;
+      info.appendChild(vTitle);
+
+      var meta = document.createElement('div');
+      meta.className = 'portal-search-item-meta';
+      var priceCents = typeof v.price === 'number' ? v.price : Math.round(parseFloat(v.price || '0') * 100);
+      var priceFormatted = formatMoney(priceCents);
+      meta.textContent = priceFormatted + (v.available === false ? ' (Out of stock)' : '');
+      info.appendChild(meta);
+
+      item.appendChild(info);
+
+      var addBtn = document.createElement('button');
+      addBtn.type = 'button';
+      var isAvail = v.available !== false;
+      addBtn.className = 'portal-btn ' + (isAvail ? 'portal-btn-secondary' : 'portal-btn-disabled');
+      addBtn.style.cssText = 'font-size:0.75rem; padding:0.25rem 0.5rem;';
+      addBtn.textContent = isAvail ? '+ Add' : 'Unavailable';
+      if (!isAvail) {
+        addBtn.disabled = true;
+        addBtn.setAttribute('aria-disabled', 'true');
+      } else {
+        addBtn.addEventListener('click', function(e) {
+          e.stopPropagation();
+          var gid = typeof v.id === 'string' && v.id.startsWith('gid://')
+            ? v.id
+            : ('gid://shopify/ProductVariant/' + v.id);
+          var lineTitle = (fullProd.title || 'Product') + (v.title && v.title !== 'Default Title' ? ' - ' + v.title : '');
+          addVariant({
+            id: gid,
+            productHandle: handle || fullProd.handle || null,
+            title: lineTitle,
+            price: priceCents / 100
+          });
+        });
+      }
+
+      item.appendChild(addBtn);
+      searchDropdown.appendChild(item);
+    });
+  }
+
+  // Debounced input search (min 2 chars, 300ms)
+  if (searchInput) {
+    searchInput.addEventListener('input', function() {
+      clearTimeout(searchDebounceTimer);
+      var q = (searchInput.value || '').trim();
+      if (q.length < 2) {
+        searchDropdown.style.display = 'none';
+        clearElement(searchDropdown);
+        return;
+      }
+      searchDebounceTimer = setTimeout(function() {
+        performSearch(q);
+      }, 300);
+    });
+
+    searchInput.addEventListener('keydown', function(e) {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        clearTimeout(searchDebounceTimer);
+        performSearch((searchInput.value || '').trim());
+      }
+    });
+  }
+
+  if (searchBtn) {
+    searchBtn.addEventListener('click', function() {
+      clearTimeout(searchDebounceTimer);
+      performSearch((searchInput.value || '').trim());
+    });
+  }
+
+  function addVariant(v) {
     clearError();
     if (selectedLines.length >= 20) {
       showError('A protocol cannot exceed 20 product lines.');
@@ -1697,13 +1985,15 @@ ${protocolsJson}
 
     selectedLines.push({
       variantGid: v.id,
-      title: v.displayTitle || prodTitle,
-      price: parseFloat(v.price || '0') || 0,
+      productHandle: v.productHandle || null,
+      title: v.title,
+      price: v.price || 0,
       quantity: 1,
       usageNote: ''
     });
 
     searchDropdown.style.display = 'none';
+    clearElement(searchDropdown);
     searchInput.value = '';
     renderSelectedLines();
   }
@@ -1743,6 +2033,7 @@ ${protocolsJson}
         lines: selectedLines.map(function(l) {
           return {
             variantGid: l.variantGid,
+            productHandle: l.productHandle || null,
             quantity: l.quantity || 1,
             usageNote: (l.usageNote || '').trim()
           };
@@ -1753,8 +2044,10 @@ ${protocolsJson}
       saveBtn.textContent = 'Saving...';
 
       var endpoint = '/apps/protocols';
-      var method = currentEditingProtocolId ? 'PUT' : 'POST';
-      var url = currentEditingProtocolId ? (endpoint + '?action=update&id=' + encodeURIComponent(currentEditingProtocolId)) : (endpoint + '?action=create');
+      var method = 'POST';
+      var url = currentEditingProtocolId
+        ? (endpoint + '?action=update&id=' + encodeURIComponent(currentEditingProtocolId))
+        : (endpoint + '?action=create');
 
       fetch(url, {
         method: method,

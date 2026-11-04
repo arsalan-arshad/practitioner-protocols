@@ -656,17 +656,30 @@ export function renderProtocolLiquid({ protocol, practiceName = '', isLoggedInPr
   const linesMarkup = lines.map((line) => {
     const rawVariant = line.variantGid || line.variantId || line.id || '';
     const normVariantId = normalizeVariantId(rawVariant);
+    const productHandle = line.productHandle ? String(line.productHandle).trim() : '';
     const quantity = (typeof line.quantity === 'number' && Number.isInteger(line.quantity) && line.quantity >= 1)
       ? line.quantity
       : 1;
     const usageNote = line.usageNote ? String(line.usageNote).trim() : '';
-    const title = line.title || line.productTitle || line.name || 'Recommended Product';
+
+    // Check if enriched server-side (demo/test mode or GraphQL)
+    const isEnriched = Boolean(line.title || line.productTitle);
+    const hasHandle = Boolean(productHandle);
+
+    // If neither enriched server-side nor has productHandle, it cannot be resolved -> missing/unavailable
+    const isMissingProduct = !isEnriched && !hasHandle;
+    const isAvailable = !isMissingProduct && (line.available !== false && line.inStock !== false);
+
+    const title = isMissingProduct
+      ? 'Product no longer available'
+      : (line.title || line.productTitle || line.name || (hasHandle ? 'Loading product...' : 'Recommended Product'));
     const variantTitle = line.variantTitle || '';
     const price = line.priceFormatted || line.price || '';
-    const isAvailable = line.available !== false && line.inStock !== false;
 
     clientItems.push({
       id: normVariantId,
+      variantGid: line.variantGid || (normVariantId ? `gid://shopify/ProductVariant/${normVariantId}` : ''),
+      productHandle,
       quantity,
       available: isAvailable,
       usageNote
@@ -678,14 +691,19 @@ export function renderProtocolLiquid({ protocol, practiceName = '', isLoggedInPr
     const safeUsage = escapeHtml(usageNote);
 
     return `
-    <div class="protocol-line-card ${isAvailable ? '' : 'protocol-line-unavailable'}" data-variant-id="${escapeHtml(normVariantId)}">
+    <div class="protocol-line-card ${isAvailable ? '' : 'protocol-line-unavailable'}"
+      data-variant-id="${escapeHtml(normVariantId)}"
+      data-variant-gid="${escapeHtml(line.variantGid || '')}"
+      data-product-handle="${escapeHtml(productHandle)}"
+      data-quantity="${quantity}"
+      data-usage="${safeUsage}">
       <div class="protocol-line-details">
         <h3 class="protocol-line-title">${safeTitle}</h3>
         <div class="protocol-line-meta">
           ${safeVariant ? `<span class="protocol-line-variant">${safeVariant}</span>` : ''}
           ${safePrice ? `<span class="protocol-line-price">${safePrice}</span>` : ''}
           <span class="protocol-line-qty">Qty: ${quantity}</span>
-          ${!isAvailable ? `<span class="protocol-badge protocol-badge-unavailable">Out of stock</span>` : ''}
+          ${isMissingProduct ? `<span class="protocol-badge protocol-badge-unavailable">Product no longer available</span>` : (!isAvailable ? `<span class="protocol-badge protocol-badge-unavailable">Out of stock</span>` : '')}
         </div>
         ${safeUsage ? `<div class="protocol-line-usage"><strong>Instructions:</strong> ${safeUsage}</div>` : ''}
       </div>
@@ -695,6 +713,7 @@ export function renderProtocolLiquid({ protocol, practiceName = '', isLoggedInPr
           data-variant-id="${escapeHtml(normVariantId)}"
           data-quantity="${quantity}"
           data-usage="${safeUsage}"
+          ${hasHandle ? 'disabled aria-disabled="true"' : ''}
           aria-label="Add ${safeTitle} to cart">
           Add
         </button>` : `
@@ -708,6 +727,8 @@ export function renderProtocolLiquid({ protocol, practiceName = '', isLoggedInPr
 
   const totalLines = lines.length;
   const inStockCount = clientItems.filter((i) => i.available).length;
+  const hasPendingHydration = lines.some((l) => Boolean(l.productHandle));
+  const addAllDisabled = inStockCount === 0 || hasPendingHydration;
 
   const protocolDataJson = JSON.stringify({
     protocolId: rawId,
@@ -735,7 +756,7 @@ export function renderProtocolLiquid({ protocol, practiceName = '', isLoggedInPr
       ${totalLines} ${totalLines === 1 ? 'item' : 'items'} recommended
     </div>
     <button type="button" class="protocol-btn protocol-btn-primary protocol-add-all-btn" id="protocol-add-all-btn"
-      ${inStockCount === 0 ? 'disabled aria-disabled="true"' : ''}>
+      ${addAllDisabled ? 'disabled aria-disabled="true"' : ''}>
       Add all to cart
     </button>
   </div>
@@ -851,15 +872,237 @@ ${protocolDataJson}
     });
   }
 
-  var lineButtons = document.querySelectorAll('.protocol-line-add-btn');
-  lineButtons.forEach(function(btn) {
-    btn.addEventListener('click', function() {
+  function clearElement(el) {
+    if (!el) return;
+    while (el.firstChild) {
+      el.removeChild(el.firstChild);
+    }
+  }
+
+  // Event delegation for individual line Add buttons
+  var linesList = document.querySelector('.protocol-lines-list');
+  if (linesList) {
+    linesList.addEventListener('click', function(e) {
+      var btn = e.target && e.target.closest('.protocol-line-add-btn');
+      if (!btn || btn.disabled) return;
       var variantId = btn.getAttribute('data-variant-id');
       var quantity = parseInt(btn.getAttribute('data-quantity') || '1', 10);
       var usageNote = btn.getAttribute('data-usage') || '';
       addToCart([{ id: variantId, quantity: quantity, usageNote: usageNote }], btn, 'Added!');
     });
+  }
+
+  // Client-side hydration from /products/<handle>.js in production
+  var liquidCurrency = (function() {
+    var raw = '{{ cart.currency.iso_code | json }}';
+    if (raw && raw.indexOf('{') === -1) {
+      try { return JSON.parse(raw); } catch (e) { return raw; }
+    }
+    return '';
+  })();
+
+  function formatMoney(minorUnits) {
+    var num = typeof minorUnits === 'number' ? minorUnits : parseFloat(minorUnits);
+    if (isNaN(num)) return '';
+    var major = num / 100;
+    var cur = (window.Shopify && window.Shopify.currency && window.Shopify.currency.active) || liquidCurrency || '';
+    if (cur) {
+      try {
+        var lang = (document.documentElement && document.documentElement.lang) || undefined;
+        return new Intl.NumberFormat(lang, { style: 'currency', currency: cur }).format(major);
+      } catch (e) {}
+    }
+    return major.toFixed(2);
+  }
+
+  function findCardsByHandle(targetHandle) {
+    var cardsList = document.querySelectorAll('.protocol-line-card');
+    var matches = [];
+    for (var i = 0; i < cardsList.length; i++) {
+      if (cardsList[i].getAttribute('data-product-handle') === targetHandle) {
+        matches.push(cardsList[i]);
+      }
+    }
+    return matches;
+  }
+
+  var cards = document.querySelectorAll('.protocol-line-card[data-product-handle]');
+  var handlesToFetch = {};
+  cards.forEach(function(card) {
+    var h = card.getAttribute('data-product-handle');
+    if (h && h.trim()) {
+      handlesToFetch[h.trim()] = true;
+    }
   });
+
+  var uniqueHandles = Object.keys(handlesToFetch);
+  if (uniqueHandles.length > 0) {
+    var fetchPromises = uniqueHandles.map(function(handle) {
+      return fetch('/products/' + encodeURIComponent(handle) + '.js', {
+        headers: { 'Accept': 'application/json' }
+      })
+      .then(function(res) {
+        if (!res.ok) throw new Error('Product not found: ' + handle);
+        return res.json();
+      })
+      .then(function(product) {
+        var matchingCards = findCardsByHandle(handle);
+        matchingCards.forEach(function(card) {
+          var varId = card.getAttribute('data-variant-id');
+          var varGid = card.getAttribute('data-variant-gid');
+          var variant = null;
+          if (product && Array.isArray(product.variants)) {
+            variant = product.variants.find(function(v) {
+              return String(v.id) === String(varId) || ('gid://shopify/ProductVariant/' + v.id) === varGid;
+            });
+          }
+
+          var titleEl = card.querySelector('.protocol-line-title');
+          var variantEl = card.querySelector('.protocol-line-variant');
+          var priceEl = card.querySelector('.protocol-line-price');
+          var badgeEl = card.querySelector('.protocol-badge');
+          var actionContainer = card.querySelector('.protocol-line-actions');
+
+          var itemInPayload = payload.items.find(function(i) {
+            return String(i.id) === String(varId) || (i.variantGid && i.variantGid === varGid);
+          });
+
+          if (!variant) {
+            card.classList.add('protocol-line-unavailable');
+            if (titleEl) titleEl.textContent = 'Product no longer available';
+            if (variantEl) variantEl.textContent = '';
+            if (priceEl) priceEl.textContent = '';
+            if (!badgeEl && card.querySelector('.protocol-line-meta')) {
+              badgeEl = document.createElement('span');
+              badgeEl.className = 'protocol-badge protocol-badge-unavailable';
+              card.querySelector('.protocol-line-meta').appendChild(badgeEl);
+            }
+            if (badgeEl) badgeEl.textContent = 'Product no longer available';
+            if (actionContainer) {
+              clearElement(actionContainer);
+              var disBtn = document.createElement('button');
+              disBtn.type = 'button';
+              disBtn.className = 'protocol-btn protocol-btn-disabled';
+              disBtn.disabled = true;
+              disBtn.setAttribute('aria-disabled', 'true');
+              disBtn.textContent = 'Unavailable';
+              actionContainer.appendChild(disBtn);
+            }
+            if (itemInPayload) itemInPayload.available = false;
+            return;
+          }
+
+          var vTitle = variant.title && variant.title !== 'Default Title' ? variant.title : '';
+          var fullTitle = (product.title || 'Product') + (vTitle ? ' - ' + vTitle : '');
+          if (titleEl) titleEl.textContent = fullTitle;
+          if (variantEl && vTitle) variantEl.textContent = vTitle;
+
+          var priceMinor = typeof variant.price === 'number' ? variant.price : 0;
+          if (priceEl) {
+            priceEl.textContent = formatMoney(priceMinor);
+          } else {
+            var metaEl = card.querySelector('.protocol-line-meta');
+            if (metaEl) {
+              var newPrice = document.createElement('span');
+              newPrice.className = 'protocol-line-price';
+              newPrice.textContent = formatMoney(priceMinor);
+              metaEl.insertBefore(newPrice, metaEl.firstChild);
+            }
+          }
+
+          var isAvail = variant.available === true;
+          if (itemInPayload) itemInPayload.available = isAvail;
+
+          if (isAvail) {
+            card.classList.remove('protocol-line-unavailable');
+            if (badgeEl) badgeEl.remove();
+            if (actionContainer) {
+              clearElement(actionContainer);
+              var addBtn = document.createElement('button');
+              addBtn.type = 'button';
+              addBtn.className = 'protocol-btn protocol-btn-secondary protocol-line-add-btn';
+              addBtn.setAttribute('data-variant-id', String(varId));
+              addBtn.setAttribute('data-quantity', card.getAttribute('data-quantity') || (itemInPayload ? String(itemInPayload.quantity) : '1'));
+              addBtn.setAttribute('data-usage', card.getAttribute('data-usage') || (itemInPayload ? itemInPayload.usageNote : ''));
+              addBtn.setAttribute('aria-label', 'Add ' + fullTitle + ' to cart');
+              addBtn.textContent = 'Add';
+              actionContainer.appendChild(addBtn);
+
+              var errDiv = document.createElement('div');
+              errDiv.className = 'protocol-line-error';
+              errDiv.style.display = 'none';
+              errDiv.setAttribute('role', 'alert');
+              actionContainer.appendChild(errDiv);
+            }
+          } else {
+            card.classList.add('protocol-line-unavailable');
+            if (!badgeEl && card.querySelector('.protocol-line-meta')) {
+              badgeEl = document.createElement('span');
+              badgeEl.className = 'protocol-badge protocol-badge-unavailable';
+              card.querySelector('.protocol-line-meta').appendChild(badgeEl);
+            }
+            if (badgeEl) badgeEl.textContent = 'Out of stock';
+            if (actionContainer) {
+              clearElement(actionContainer);
+              var disBtn = document.createElement('button');
+              disBtn.type = 'button';
+              disBtn.className = 'protocol-btn protocol-btn-disabled';
+              disBtn.disabled = true;
+              disBtn.setAttribute('aria-disabled', 'true');
+              disBtn.textContent = 'Unavailable';
+              actionContainer.appendChild(disBtn);
+            }
+          }
+        });
+      })
+      .catch(function() {
+        var matchingCards = findCardsByHandle(handle);
+        matchingCards.forEach(function(card) {
+          card.classList.add('protocol-line-unavailable');
+          var titleEl = card.querySelector('.protocol-line-title');
+          if (titleEl) titleEl.textContent = 'Product no longer available';
+          var metaEl = card.querySelector('.protocol-line-meta');
+          var badgeEl = card.querySelector('.protocol-badge');
+          if (!badgeEl && metaEl) {
+            badgeEl = document.createElement('span');
+            badgeEl.className = 'protocol-badge protocol-badge-unavailable';
+            metaEl.appendChild(badgeEl);
+          }
+          if (badgeEl) badgeEl.textContent = 'Product no longer available';
+          var actionContainer = card.querySelector('.protocol-line-actions');
+          if (actionContainer) {
+            clearElement(actionContainer);
+            var disBtn = document.createElement('button');
+            disBtn.type = 'button';
+            disBtn.className = 'protocol-btn protocol-btn-disabled';
+            disBtn.disabled = true;
+            disBtn.setAttribute('aria-disabled', 'true');
+            disBtn.textContent = 'Unavailable';
+            actionContainer.appendChild(disBtn);
+          }
+          var varId = card.getAttribute('data-variant-id');
+          var varGid = card.getAttribute('data-variant-gid');
+          var itemInPayload = payload.items.find(function(i) {
+            return String(i.id) === String(varId) || (i.variantGid && i.variantGid === varGid);
+          });
+          if (itemInPayload) itemInPayload.available = false;
+        });
+      });
+    });
+
+    Promise.all(fetchPromises).finally(function() {
+      var availableItems = payload.items.filter(function(i) { return i.available !== false && i.id; });
+      if (addAllBtn) {
+        if (availableItems.length === 0) {
+          addAllBtn.disabled = true;
+          addAllBtn.setAttribute('aria-disabled', 'true');
+        } else {
+          addAllBtn.disabled = false;
+          addAllBtn.removeAttribute('aria-disabled');
+        }
+      }
+    });
+  }
 })();
 </script>`;
 }

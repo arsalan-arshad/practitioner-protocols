@@ -218,7 +218,8 @@ Enrolment is **never executed on a GET request**. It requires an explicit user P
 
 ### 6.3 Backend Validation for Protocol Create & Update
 When an approved practitioner calls `POST action=create` or `POST action=update`:
-- **Format Validation:** Each `variantGid` is validated against canonical format `^gid://shopify/ProductVariant/\d+$` and length limits ($\le 100$ characters). `productHandle` is validated against handle format.
+- **Format Validation:** Each `variantGid` is validated against canonical format `^gid://shopify/ProductVariant/\d+$` and length limits ($\le 100$ characters). `productHandle` is validated against handle format `^[a-z0-9][a-z0-9-]{0,254}$`.
+  - *Known limitation:* Products whose Shopify handle contains non-Latin characters cannot be added yet.
 - **Residual Risk:** Without `read_products` or Storefront API query access, the backend cannot verify whether a submitted `variantGid` actually exists in the merchant's store, is currently published, or is available for sale.
 - **Failure Mode:** If an invalid, removed, or foreign variant ID is saved, the error will manifest downstream when the client attempts to add the line to cart or view product details.
 

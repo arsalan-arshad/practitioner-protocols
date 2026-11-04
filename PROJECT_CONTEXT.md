@@ -1,6 +1,6 @@
 # Practitioner Protocols — Project Context (for Claude)
 
-_Snapshot: 2026-11-04 · Live Railway deployment active (`practitioner-protocols-production.up.railway.app`) with internal Postgres & ledger migrations · Production app record "Practitioner Protocols" released (v2, Public distribution) · Production hardening complete · Milestone M9a (Embedded Merchant Admin), M9b-1 (allowSelfEnrol Setting, Migration & Pending-Practitioner Admin Review) & M9b-2 (Storefront Self-Enrolment Flow, Portal States, and App Proxy CSRF Protection) implemented, pending live dev store verification · Spikes S2, S3, S4, S5 resolved; S1 resolved on the Plus dev store only; S6 candidate proposed (Spike open) · Brand assets v2 produced and verified (text-free App Store icon & feature image; code-composited README hero banner & social thumbnail; shopping-bag glyph eliminated) · 443 tests passing across 102 suites._
+_Snapshot: 2026-11-04 · Live Railway deployment active (`practitioner-protocols-production.up.railway.app`) with internal Postgres & ledger migrations · Production app record "Practitioner Protocols" released (v2, Public distribution) · Production hardening complete · Milestones M9a (Embedded Merchant Admin), M9b-1 (allowSelfEnrol Setting, Migration & Pending-Practitioner Admin Review) & M9b-2 (Storefront Self-Enrolment Flow, Portal States, and App Proxy CSRF Protection) verified live on dev store · Milestone M9b-3a (Catalog Search, Production Authoring & Client Page Hydration) implemented, pending live dev store verification · Spikes S2, S3, S4, S5, S6 resolved; S1 resolved on the Plus dev store only · Brand assets v2 produced and verified (text-free App Store icon & feature image; code-composited README hero banner & social thumbnail; shopping-bag glyph eliminated) · 464 tests passing across 105 suites._
 _Contains NO secrets. Never paste `.env` values or tokens into chat or docs._
 
 ## 1. What this is
@@ -867,6 +867,43 @@ Run the five spikes in a day or two on a dev store; write the answers into secti
   - Capture 3–6 real UI screenshots (1600 × 900 px) from the running app for App Store listing submission.
 - **Verification:**
   - All 443 unit tests passing across 102 suites (0 failures).
+
+## 42. Milestone M9b-3a: Catalog Search, Production Authoring & Client Page Hydration (2026-11-04)
+
+- **Objective:**
+  Implement Milestone M9b-3a (PR 3a) per `docs/M9B_DESIGN.md` §5, §6, §8 PR 3, following the Option A decision from Spike S6. Delivers production protocol authoring with client-side catalog search in the practitioner editor, client-side storefront hydration on the public protocol page, database schema persistence of `productHandle`, and removal of demo catalog resolvers from production. Protocol lifecycle operations (archive, restore, duplicate) are deferred to M9b-3b.
+- **Components & Implementation:**
+  1. **Schema & Migration:**
+     - Created migration `prisma/migrations/20261104_add_product_handle_to_protocol_line/migration.sql` executing `ALTER TABLE "ProtocolLine" ADD COLUMN IF NOT EXISTS "productHandle" TEXT;`.
+     - Registered migration in `scripts/migrate.js` (`MIGRATION_FILES`) to run with ledger tracking during deployment.
+     - Updated `model ProtocolLine` in `prisma/schema.prisma` with nullable `productHandle String?`.
+  2. **Validation & Data Layer (`app/lib/protocols/validation.js`, `service.js`):**
+     - Added `PRODUCT_HANDLE_PATTERN` (`^[a-z0-9][a-z0-9-]{0,254}$`) and `isValidProductHandle` validator, rejecting uppercase characters, slashes, directory traversals, spaces, and URL schemes. Known limitation: products whose Shopify handle contains non-Latin characters cannot be added yet.
+     - Enforced `variantGid` format (`^gid://shopify/ProductVariant/\d+$`) and sanitized `productHandle` persistence in `createProtocol`, `updateProtocol`, `getProtocolByToken`, `getProtocolById`, and `listProtocols`.
+     - Backward compatibility: existing rows with `null` `productHandle` are accepted and render "Product no longer available" rather than failing.
+     - Zero stored prices: price fields are not stored in the database.
+  3. **Practitioner Editor (`app/lib/protocols/portal.js`):**
+     - Integrated debounced (300ms, $\ge 2$ characters) product search calling storefront `GET /search/suggest.json?resources[type]=product&resources[limit]=10&resources[options][unavailable_products]=show&q=<encoded>`. On search failure, displays "Search failed. Please try again." with dead fallback removed.
+     - On product selection, queries `/products/<encodeURIComponent(handle)>.js` from storefront origin to enumerate variants with titles, availability, and prices formatted dynamically via client-side `formatMoney` helper using `Intl.NumberFormat` with Liquid `{{ cart.currency.iso_code | json }}` and `window.Shopify.currency.active` fallbacks (no hard-coded `$`).
+     - Unavailable variants are marked and disabled.
+     - Quantity stepper (1–10) and usage note input ($\le 200$ characters).
+     - Renders all remote catalog data strictly via DOM node creation and `textContent` (zero `innerHTML` or raw string interpolation).
+     - Persists protocol authoring payloads via JSON `POST /apps/protocols?action=create` and `action=update` protected by App Proxy HMAC and CSRF verification.
+  4. **Client Protocol Page Hydration (`app/lib/protocols/proxy.js`):**
+     - Server Liquid template outputs container markup and product cards annotated with `data-product-handle`, `data-variant-id`, and `data-variant-gid`.
+     - Anti-race protection: `#protocol-add-all-btn` and per-line Add buttons render disabled with `aria-disabled="true"` when lines contain `productHandle`, enabling only after client-side hydration completes if in-stock items remain.
+     - Hardened selector matching: replaces querySelector string interpolation with iterative attribute loops (`card.getAttribute('data-product-handle') === handle`).
+     - Injected client-side hydration script deduplicates product handles and fetches `/products/<handle>.js` from storefront origin.
+     - Dynamically populates variant titles, formatted prices (via `formatMoney`, zero hard-coded `$`), and availability via `textContent`.
+     - Missing or unpublished variants are flagged as "Product no longer available" and excluded from the "Add all to cart" batch payload.
+     - Retains single-tap Cart AJAX batching (`POST /cart/add.js`) carrying `_protocol_token`, `_protocol_id`, and `_protocol_usage`.
+  5. **Production Server Cleanup (`server.js`):**
+     - Removed `createFakeVariantResolver` from the production App Proxy route (`variantResolver: pool ? undefined : createFakeVariantResolver(...)`), guaranteeing that live storefront client pages hydrate solely from the store's active catalog.
+  6. **Automated Test Coverage:**
+     - 464 pure unit tests passing across 105 suites (`npm test`).
+     - Added comprehensive test suites in `test/validation.test.js`, `test/portal.test.js`, `test/proxy.test.js`, `test/routes.test.js`, and `test/server.test.js` verifying product handle validation, XSS and Liquid injection neutralization, client hydration attributes and currency formatting without hard-coded `$`, add-all and per-line button gating, hardened selector loops, App Proxy create/update route authorization (Rule 4 cross-owner 404 rejection and cross-shop isolation), and migration registration.
+  7. **Status:**
+     - Implemented, pending live dev-store verification.
 
 
 

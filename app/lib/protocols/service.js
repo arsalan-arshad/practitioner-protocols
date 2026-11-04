@@ -91,6 +91,7 @@ export async function listProtocols(db, { shop, user, status = 'active', include
             'id', pl.id,
             'position', pl.position,
             'variantGid', pl."variantGid",
+            'productHandle', pl."productHandle",
             'quantity', pl.quantity,
             'usageNote', pl."usageNote"
           ) ORDER BY pl.position ASC
@@ -151,6 +152,7 @@ export async function getProtocolByToken(db, { shop, token }) {
             'id', pl.id,
             'position', pl.position,
             'variantGid', pl."variantGid",
+            'productHandle', pl."productHandle",
             'quantity', pl.quantity,
             'usageNote', pl."usageNote"
           ) ORDER BY pl.position ASC
@@ -203,6 +205,7 @@ export async function getProtocolById(db, { shop, user, protocolId, action = 're
             'id', pl.id,
             'position', pl.position,
             'variantGid', pl."variantGid",
+            'productHandle', pl."productHandle",
             'quantity', pl.quantity,
             'usageNote', pl."usageNote"
           ) ORDER BY pl.position ASC
@@ -307,15 +310,16 @@ export async function createProtocol(db, { shop, user, input, isDuplicate = fals
         const line = sanitized.lines[pos];
         const insertLineSql = `
           INSERT INTO "ProtocolLine" (
-            "id", "protocolId", "position", "variantGid", "quantity", "usageNote", "createdAt", "updatedAt"
+            "id", "protocolId", "position", "variantGid", "productHandle", "quantity", "usageNote", "createdAt", "updatedAt"
           ) VALUES (
-            gen_random_uuid()::text, $1, $2, $3, $4, $5, NOW(), NOW()
+            gen_random_uuid()::text, $1, $2, $3, $4, $5, $6, NOW(), NOW()
           ) RETURNING *
         `;
         const lineRes = await tx.query(insertLineSql, [
           createdProtocol.id,
           pos,
           line.variantGid,
+          line.productHandle || null,
           line.quantity,
           line.usageNote || null
         ]);
@@ -350,6 +354,7 @@ export async function duplicateProtocol(db, { shop, user, protocolId }) {
     sourceProtocolId: existing.id,
     lines: (existing.lines || []).map(l => ({
       variantGid: l.variantGid,
+      productHandle: l.productHandle || null,
       quantity: l.quantity,
       usageNote: l.usageNote || ''
     }))
@@ -432,15 +437,16 @@ export async function updateProtocol(db, { shop, user, protocolId, input }) {
         const line = sanitized.lines[pos];
         const insertLineSql = `
           INSERT INTO "ProtocolLine" (
-            "id", "protocolId", "position", "variantGid", "quantity", "usageNote", "createdAt", "updatedAt"
+            "id", "protocolId", "position", "variantGid", "productHandle", "quantity", "usageNote", "createdAt", "updatedAt"
           ) VALUES (
-            gen_random_uuid()::text, $1, $2, $3, $4, $5, NOW(), NOW()
+            gen_random_uuid()::text, $1, $2, $3, $4, $5, $6, NOW(), NOW()
           ) RETURNING *
         `;
         const lineRes = await tx.query(insertLineSql, [
           protocolId,
           pos,
           line.variantGid,
+          line.productHandle || null,
           line.quantity,
           line.usageNote || null
         ]);

@@ -43,15 +43,16 @@ model Protocol {
 
 /// Individual product line item within a protocol.
 model ProtocolLine {
-  id          String   @id @default(cuid())
-  protocolId  String
-  protocol    Protocol @relation(fields: [protocolId], references: [id], onDelete: Cascade)
-  position    Int      @default(0)
-  variantGid  String   // gid://shopify/ProductVariant/...
-  quantity    Int      @default(1) // 1 to 10
-  usageNote   String?  // Usage instructions for client (<=200 chars)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id            String   @id @default(cuid())
+  protocolId    String
+  protocol      Protocol @relation(fields: [protocolId], references: [id], onDelete: Cascade)
+  position      Int      @default(0)
+  variantGid    String   // gid://shopify/ProductVariant/...
+  productHandle String?  // Handle of product for storefront hydration (e.g. 'daily-cleanser')
+  quantity      Int      @default(1) // 1 to 10
+  usageNote     String?  // Usage instructions for client (<=200 chars)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 
   @@unique([protocolId, variantGid])
   @@index([protocolId])

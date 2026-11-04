@@ -73,13 +73,13 @@
     - CSRF media-type rejections: form-encoded and `text/plain; application/json` POSTs return HTTP 415.
     - Unknown action returns HTTP 400.
   - Note: The per-customer rate limit (5/hr), the pending cap (200), `customers/redact` profile deletion, and `Sec-Fetch-Site` handling are covered by unit tests and were NOT exercised live.
-- [x] **M9b-3a: Catalog Search, Production Authoring & Client Page Hydration (IMPLEMENTED, PENDING LIVE DEV-STORE VERIFICATION)**:
+- [x] **M9b-3a: Catalog Search, Production Authoring & Client Page Hydration (IMPLEMENTED, LIVE VERIFICATION IN PROGRESS)**:
   - Migration `20261104_add_product_handle_to_protocol_line/migration.sql` adding nullable `productHandle TEXT` to `ProtocolLine` table; updated `prisma/schema.prisma` and registered in `scripts/migrate.js`.
   - Validation: `productHandle` format (`^[a-z0-9][a-z0-9-]{0,254}$`), variant GID format, payload sanitization. Handled null handles gracefully (rendered "Product no longer available").
   - Practitioner editor (approved state): client-side debounced (300ms, $\ge 2$ chars) `/search/suggest.json` with `resources[options][unavailable_products]=show`, on-select `/products/<handle>.js` variant hydration converting prices from minor units and disabling out-of-stock variants, quantity 1-10, usage notes $\le 200$ chars, saving via POST JSON `action=create` and `action=update` with strict `textContent` rendering (zero `innerHTML`) and no stored prices.
   - Client protocol page (`/apps/protocols/<token>`, production): rendered cards with data attributes, client-side hydration from `/products/<handle>.js` updating titles, prices, stock status and dynamic "Add all to cart" disabling.
   - Production server cleanup: removed `createFakeVariantResolver` from production `/api/proxy` path (`variantResolver: pool ? undefined : createFakeVariantResolver(...)`).
-  - Automated unit test coverage: 464 passing tests across 105 suites.
+  - Automated unit test coverage: 471 passing tests across 107 suites (including node:vm script parse regression guards).
 - [ ] **M9b-3b: Protocol Lifecycle Management (Archive, Restore, Duplicate)**:
   - Portal actions for archiving, restoring, and duplicating protocols in production mode with ownership and status guards.
 

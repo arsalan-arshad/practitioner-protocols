@@ -1,6 +1,6 @@
 # Practitioner Protocols — Project Context (for Claude)
 
-_Snapshot: 2026-11-04 · Live Railway deployment active (`practitioner-protocols-production.up.railway.app`) with internal Postgres & ledger migrations · Production app record "Practitioner Protocols" released (v2, Public distribution) · Production hardening complete · Milestones M9a (Embedded Merchant Admin), M9b-1 (allowSelfEnrol Setting, Migration & Pending-Practitioner Admin Review) & M9b-2 (Storefront Self-Enrolment Flow, Portal States, and App Proxy CSRF Protection) verified live on dev store · Milestone M9b-3a (Catalog Search, Production Authoring & Client Page Hydration) implemented, pending live dev store verification · Spikes S2, S3, S4, S5, S6 resolved; S1 resolved on the Plus dev store only · Brand assets v2 produced and verified (text-free App Store icon & feature image; code-composited README hero banner & social thumbnail; shopping-bag glyph eliminated) · 464 tests passing across 105 suites._
+_Snapshot: 2026-11-04 · Live Railway deployment active (`practitioner-protocols-production.up.railway.app`) with internal Postgres & ledger migrations · Production app record "Practitioner Protocols" released (v2, Public distribution) · Production hardening complete · Milestones M9a (Embedded Merchant Admin), M9b-1 (allowSelfEnrol Setting, Migration & Pending-Practitioner Admin Review) & M9b-2 (Storefront Self-Enrolment Flow, Portal States, and App Proxy CSRF Protection) verified live on dev store · Milestone M9b-3a (Catalog Search, Production Authoring & Client Page Hydration) implemented, live verification in progress · Spikes S2, S3, S4, S5, S6 resolved; S1 resolved on the Plus dev store only · Brand assets v2 produced and verified (text-free App Store icon & feature image; code-composited README hero banner & social thumbnail; shopping-bag glyph eliminated) · 471 tests passing across 107 suites._
 _Contains NO secrets. Never paste `.env` values or tokens into chat or docs._
 
 ## 1. What this is
@@ -900,10 +900,14 @@ Run the five spikes in a day or two on a dev store; write the answers into secti
   5. **Production Server Cleanup (`server.js`):**
      - Removed `createFakeVariantResolver` from the production App Proxy route (`variantResolver: pool ? undefined : createFakeVariantResolver(...)`), guaranteeing that live storefront client pages hydrate solely from the store's active catalog.
   6. **Automated Test Coverage:**
-     - 464 pure unit tests passing across 105 suites (`npm test`).
-     - Added comprehensive test suites in `test/validation.test.js`, `test/portal.test.js`, `test/proxy.test.js`, `test/routes.test.js`, and `test/server.test.js` verifying product handle validation, XSS and Liquid injection neutralization, client hydration attributes and currency formatting without hard-coded `$`, add-all and per-line button gating, hardened selector loops, App Proxy create/update route authorization (Rule 4 cross-owner 404 rejection and cross-shop isolation), and migration registration.
+     - 471 pure unit tests passing across 107 suites (`npm test`).
+     - Added comprehensive test suites in `test/validation.test.js`, `test/portal.test.js`, `test/proxy.test.js`, `test/routes.test.js`, and `test/server.test.js` verifying product handle validation, XSS and Liquid injection neutralization, client hydration attributes and currency formatting without hard-coded `$`, add-all and per-line button gating, hardened selector loops, App Proxy create/update route authorization (Rule 4 cross-owner 404 rejection and cross-shop isolation), script syntax parsing via `node:vm`, and migration registration.
   7. **Status:**
-     - Implemented, pending live dev-store verification.
+     - Implemented, live verification in progress.
+  8. **Architectural Lesson & Hotfix (Portal Editor Script Syntax):**
+     - Client scripts are template strings; unit tests must parse them, string-contains tests missed a syntax error that only showed live.
+     - In `app/lib/protocols/portal.js`, regex literal `replace(/^gid:\/\/.../)` inside a JS template literal lost its backslash escapes (`\/` became `/`), forming `//` comment syntax and breaking the approved portal script.
+     - Fixed by using exact string replacement `replace('gid://shopify/ProductVariant/', '')` and adding native `node:vm` `new vm.Script(body)` parsing tests across all portal and client-page states to guarantee syntax validity across every render branch.
 
 
 

@@ -1556,7 +1556,7 @@ ${protocolsJson}
           .then(function(res) { return res.ok ? res.json() : null; })
           .then(function(prod) {
             if (!prod) return;
-            var normId = String(line.variantGid).replace(/^gid:\/\/shopify\/ProductVariant\//, '');
+            var normId = String(line.variantGid).replace('gid://shopify/ProductVariant/', '');
             var v = (prod.variants || []).find(function(item) {
               return String(item.id) === normId || ('gid://shopify/ProductVariant/' + item.id) === line.variantGid;
             });

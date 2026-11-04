@@ -1442,7 +1442,7 @@ export function renderPortalLiquid(options = {}) {
     </div>
     <div class="portal-modal-footer">
       <div id="protocol-editor-summary" style="font-size: 0.875rem; color: #4b5563; font-weight: 500;">
-        <span id="protocol-editor-count">0 / 20 items</span> &middot; <span id="protocol-editor-total">$0.00</span>
+        <span id="protocol-editor-count">0 / 20 items</span> &middot; <span id="protocol-editor-total"></span>
       </div>
       <div style="display: flex; gap: 0.5rem;">
         <button type="button" class="portal-btn portal-btn-secondary" id="protocol-editor-cancel-btn">Cancel</button>
@@ -1478,6 +1478,32 @@ ${protocolsJson}
   var currentEditingProtocolId = null;
   var selectedLines = [];
   var searchDebounceTimer = null;
+
+  var liquidCurrency = (function() {
+    var raw = '{{ cart.currency.iso_code | json }}';
+    if (raw && raw.indexOf('{') === -1) {
+      try { return JSON.parse(raw); } catch (e) { return raw; }
+    }
+    return '';
+  })();
+
+  function formatMoney(minorUnits) {
+    var num = typeof minorUnits === 'number' ? minorUnits : parseFloat(minorUnits);
+    if (isNaN(num)) return '';
+    var major = num / 100;
+    var cur = (window.Shopify && window.Shopify.currency && window.Shopify.currency.active) || liquidCurrency || '';
+    if (cur) {
+      try {
+        var lang = (document.documentElement && document.documentElement.lang) || undefined;
+        return new Intl.NumberFormat(lang, { style: 'currency', currency: cur }).format(major);
+      } catch (e) {}
+    }
+    return major.toFixed(2);
+  }
+
+  if (totalEl) {
+    totalEl.textContent = formatMoney(0);
+  }
 
   function clearElement(el) {
     if (!el) return;
@@ -1574,7 +1600,7 @@ ${protocolsJson}
 
         var titleSpan = document.createElement('span');
         titleSpan.className = 'portal-line-title';
-        var priceStr = typeof line.price === 'number' ? ' - $' + line.price.toFixed(2) : '';
+        var priceStr = typeof line.price === 'number' ? ' - ' + formatMoney(Math.round(line.price * 100)) : '';
         titleSpan.textContent = (line.title || 'Product') + priceStr;
         header.appendChild(titleSpan);
 
@@ -1632,7 +1658,7 @@ ${protocolsJson}
     selectedLines.forEach(function(l) {
       total += (l.price || 0) * (l.quantity || 1);
     });
-    totalEl.textContent = '$' + total.toFixed(2);
+    totalEl.textContent = formatMoney(Math.round(total * 100));
   }
 
   // Open Create Protocol
@@ -1715,13 +1741,7 @@ ${protocolsJson}
     })
     .then(function(res) {
       if (!res.ok) {
-        // Fallback for tests or local demo environments
-        return fetch('/apps/protocols?action=search&q=' + encodeURIComponent(q), {
-          headers: { 'Accept': 'application/json' }
-        }).then(function(r2) {
-          if (!r2.ok) throw new Error('Search failed');
-          return r2.json();
-        });
+        throw new Error('Search failed');
       }
       return res.json();
     })
@@ -1762,7 +1782,8 @@ ${protocolsJson}
         if (prod.price) {
           var metaDiv = document.createElement('div');
           metaDiv.className = 'portal-search-item-meta';
-          metaDiv.textContent = typeof prod.price === 'string' ? ('$' + prod.price) : ('$' + (prod.price / 100).toFixed(2));
+          var minor = typeof prod.price === 'string' ? Math.round(parseFloat(prod.price) * 100) : prod.price;
+          metaDiv.textContent = formatMoney(minor);
           infoDiv.appendChild(metaDiv);
         }
 
@@ -1882,8 +1903,8 @@ ${protocolsJson}
 
       var meta = document.createElement('div');
       meta.className = 'portal-search-item-meta';
-      var priceCents = typeof v.price === 'number' ? v.price : (parseFloat(v.price || '0') * 100);
-      var priceFormatted = '$' + (priceCents / 100).toFixed(2);
+      var priceCents = typeof v.price === 'number' ? v.price : Math.round(parseFloat(v.price || '0') * 100);
+      var priceFormatted = formatMoney(priceCents);
       meta.textContent = priceFormatted + (v.available === false ? ' (Out of stock)' : '');
       info.appendChild(meta);
 

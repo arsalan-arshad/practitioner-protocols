@@ -821,6 +821,29 @@ describe('Practitioner Portal (app/lib/protocols/portal.js)', () => {
         assert.ok(liquid.includes('&lt;script&gt;alert(&quot;hack&quot;)&lt;/script&gt;'));
         assert.ok(liquid.includes('&lt;img src=x onerror=alert(1)&gt;'));
       });
+
+      it('uses formatMoney in editor client script with Liquid fallback and removes hardcoded dollar symbols (M9b-3a)', () => {
+        const liquid = renderPortalLiquid({
+          isLoggedIn: true,
+          isApproved: true,
+          hasProfile: true,
+          practiceName: 'Elite Naturopathic Clinic',
+          activeProtocols: []
+        });
+
+        assert.ok(liquid.includes('function formatMoney('), 'Editor script must define formatMoney');
+        assert.ok(liquid.includes('{{ cart.currency.iso_code | json }}'), 'Editor script must include Liquid currency fallback');
+        assert.ok(liquid.includes('Search failed. Please try again.'), 'Search error message must be present');
+        assert.ok(!liquid.includes('action=search'), 'Editor must not fall back to action=search');
+
+        // Check that client script does not use hardcoded '$' price strings
+        const scriptMatch = liquid.match(/<script>([\s\S]*?)<\/script>/);
+        assert.ok(scriptMatch, 'Script must exist');
+        const script = scriptMatch[1];
+        assert.ok(!script.includes("'$'"), 'Script must not contain single-quoted dollar');
+        assert.ok(!script.includes('"$'), 'Script must not contain double-quoted dollar string');
+        assert.ok(!script.includes("'$"), 'Script must not contain single-quoted dollar string');
+      });
     });
 
     describe('Portal States & Self-Enrolment UI (Milestone M9b-2)', () => {

@@ -79,7 +79,7 @@
   - Practitioner editor (approved state): client-side debounced (300ms, $\ge 2$ chars) `/search/suggest.json` with `resources[options][unavailable_products]=show`, on-select `/products/<handle>.js` variant hydration converting prices from minor units and disabling out-of-stock variants, quantity 1-10, usage notes $\le 200$ chars, saving via POST JSON `action=create` and `action=update` with strict `textContent` rendering (zero `innerHTML`) and no stored prices.
   - Client protocol page (`/apps/protocols/<token>`, production): rendered cards with data attributes, client-side hydration from `/products/<handle>.js` updating titles, prices, stock status and dynamic "Add all to cart" disabling.
   - Production server cleanup: removed `createFakeVariantResolver` from production `/api/proxy` path (`variantResolver: pool ? undefined : createFakeVariantResolver(...)`).
-  - Automated unit test coverage: 460 passing tests across 105 suites.
+  - Automated unit test coverage: 464 passing tests across 105 suites.
 - [ ] **M9b-3b: Protocol Lifecycle Management (Archive, Restore, Duplicate)**:
   - Portal actions for archiving, restoring, and duplicating protocols in production mode with ownership and status guards.
 

@@ -713,6 +713,7 @@ export function renderProtocolLiquid({ protocol, practiceName = '', isLoggedInPr
           data-variant-id="${escapeHtml(normVariantId)}"
           data-quantity="${quantity}"
           data-usage="${safeUsage}"
+          ${hasHandle ? 'disabled aria-disabled="true"' : ''}
           aria-label="Add ${safeTitle} to cart">
           Add
         </button>` : `
@@ -726,6 +727,8 @@ export function renderProtocolLiquid({ protocol, practiceName = '', isLoggedInPr
 
   const totalLines = lines.length;
   const inStockCount = clientItems.filter((i) => i.available).length;
+  const hasPendingHydration = lines.some((l) => Boolean(l.productHandle));
+  const addAllDisabled = inStockCount === 0 || hasPendingHydration;
 
   const protocolDataJson = JSON.stringify({
     protocolId: rawId,
@@ -753,7 +756,7 @@ export function renderProtocolLiquid({ protocol, practiceName = '', isLoggedInPr
       ${totalLines} ${totalLines === 1 ? 'item' : 'items'} recommended
     </div>
     <button type="button" class="protocol-btn protocol-btn-primary protocol-add-all-btn" id="protocol-add-all-btn"
-      ${inStockCount === 0 ? 'disabled aria-disabled="true"' : ''}>
+      ${addAllDisabled ? 'disabled aria-disabled="true"' : ''}>
       Add all to cart
     </button>
   </div>
@@ -890,6 +893,39 @@ ${protocolDataJson}
   }
 
   // Client-side hydration from /products/<handle>.js in production
+  var liquidCurrency = (function() {
+    var raw = '{{ cart.currency.iso_code | json }}';
+    if (raw && raw.indexOf('{') === -1) {
+      try { return JSON.parse(raw); } catch (e) { return raw; }
+    }
+    return '';
+  })();
+
+  function formatMoney(minorUnits) {
+    var num = typeof minorUnits === 'number' ? minorUnits : parseFloat(minorUnits);
+    if (isNaN(num)) return '';
+    var major = num / 100;
+    var cur = (window.Shopify && window.Shopify.currency && window.Shopify.currency.active) || liquidCurrency || '';
+    if (cur) {
+      try {
+        var lang = (document.documentElement && document.documentElement.lang) || undefined;
+        return new Intl.NumberFormat(lang, { style: 'currency', currency: cur }).format(major);
+      } catch (e) {}
+    }
+    return major.toFixed(2);
+  }
+
+  function findCardsByHandle(targetHandle) {
+    var cardsList = document.querySelectorAll('.protocol-line-card');
+    var matches = [];
+    for (var i = 0; i < cardsList.length; i++) {
+      if (cardsList[i].getAttribute('data-product-handle') === targetHandle) {
+        matches.push(cardsList[i]);
+      }
+    }
+    return matches;
+  }
+
   var cards = document.querySelectorAll('.protocol-line-card[data-product-handle]');
   var handlesToFetch = {};
   cards.forEach(function(card) {
@@ -910,7 +946,7 @@ ${protocolDataJson}
         return res.json();
       })
       .then(function(product) {
-        var matchingCards = document.querySelectorAll('.protocol-line-card[data-product-handle="' + handle + '"]');
+        var matchingCards = findCardsByHandle(handle);
         matchingCards.forEach(function(card) {
           var varId = card.getAttribute('data-variant-id');
           var varGid = card.getAttribute('data-variant-gid');
@@ -963,13 +999,13 @@ ${protocolDataJson}
 
           var priceMinor = typeof variant.price === 'number' ? variant.price : 0;
           if (priceEl) {
-            priceEl.textContent = '$' + (priceMinor / 100).toFixed(2);
+            priceEl.textContent = formatMoney(priceMinor);
           } else {
             var metaEl = card.querySelector('.protocol-line-meta');
             if (metaEl) {
               var newPrice = document.createElement('span');
               newPrice.className = 'protocol-line-price';
-              newPrice.textContent = '$' + (priceMinor / 100).toFixed(2);
+              newPrice.textContent = formatMoney(priceMinor);
               metaEl.insertBefore(newPrice, metaEl.firstChild);
             }
           }
@@ -1020,7 +1056,7 @@ ${protocolDataJson}
         });
       })
       .catch(function() {
-        var matchingCards = document.querySelectorAll('.protocol-line-card[data-product-handle="' + handle + '"]');
+        var matchingCards = findCardsByHandle(handle);
         matchingCards.forEach(function(card) {
           card.classList.add('protocol-line-unavailable');
           var titleEl = card.querySelector('.protocol-line-title');

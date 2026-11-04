@@ -389,5 +389,86 @@ describe('Shopify App Proxy & Storefront (app/lib/protocols/proxy.js)', () => {
         'JSON.parse in client JS must recover the exact original text string'
       );
     });
+
+    it('contains no hard-coded "$" price literals in client script and uses formatMoney with Liquid fallback', () => {
+      const liquid = renderProtocolLiquid({ protocol: mockProtocol });
+      const scriptMatch = liquid.match(/<script>([\s\S]*?)<\/script>/);
+      assert.ok(scriptMatch, 'Client script tag must exist');
+      const script = scriptMatch[1];
+
+      // Must define and use formatMoney
+      assert.ok(script.includes('function formatMoney('), 'Script must define formatMoney helper');
+      assert.ok(script.includes('{{ cart.currency.iso_code | json }}'), 'Script must use Liquid currency fallback');
+      assert.ok(script.includes('new Intl.NumberFormat'), 'Script must use Intl.NumberFormat');
+      assert.ok(script.includes('priceEl.textContent = formatMoney('), 'Existing price span must use formatMoney');
+      assert.ok(script.includes('newPrice.textContent = formatMoney('), 'New price span must use formatMoney');
+
+      // Must contain NO hardcoded '$' price literals in the script
+      assert.ok(!script.includes("'$'"), 'Script must not contain single-quoted dollar literal');
+      assert.ok(!script.includes('"$'), 'Script must not contain double-quoted dollar string');
+      assert.ok(!script.includes("'$"), 'Script must not contain single-quoted dollar string');
+
+      // Must use hardened card selector loop rather than querySelector with handle string
+      assert.ok(script.includes('findCardsByHandle'), 'Script must define findCardsByHandle helper');
+      assert.ok(!script.includes('data-product-handle="\' + handle'), 'Script must not use unhardened querySelector');
+    });
+
+    it('renders #protocol-add-all-btn disabled and per-line add buttons disabled when lines have productHandle (M9b-3a)', () => {
+      const protocolWithHandle = {
+        ...mockProtocol,
+        lines: [
+          {
+            variantGid: 'gid://shopify/ProductVariant/1001',
+            productHandle: 'sleep-tincture',
+            quantity: 1,
+            available: true
+          }
+        ]
+      };
+      const liquid = renderProtocolLiquid({ protocol: protocolWithHandle });
+
+      // Add-all button must be disabled pending client-side hydration
+      assert.match(
+        liquid,
+        /id="protocol-add-all-btn"[^>]*disabled aria-disabled="true"/,
+        'Add-all button must be disabled pending hydration'
+      );
+
+      // Per-line add button must be disabled pending client-side hydration
+      assert.match(
+        liquid,
+        /class="protocol-btn protocol-btn-secondary protocol-line-add-btn"[^>]*disabled aria-disabled="true"/,
+        'Per-line add button must be disabled pending card hydration'
+      );
+    });
+
+    it('renders #protocol-add-all-btn enabled and per-line add buttons enabled when no lines have productHandle (M9b-3a)', () => {
+      const protocolWithoutHandle = {
+        ...mockProtocol,
+        lines: [
+          {
+            variantGid: 'gid://shopify/ProductVariant/1001',
+            title: 'Enriched Vitamin D3',
+            variantTitle: '1000 IU',
+            priceFormatted: '25.00',
+            quantity: 2,
+            available: true
+          }
+        ]
+      };
+      const liquid = renderProtocolLiquid({ protocol: protocolWithoutHandle });
+
+      // Add-all button must be enabled
+      const addAllMatch = liquid.match(/id="protocol-add-all-btn"([^>]*)>/);
+      assert.ok(addAllMatch, 'Add-all button must exist');
+      assert.ok(!addAllMatch[1].includes('disabled'), 'Add-all button must not be disabled');
+      assert.ok(!addAllMatch[1].includes('aria-disabled'), 'Add-all button must not have aria-disabled');
+
+      // Per-line add button must be enabled
+      const lineAddMatch = liquid.match(/class="protocol-btn protocol-btn-secondary protocol-line-add-btn"([^>]*)>/);
+      assert.ok(lineAddMatch, 'Per-line add button must exist');
+      assert.ok(!lineAddMatch[1].includes('disabled'), 'Per-line add button must not be disabled');
+      assert.ok(!lineAddMatch[1].includes('aria-disabled'), 'Per-line add button must not have aria-disabled');
+    });
   });
 });

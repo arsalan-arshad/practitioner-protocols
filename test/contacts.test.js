@@ -668,8 +668,10 @@ describe('Contacts & Merchant Feedback Service (app/lib/protocols/contacts.js)',
 
       // 1. Success path
       let capturedSignal = null;
+      let capturedBody = null;
       const fakeFetchSuccess = async (url, options) => {
         capturedSignal = options?.signal;
+        capturedBody = JSON.parse(options?.body || '{}');
         return {
           ok: true,
           json: async () => ({
@@ -679,7 +681,7 @@ describe('Contacts & Merchant Feedback Service (app/lib/protocols/contacts.js)',
                 email: 'info@holistic.com',
                 shopOwnerName: 'Alice Green',
                 plan: { publicDisplayName: 'Advanced' },
-                billingAddress: { countryCodeV2: 'GB' }
+                shopAddress: { countryCodeV2: 'GB' }
               }
             }
           })
@@ -690,6 +692,9 @@ describe('Contacts & Merchant Feedback Service (app/lib/protocols/contacts.js)',
       assert.ok(res);
       assert.ok(capturedSignal, 'Must pass AbortSignal to GraphQL fetch');
       assert.equal(typeof capturedSignal.aborted, 'boolean');
+      assert.ok(capturedBody.query, 'Must send GraphQL query in body');
+      assert.match(capturedBody.query, /shopAddress\s*\{\s*countryCodeV2\s*\}/, 'Query must select shopAddress { countryCodeV2 }');
+      assert.doesNotMatch(capturedBody.query, /billingAddress/, 'Query must not select billingAddress');
       assert.equal(res.shopName, 'Holistic Care');
       assert.equal(res.email, 'info@holistic.com');
       assert.equal(res.ownerName, 'Alice Green');
@@ -710,7 +715,7 @@ describe('Contacts & Merchant Feedback Service (app/lib/protocols/contacts.js)',
         const failRes = await syncShopProfile(mockDb, { shop: 'holistic.myshopify.com', fetchFn: fakeFetchFail });
         assert.equal(failRes, null);
         assert.equal(warnings.length, 1);
-        assert.match(warnings[0], /Failed to fetch shop profile/);
+        assert.match(warnings[0], /Failed to fetch shop profile for holistic\.myshopify\.com: HTTP 500/);
 
         // 3. Aborted/timed out fetch must be handled gracefully without throwing
         const fakeFetchTimeout = async () => {
@@ -723,6 +728,20 @@ describe('Contacts & Merchant Feedback Service (app/lib/protocols/contacts.js)',
         assert.equal(timeoutRes, null);
         assert.equal(warnings.length, 2);
         assert.match(warnings[1], /The operation was aborted/);
+
+        // 4. GraphQL errors response logs single line with truncated message and returns null
+        const longMessage = 'A'.repeat(300);
+        const fakeFetchGraphQLError = async () => ({
+          ok: true,
+          json: async () => ({
+            errors: [{ message: longMessage }]
+          })
+        });
+
+        const gqlErrRes = await syncShopProfile(mockDb, { shop: 'holistic.myshopify.com', fetchFn: fakeFetchGraphQLError });
+        assert.equal(gqlErrRes, null);
+        assert.equal(warnings.length, 3);
+        assert.match(warnings[2], /^\[ShopProfile\] GraphQL error for holistic\.myshopify\.com: A{200}$/);
       } finally {
         console.warn = origWarn;
       }

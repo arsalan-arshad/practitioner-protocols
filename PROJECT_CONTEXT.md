@@ -1043,7 +1043,7 @@ Run the five spikes in a day or two on a dev store; write the answers into secti
 5. **Merchant Profile & Contact Preferences (`ShopProfile`):**
    - Migration `20261105_add_shop_profile_and_feedback_rating/migration.sql` creates `ShopProfile` (id, shop unique, shopName, ownerName, email, planName, country, installedAt, uninstalledAt, marketingOptIn default false, marketingOptInAt, createdAt, updatedAt) and adds `rating` (1–5) to `MerchantFeedback`.
    - Registered in `scripts/migrate.js` and mirrored in `prisma/schema.prisma`.
-   - Admin GraphQL `shop` query (`name, email, shopOwnerName, plan.publicDisplayName, billingAddress.countryCodeV2`) synchronized on OAuth code exchange and on admin load if stale (> 7 days). No additional Shopify scopes required (`read_orders` only).
+   - Admin GraphQL `shop` query (`name, email, shopOwnerName, plan.publicDisplayName, shopAddress.countryCodeV2`) synchronized on OAuth code exchange and on admin load if stale (> 7 days). No additional Shopify scopes required (`read_orders` only).
    - Failed GraphQL profile sync logs a single non-PII warning and never blocks installation.
    - Reinstallation clears `uninstalledAt = NULL` while strictly preserving existing `marketingOptIn` and `marketingOptInAt`.
 6. **Polaris Admin Settings "Contact & feedback" Card:**
@@ -1098,5 +1098,24 @@ Run the five spikes in a day or two on a dev store; write the answers into secti
 9. **Automated Test Coverage:**
    - Added `test/exchange.test.js` covering RFC 8693 request parameter compliance, encrypted session write, profile sync, second-request bypass, in-flight concurrency lock deduplication, negative cache cooldown, 400 non-blocking render, privacy logging, `app/uninstalled` session cleanup, UI disabled state, and friendly root page.
    - 578 unit tests passing across 132 suites (`npm test`). Zero failures.
+
+### 2026-11-06: Shop Profile GraphQL Field Migration (`shopAddress` vs `billingAddress`) (Branch fix/shop-profile-query)
+1. **Root Cause Resolution (Empty ShopProfile on Live Store):**
+   - Live testing confirmed token exchange created the `Session` row successfully, but `ShopProfile` remained empty.
+   - Investigation revealed `syncShopProfile` in `app/lib/protocols/contacts.js` queried `billingAddress { countryCodeV2 }` on the `Shop` object. In current Shopify Admin GraphQL schemas, `billingAddress` is deprecated and rejected on modern API versions, causing Shopify to reject the entire GraphQL query with an error and preventing `ShopProfile` from being populated.
+   - Verified against current Shopify Admin GraphQL schema using Dev MCP tooling: `shopAddress { countryCodeV2 }` is the valid store address field, while `name`, `email`, `shopOwnerName`, and `plan { publicDisplayName }` exist and remain fully valid.
+2. **GraphQL Query & Resolver Update:**
+   - Updated `syncShopProfile` to query `shopAddress { countryCodeV2 }` and read `shopData.shopAddress?.countryCodeV2`.
+   - Maintained 5-second `AbortController` timeout and non-blocking failure semantics.
+3. **Non-PII GraphQL Error Logging:**
+   - Updated error handling on GraphQL `errors` response to log a single non-PII warning line containing the first error's message truncated to 200 characters (`[ShopProfile] GraphQL error for <shop>: <message>`). Never logs tokens, emails, or response bodies.
+4. **Privacy Text & Documentation Alignment:**
+   - Verified and aligned `/privacy` page text in `server.js`, `docs/SPEC.md`, and `PROJECT_CONTEXT.md` to accurately state that store country is retrieved from the shop address.
+5. **Test Suite & Verification:**
+   - Updated test mocks in `test/exchange.test.js` and `test/contacts.test.js` to return `shopAddress`.
+   - Added assertions verifying that the GraphQL request body contains `shopAddress { countryCodeV2 }` and strictly does not contain `billingAddress`.
+   - Added test verifying truncated single-line logging on GraphQL `errors`.
+   - 578 unit tests passing across 132 suites (`npm test`).
+
 
 

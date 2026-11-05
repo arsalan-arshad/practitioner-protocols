@@ -227,7 +227,7 @@ describe('Shopify Token Exchange & Managed Install Hardening (app/lib/protocols/
                     email: 'owner@elitenaturalhealth.com',
                     shopOwnerName: 'Dr. Jane Smith',
                     plan: { publicDisplayName: 'Shopify Plus' },
-                    billingAddress: { countryCodeV2: 'CA' }
+                    shopAddress: { countryCodeV2: 'CA' }
                   }
                 }
               };

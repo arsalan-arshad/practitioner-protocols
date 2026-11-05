@@ -11,6 +11,11 @@ import {
   DEMO_SETTINGS,
   DEMO_REPORT,
   DEMO_PROTOCOL,
+  signOAuthState,
+  verifyOAuthState,
+  renderPrivacyHtml,
+  parseCookies,
+  buildAdminCsp,
 } from '../server.js';
 import { runMigrations, getDatabaseSslConfig, MIGRATION_FILES } from '../scripts/migrate.js';
 import { calculateOAuthSignature } from '../app/lib/protocols/proxy.js';
@@ -269,10 +274,34 @@ describe('Server & Configuration Hardening (server.js, shopify.app.toml, README.
       assert.equal(data.error, 'Invalid or missing shop parameter');
     });
 
-    it('GET /api/auth/callback rejects request with invalid HMAC signature with HTTP 400', async () => {
+    it('GET /api/auth initiates OAuth with signed state cookie', async () => {
       const req = createMockReq({
         method: 'GET',
-        url: '/api/auth/callback?shop=my-store.myshopify.com&code=auth_code_123&state=nonce1&hmac=deadbeef',
+        url: '/api/auth?shop=my-store.myshopify.com',
+      });
+      const res = createMockRes();
+      await oauthListener(req, res);
+
+      assert.equal(res.statusCode, 302);
+      assert.ok(res.headers.Location.includes('/admin/oauth/authorize'));
+      assert.ok(res.headers.Location.includes('state='));
+      const setCookie = res.headers['Set-Cookie'] || res.headers['set-cookie'];
+      assert.ok(setCookie, 'Set-Cookie header must be present');
+      assert.ok(setCookie.includes('shopify_oauth_state='));
+      assert.ok(setCookie.includes('Path=/api/auth'));
+      assert.ok(setCookie.includes('Max-Age=600'));
+      assert.ok(setCookie.includes('HttpOnly'));
+      assert.ok(setCookie.includes('Secure'));
+      assert.ok(setCookie.includes('SameSite=Lax'));
+    });
+
+    it('GET /api/auth/callback rejects request with invalid HMAC signature with HTTP 400', async () => {
+      const state = 'nonce1';
+      const signedCookie = signOAuthState(state, apiSecret);
+      const req = createMockReq({
+        method: 'GET',
+        url: `/api/auth/callback?shop=my-store.myshopify.com&code=auth_code_123&state=${state}&hmac=deadbeef`,
+        headers: { cookie: `shopify_oauth_state=${signedCookie}` },
       });
       const res = createMockRes();
       await oauthListener(req, res);
@@ -295,11 +324,68 @@ describe('Server & Configuration Hardening (server.js, shopify.app.toml, README.
       assert.equal(data.error, 'Missing code parameter');
     });
 
-    it('GET /api/auth/callback in demo mode redirects 302 to /admin on valid HMAC', async () => {
+    it('GET /api/auth/callback rejects request with missing state parameter with HTTP 400', async () => {
+      const req = createMockReq({
+        method: 'GET',
+        url: '/api/auth/callback?shop=my-store.myshopify.com&code=auth_code_123',
+      });
+      const res = createMockRes();
+      await oauthListener(req, res);
+
+      assert.equal(res.statusCode, 400);
+      const data = JSON.parse(res.body);
+      assert.equal(data.error, 'Missing state parameter');
+    });
+
+    it('GET /api/auth/callback rejects request with missing state cookie with HTTP 400', async () => {
+      const req = createMockReq({
+        method: 'GET',
+        url: '/api/auth/callback?shop=my-store.myshopify.com&code=auth_code_123&state=nonce1',
+      });
+      const res = createMockRes();
+      await oauthListener(req, res);
+
+      assert.equal(res.statusCode, 400);
+      const data = JSON.parse(res.body);
+      assert.equal(data.error, 'Missing OAuth state cookie');
+    });
+
+    it('GET /api/auth/callback rejects request with mismatched state cookie with HTTP 400', async () => {
+      const signedCookie = signOAuthState('different_state', apiSecret);
+      const req = createMockReq({
+        method: 'GET',
+        url: '/api/auth/callback?shop=my-store.myshopify.com&code=auth_code_123&state=expected_state',
+        headers: { cookie: `shopify_oauth_state=${signedCookie}` },
+      });
+      const res = createMockRes();
+      await oauthListener(req, res);
+
+      assert.equal(res.statusCode, 400);
+      const data = JSON.parse(res.body);
+      assert.equal(data.error, 'Invalid OAuth state');
+    });
+
+    it('GET /api/auth/callback rejects request with expired or tampered state cookie with HTTP 400', async () => {
+      const req = createMockReq({
+        method: 'GET',
+        url: '/api/auth/callback?shop=my-store.myshopify.com&code=auth_code_123&state=tampered_state',
+        headers: { cookie: 'shopify_oauth_state=tampered_state.123456.invalidhmac' },
+      });
+      const res = createMockRes();
+      await oauthListener(req, res);
+
+      assert.equal(res.statusCode, 400);
+      const data = JSON.parse(res.body);
+      assert.equal(data.error, 'Invalid OAuth state');
+    });
+
+    it('GET /api/auth/callback in demo mode redirects 302 to /admin on valid HMAC and clears cookie', async () => {
+      const state = 'nonce_abc_123';
+      const signedCookie = signOAuthState(state, apiSecret);
       const params = {
         code: 'valid_auth_code_999',
         shop: 'my-store.myshopify.com',
-        state: 'nonce_abc_123',
+        state,
         timestamp: '1729500000',
       };
       const hmac = calculateOAuthSignature(params, apiSecret);
@@ -308,15 +394,20 @@ describe('Server & Configuration Hardening (server.js, shopify.app.toml, README.
       const req = createMockReq({
         method: 'GET',
         url: `/api/auth/callback?${queryString}`,
+        headers: { cookie: `shopify_oauth_state=${signedCookie}` },
       });
       const res = createMockRes();
       await oauthListener(req, res);
 
       assert.equal(res.statusCode, 302);
       assert.equal(res.headers.Location, '/admin?shop=my-store.myshopify.com');
+      const setCookie = res.headers['Set-Cookie'] || res.headers['set-cookie'];
+      assert.ok(setCookie, 'Must clear state cookie with Set-Cookie header');
+      assert.ok(setCookie.includes('Max-Age=0'));
+      assert.ok(setCookie.includes('shopify_oauth_state=;'));
     });
 
-    it('GET /api/auth/callback in production mode exchanges code, writes session, and redirects 302', async () => {
+    it('GET /api/auth/callback in production mode exchanges code, writes session with state authenticated, and redirects 302', async () => {
       const queriedRows = [];
       const mockPool = {
         async query(sql, params) {
@@ -337,10 +428,12 @@ describe('Server & Configuration Hardening (server.js, shopify.app.toml, README.
         },
       });
 
+      const state = 'nonce_prod_state';
+      const signedCookie = signOAuthState(state, apiSecret);
       const params = {
         code: 'valid_auth_code_prod',
         shop: 'my-store.myshopify.com',
-        state: 'nonce_prod_state',
+        state,
         timestamp: '1729500000',
       };
       const hmac = calculateOAuthSignature(params, apiSecret);
@@ -349,6 +442,7 @@ describe('Server & Configuration Hardening (server.js, shopify.app.toml, README.
       const req = createMockReq({
         method: 'GET',
         url: `/api/auth/callback?${queryString}`,
+        headers: { cookie: `shopify_oauth_state=${signedCookie}` },
       });
       const res = createMockRes();
       await prodListener(req, res);
@@ -359,14 +453,19 @@ describe('Server & Configuration Hardening (server.js, shopify.app.toml, README.
       assert.ok(queriedRows[0].sql.includes('INSERT INTO "Session"'));
       assert.equal(queriedRows[0].params[0], 'offline_my-store.myshopify.com');
       assert.equal(queriedRows[0].params[1], 'my-store.myshopify.com');
+      // Do not store the state in Session.state; store "authenticated"
+      assert.equal(queriedRows[0].params[2], 'authenticated');
       assert.equal(queriedRows[0].params[4], 'shpca_token_xyz_999');
+
+      const setCookie = res.headers['Set-Cookie'] || res.headers['set-cookie'];
+      assert.ok(setCookie.includes('Max-Age=0'));
     });
   });
 
   describe('Shopify App Store Security Headers (server.js)', () => {
     const listener = createRequestListener();
 
-    it('returns Content-Security-Policy with frame-ancestors for the current shop', async () => {
+    it('returns Content-Security-Policy with frame-ancestors for the current shop and required directives', async () => {
       const req = createMockReq({
         method: 'GET',
         url: '/admin?shop=verified-store.myshopify.com',
@@ -375,10 +474,13 @@ describe('Server & Configuration Hardening (server.js, shopify.app.toml, README.
       await listener(req, res);
 
       assert.equal(res.statusCode, 200);
-      assert.equal(
-        res.headers['Content-Security-Policy'],
-        'frame-ancestors https://verified-store.myshopify.com https://admin.shopify.com;'
-      );
+      const csp = res.headers['Content-Security-Policy'] || res.headers['content-security-policy'];
+      assert.ok(csp.startsWith('frame-ancestors https://verified-store.myshopify.com https://admin.shopify.com;'));
+      assert.ok(csp.includes("default-src 'self'"));
+      assert.ok(csp.includes('https://cdn.shopify.com'));
+      assert.ok(csp.includes('https://cdn.shopifycdn.net'));
+      assert.ok(csp.includes('https://admin.shopify.com'));
+      assert.ok(csp.includes('https://verified-store.myshopify.com'));
       assert.equal(res.headers['X-Content-Type-Options'], 'nosniff');
       assert.equal(res.headers['Referrer-Policy'], 'strict-origin-when-cross-origin');
     });
@@ -392,10 +494,98 @@ describe('Server & Configuration Hardening (server.js, shopify.app.toml, README.
       await listener(req, res);
 
       assert.equal(res.statusCode, 200);
-      assert.equal(
-        res.headers['Content-Security-Policy'],
-        'frame-ancestors https://*.myshopify.com https://admin.shopify.com;'
-      );
+      const csp = res.headers['Content-Security-Policy'] || res.headers['content-security-policy'];
+      assert.ok(csp.startsWith('frame-ancestors https://*.myshopify.com https://admin.shopify.com;'));
+      assert.ok(csp.includes("default-src 'self'"));
+    });
+
+    it('returns Strict-Transport-Security on all responses (not only HTML)', async () => {
+      const endpoints = [
+        { method: 'GET', url: '/health' },
+        { method: 'GET', url: '/admin?shop=test.myshopify.com' },
+        { method: 'GET', url: '/privacy' },
+        { method: 'GET', url: '/api/auth?shop=test.myshopify.com' },
+      ];
+
+      for (const ep of endpoints) {
+        const req = createMockReq(ep);
+        const res = createMockRes();
+        await listener(req, res);
+        const hsts = res.headers['Strict-Transport-Security'] || res.headers['strict-transport-security'];
+        assert.equal(
+          hsts,
+          'max-age=31536000; includeSubDomains',
+          `Endpoint ${ep.url} must set Strict-Transport-Security header`
+        );
+      }
+    });
+  });
+
+  describe('Privacy Policy Endpoint (GET /privacy)', () => {
+    it('serves public HTML privacy policy with status 200 and strict security headers', async () => {
+      const listener = createRequestListener({ privacyContactEmail: 'privacy@example.com' });
+      const req = createMockReq({ method: 'GET', url: '/privacy' });
+      const res = createMockRes();
+      await listener(req, res);
+
+      assert.equal(res.statusCode, 200);
+      assert.equal(res.headers['Content-Type'], 'text/html; charset=utf-8');
+      assert.equal(res.headers['Content-Security-Policy'], "default-src 'self'; style-src 'self' 'unsafe-inline'; frame-ancestors 'none';");
+      assert.equal(res.headers['X-Content-Type-Options'], 'nosniff');
+      assert.equal(res.headers['Strict-Transport-Security'], 'max-age=31536000; includeSubDomains');
+
+      const body = res.body;
+      assert.ok(body.includes('Practitioner Protocols Privacy Policy'));
+      assert.ok(body.includes('What the App Stores'));
+      assert.ok(body.includes('What the App Does NOT Store'));
+      assert.ok(body.includes('Data Retention and Deletion'));
+      assert.ok(body.includes('Sub-Processors'));
+      assert.ok(body.includes('Railway'));
+      assert.ok(body.includes('Shopify'));
+      assert.ok(body.includes('read_orders'));
+      assert.ok(body.includes('customers/data_request'));
+      assert.ok(body.includes('customers/redact'));
+      assert.ok(body.includes('shop/redact'));
+      assert.ok(body.includes('app/uninstalled'));
+      assert.ok(body.includes('mailto:privacy@example.com'));
+
+      // Check no medical/health claims
+      assert.ok(!/\b(cure|cures|curing|cured)\b/i.test(body));
+      assert.ok(!/\b(treat|treats|treatment|treating)\b/i.test(body));
+      assert.ok(!/\b(disease|diseases)\b/i.test(body));
+    });
+
+    it('renders placeholder administrator text when contact email is not provided', async () => {
+      const listener = createRequestListener();
+      const req = createMockReq({ method: 'GET', url: '/privacy' });
+      const res = createMockRes();
+      await listener(req, res);
+
+      assert.equal(res.statusCode, 200);
+      assert.ok(res.body.includes('contact the store administrator'));
+    });
+  });
+
+  describe('Admin Practitioners Route Security (GET /api/admin/practitioners)', () => {
+    it('returns HTTP 401 with retry header when unauthenticated in production mode', async () => {
+      const prodListener = createRequestListener({
+        databaseUrl: 'postgres://production.host:5432/db',
+        shopifyApiSecret: 'secret123',
+        shopifyApiKey: 'key123',
+        pool: { query: async () => ({ rows: [] }) },
+      });
+
+      const req = createMockReq({
+        method: 'GET',
+        url: '/api/admin/practitioners?shop=test.myshopify.com',
+      });
+      const res = createMockRes();
+      await prodListener(req, res);
+
+      assert.equal(res.statusCode, 401);
+      assert.equal(res.headers['X-Shopify-Retry-Invalid-Session-Request'], '1');
+      const data = JSON.parse(res.body);
+      assert.equal(data.error, 'Unauthorized');
     });
   });
 

@@ -221,12 +221,21 @@ describe('Shopify App Proxy & Storefront (app/lib/protocols/proxy.js)', () => {
       assert.ok(liquid.includes('errBody.description || errBody.message'));
     });
 
-    it('shows practitioner banner when signed in as professional', () => {
+    it('shows practitioner banner when signed in as professional on active protocols', () => {
       const clientView = renderProtocolLiquid({ protocol: mockProtocol, isLoggedInPractitioner: false });
       assert.ok(!clientView.includes("You're signed in as a professional"));
 
       const practitionerPreview = renderProtocolLiquid({ protocol: mockProtocol, isLoggedInPractitioner: true });
       assert.ok(practitionerPreview.includes("You're signed in as a professional. Clients will see retail prices."));
+    });
+
+    it('does NOT show practitioner banner on inactive (archived) client page even when signed in as professional', () => {
+      const archivedLiquid = renderProtocolLiquid({
+        protocol: { ...mockProtocol, status: 'archived' },
+        isLoggedInPractitioner: true,
+      });
+      assert.ok(!archivedLiquid.includes("You're signed in as a professional"));
+      assert.ok(!archivedLiquid.includes('<div class="protocol-practitioner-banner"'));
     });
 
     it('renders clean friendly states for archived, disabled, and not found protocols', () => {

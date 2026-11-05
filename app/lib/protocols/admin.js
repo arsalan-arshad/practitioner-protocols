@@ -1630,13 +1630,17 @@ export function renderAdminHtml(options = {}) {
             <textarea name="introNote" rows="2" maxlength="500" placeholder="Brand guidance for specialists..." style="width:100%; padding:0.5rem; border:1px solid var(--p-color-border); border-radius:4px; box-sizing:border-box;"></textarea>
           </div>
           <div style="margin-bottom:1rem;">
-            <label style="display:block; font-weight:600; margin-bottom:0.5rem; font-size:0.875rem;">Product Line Items (1–20)</label>
-            <div id="starter-lines-container">
-              <div class="starter-line-row" style="display:flex; gap:0.5rem; margin-bottom:0.5rem; align-items:center;">
-                <input type="text" name="lines[0][variantGid]" required placeholder="gid://shopify/ProductVariant/..." style="flex:2; padding:0.4rem; border:1px solid var(--p-color-border); border-radius:4px; font-size:0.8125rem;">
-                <input type="number" name="lines[0][quantity]" value="1" min="1" max="10" required style="width:60px; padding:0.4rem; border:1px solid var(--p-color-border); border-radius:4px; font-size:0.8125rem;">
-                <input type="text" name="lines[0][usageNote]" placeholder="Usage instructions" maxlength="200" style="flex:2; padding:0.4rem; border:1px solid var(--p-color-border); border-radius:4px; font-size:0.8125rem;">
-              </div>
+            <label style="display:block; font-weight:600; margin-bottom:0.5rem; font-size:0.875rem;">Add Products to Starter</label>
+            <div style="display:flex; gap:0.5rem; position:relative;">
+              <input type="text" id="admin-starter-search-input" placeholder="Search catalog by product name..." style="flex:1; padding:0.5rem; border:1px solid var(--p-color-border); border-radius:4px; font-size:0.875rem; box-sizing:border-box;">
+              <button type="button" id="admin-starter-search-btn" class="Polaris-Button">Search</button>
+              <div id="admin-starter-search-dropdown" style="display:none; position:absolute; top:100%; left:0; right:0; background:#fff; border:1px solid var(--p-color-border); border-radius:4px; max-height:220px; overflow-y:auto; z-index:10000; box-shadow:0 4px 6px -1px rgba(0,0,0,0.1); margin-top:2px;"></div>
+            </div>
+          </div>
+          <div style="margin-bottom:1rem;">
+            <label style="display:block; font-weight:600; margin-bottom:0.5rem; font-size:0.875rem;">Selected Items (<span id="starter-lines-count">0</span>/20)</label>
+            <div id="starter-lines-container" style="display:flex; flex-direction:column; gap:0.5rem;">
+              <div id="starter-lines-empty" style="color:var(--p-color-text-subdued); font-size:0.875rem; padding:0.5rem; background:#f9fafb; border-radius:4px; text-align:center;">No products added yet. Use the search above to add products.</div>
             </div>
           </div>
           <div style="display:flex; justify-content:flex-end; gap:0.5rem; margin-top:1.5rem; border-top:1px solid var(--p-color-border); padding-top:1rem;">
@@ -1735,7 +1739,7 @@ export function renderAdminHtml(options = {}) {
         <div style="margin-bottom: 1rem;">
           <label style="display:block; font-weight:600; margin-bottom:0.25rem;">Identity Mode</label>
           <select name="mode" style="padding:0.5rem; width:100%; max-width:320px; border-radius:4px; border:1px solid var(--p-color-border);">
-            <option value="tag" ${mode === 'tag' ? 'selected' : ''}>Tag Mode (Customer Tag "practitioner")</option>
+            <option value="tag" ${mode === 'tag' ? 'selected' : ''}>Individual Mode (Customer Account)</option>
             <option value="company" ${mode === 'company' ? 'selected' : ''}>Company Mode (B2B Company Contact)</option>
           </select>
         </div>
@@ -1932,6 +1936,227 @@ ${appBridgeHead}  <title>Practitioner Protocols &mdash; Admin</title>
           window.location.href = targetUrl.toString();
         });
       });
+
+      // Admin Starter Product Search & Selection
+      const starterSearchInput = document.getElementById('admin-starter-search-input');
+      const starterSearchBtn = document.getElementById('admin-starter-search-btn');
+      const starterSearchDropdown = document.getElementById('admin-starter-search-dropdown');
+      const starterLinesContainer = document.getElementById('starter-lines-container');
+      const starterLinesCount = document.getElementById('starter-lines-count');
+      const starterLinesEmpty = document.getElementById('starter-lines-empty');
+      const starterForm = document.getElementById('admin-create-starter-form');
+
+      let starterItems = [];
+
+      function updateStarterRows() {
+        if (!starterLinesContainer) return;
+        starterLinesContainer.querySelectorAll('.starter-line-row').forEach(function(el) { el.remove(); });
+        if (starterItems.length === 0) {
+          if (starterLinesEmpty) starterLinesEmpty.style.display = 'block';
+        } else {
+          if (starterLinesEmpty) starterLinesEmpty.style.display = 'none';
+        }
+        if (starterLinesCount) starterLinesCount.textContent = String(starterItems.length);
+
+        starterItems.forEach(function(item, idx) {
+          const row = document.createElement('div');
+          row.className = 'starter-line-row';
+          row.style.cssText = 'display:flex; gap:0.5rem; align-items:center; background:#f9fafb; padding:0.5rem; border-radius:4px; border:1px solid var(--p-color-border);';
+
+          const gidInput = document.createElement('input');
+          gidInput.type = 'hidden';
+          gidInput.name = 'lines[' + idx + '][variantGid]';
+          gidInput.value = item.variantGid;
+          row.appendChild(gidInput);
+
+          if (item.productHandle) {
+            const handleInput = document.createElement('input');
+            handleInput.type = 'hidden';
+            handleInput.name = 'lines[' + idx + '][productHandle]';
+            handleInput.value = item.productHandle;
+            row.appendChild(handleInput);
+          }
+
+          const titleDiv = document.createElement('div');
+          titleDiv.style.cssText = 'flex:2; font-size:0.8125rem; font-weight:500; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;';
+          titleDiv.textContent = item.title;
+          row.appendChild(titleDiv);
+
+          const qtyInput = document.createElement('input');
+          qtyInput.type = 'number';
+          qtyInput.name = 'lines[' + idx + '][quantity]';
+          qtyInput.value = String(item.quantity || 1);
+          qtyInput.min = '1';
+          qtyInput.max = '10';
+          qtyInput.required = true;
+          qtyInput.style.cssText = 'width:55px; padding:0.35rem; border:1px solid var(--p-color-border); border-radius:4px; font-size:0.8125rem;';
+          qtyInput.addEventListener('change', function(e) {
+            const v = parseInt(e.target.value, 10);
+            if (v >= 1 && v <= 10) item.quantity = v;
+          });
+          row.appendChild(qtyInput);
+
+          const noteInput = document.createElement('input');
+          noteInput.type = 'text';
+          noteInput.name = 'lines[' + idx + '][usageNote]';
+          noteInput.value = item.usageNote || '';
+          noteInput.placeholder = 'Usage instructions';
+          noteInput.maxLength = 200;
+          noteInput.style.cssText = 'flex:2; padding:0.35rem; border:1px solid var(--p-color-border); border-radius:4px; font-size:0.8125rem;';
+          noteInput.addEventListener('input', function(e) {
+            item.usageNote = e.target.value;
+          });
+          row.appendChild(noteInput);
+
+          const removeBtn = document.createElement('button');
+          removeBtn.type = 'button';
+          removeBtn.style.cssText = 'background:none; border:none; color:#dc2626; cursor:pointer; font-size:1.25rem; padding:0 0.25rem;';
+          removeBtn.innerHTML = '&times;';
+          removeBtn.title = 'Remove item';
+          removeBtn.addEventListener('click', function() {
+            starterItems.splice(idx, 1);
+            updateStarterRows();
+          });
+          row.appendChild(removeBtn);
+
+          starterLinesContainer.appendChild(row);
+        });
+      }
+
+      function performStarterSearch() {
+        const q = (starterSearchInput ? starterSearchInput.value : '').trim();
+        if (q.length < 2 || !starterSearchDropdown) return;
+        starterSearchDropdown.style.display = 'block';
+        starterSearchDropdown.innerHTML = '<div style="padding:0.75rem; color:#6b7280; font-size:0.875rem;">Searching...</div>';
+
+        const searchUrl = '/search/suggest.json?resources[type]=product&resources[limit]=10&resources[options][unavailable_products]=show&q=' + encodeURIComponent(q);
+        fetch(searchUrl, { headers: { Accept: 'application/json' } })
+          .then(function(r) { return r.ok ? r.json() : Promise.reject(new Error('Search failed')); })
+          .then(function(data) {
+            let products = (data && data.resources && data.resources.results && data.resources.results.products) || data.products || [];
+            if (!products.length) {
+              starterSearchDropdown.innerHTML = '<div style="padding:0.75rem; color:#6b7280; font-size:0.875rem;">No products found</div>';
+              return;
+            }
+            starterSearchDropdown.innerHTML = '';
+            products.forEach(function(p) {
+              const itemDiv = document.createElement('div');
+              itemDiv.style.cssText = 'padding:0.5rem 0.75rem; cursor:pointer; border-bottom:1px solid #f3f4f6; display:flex; justify-content:space-between; align-items:center;';
+              itemDiv.innerHTML = '<div><div style="font-weight:500; font-size:0.875rem;">' + (p.title || 'Untitled') + '</div><div style="font-size:0.75rem; color:#6b7280;">' + (p.price ? '$' + p.price : '') + '</div></div>';
+              itemDiv.addEventListener('click', function() {
+                const handle = p.handle || '';
+                if (!handle && p.variants && p.variants.length > 0) {
+                  addVariantToStarter(p, p.variants[0], handle);
+                  return;
+                }
+                fetch('/products/' + encodeURIComponent(handle) + '.js', { headers: { Accept: 'application/json' } })
+                  .then(function(res) { return res.json(); })
+                  .then(function(fullProd) {
+                    const vars = fullProd.variants || [];
+                    if (vars.length <= 1) {
+                      addVariantToStarter(fullProd, vars[0] || {}, handle);
+                    } else {
+                      showVariantPicker(fullProd, vars, handle);
+                    }
+                  })
+                  .catch(function() {
+                    if (p.variants && p.variants.length > 0) {
+                      addVariantToStarter(p, p.variants[0], handle);
+                    } else {
+                      alert('Could not load product variants');
+                    }
+                  });
+              });
+              starterSearchDropdown.appendChild(itemDiv);
+            });
+          })
+          .catch(function() {
+            fetch('/apps/protocols?action=search&q=' + encodeURIComponent(q))
+              .then(function(r) { return r.ok ? r.json() : Promise.reject(); })
+              .then(function(demoData) {
+                let products = demoData.products || [];
+                if (!products.length) {
+                  starterSearchDropdown.innerHTML = '<div style="padding:0.75rem; color:#6b7280; font-size:0.875rem;">No products found</div>';
+                  return;
+                }
+                starterSearchDropdown.innerHTML = '';
+                products.forEach(function(p) {
+                  const itemDiv = document.createElement('div');
+                  itemDiv.style.cssText = 'padding:0.5rem 0.75rem; cursor:pointer; border-bottom:1px solid #f3f4f6;';
+                  itemDiv.textContent = p.title;
+                  itemDiv.addEventListener('click', function() {
+                    if (p.variants && p.variants.length > 0) {
+                      addVariantToStarter(p, p.variants[0], '');
+                    }
+                  });
+                  starterSearchDropdown.appendChild(itemDiv);
+                });
+              })
+              .catch(function() {
+                starterSearchDropdown.innerHTML = '<div style="padding:0.75rem; color:#dc2626; font-size:0.875rem;">Search error</div>';
+              });
+          });
+      }
+
+      function addVariantToStarter(prod, variant, handle) {
+        if (starterItems.length >= 20) {
+          alert('Maximum 20 lines allowed per starter template.');
+          return;
+        }
+        const vGid = variant.id ? (String(variant.id).startsWith('gid://') ? String(variant.id) : 'gid://shopify/ProductVariant/' + variant.id) : '';
+        if (!vGid) {
+          alert('Invalid variant');
+          return;
+        }
+        if (starterItems.some(function(i) { return i.variantGid === vGid; })) {
+          alert('This product variant is already in the starter template.');
+          return;
+        }
+        const title = variant.title && variant.title !== 'Default Title' ? (prod.title + ' - ' + variant.title) : (prod.title || 'Product');
+        starterItems.push({
+          variantGid: vGid,
+          productHandle: handle || '',
+          title: title,
+          quantity: 1,
+          usageNote: '',
+        });
+        if (starterSearchDropdown) starterSearchDropdown.style.display = 'none';
+        if (starterSearchInput) starterSearchInput.value = '';
+        updateStarterRows();
+      }
+
+      function showVariantPicker(prod, variants, handle) {
+        if (!starterSearchDropdown) return;
+        starterSearchDropdown.innerHTML = '<div style="padding:0.5rem 0.75rem; font-weight:600; font-size:0.8125rem; background:#f9fafb; border-bottom:1px solid #e5e7eb;">Select variant for ' + prod.title + '</div>';
+        variants.forEach(function(v) {
+          const vDiv = document.createElement('div');
+          vDiv.style.cssText = 'padding:0.5rem 0.75rem; cursor:pointer; border-bottom:1px solid #f3f4f6; font-size:0.8125rem;';
+          vDiv.textContent = v.title + (v.price ? ' ($' + (parseFloat(v.price)/100).toFixed(2) + ')' : '');
+          vDiv.addEventListener('click', function() {
+            addVariantToStarter(prod, v, handle);
+          });
+          starterSearchDropdown.appendChild(vDiv);
+        });
+      }
+
+      if (starterSearchBtn) {
+        starterSearchBtn.addEventListener('click', performStarterSearch);
+      }
+      if (starterSearchInput) {
+        let debounceTimer;
+        starterSearchInput.addEventListener('input', function() {
+          clearTimeout(debounceTimer);
+          debounceTimer = setTimeout(performStarterSearch, 300);
+        });
+      }
+      if (starterForm) {
+        starterForm.addEventListener('submit', function(e) {
+          if (starterItems.length === 0) {
+            e.preventDefault();
+            alert('Please add at least one product line item to the starter template.');
+          }
+        });
+      }
     })();
   </script>
 </body>

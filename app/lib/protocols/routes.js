@@ -1555,12 +1555,14 @@ export async function handleAdminDashboardRequest(db, request, options = {}) {
     const frameAncestors = shop && SHOPIFY_DOMAIN_REGEX.test(shop)
       ? `https://${shop} https://admin.shopify.com`
       : `https://*.myshopify.com https://admin.shopify.com`;
+    const connectShop = shop && SHOPIFY_DOMAIN_REGEX.test(shop) ? ` https://${shop}` : '';
+    const csp = `frame-ancestors ${frameAncestors}; default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.shopify.com https://cdn.shopifycdn.net; style-src 'self' 'unsafe-inline' https://cdn.shopify.com; img-src 'self' data: https:; connect-src 'self' https://admin.shopify.com${connectShop};`;
 
     return new Response(html, {
       status: 200,
       headers: {
         'Content-Type': 'text/html; charset=utf-8',
-        'Content-Security-Policy': `frame-ancestors ${frameAncestors};`,
+        'Content-Security-Policy': csp,
         'X-Content-Type-Options': 'nosniff',
         'Referrer-Policy': 'strict-origin-when-cross-origin'
       }

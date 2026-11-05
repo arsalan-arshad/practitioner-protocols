@@ -85,13 +85,22 @@
     - Bug 2 (fake `$0.00` total): Removed total retail price display from portal cards (shows `"N item(s)"`), and eliminated all hardcoded `$` symbols in `portal.js` and `proxy.js`.
     - Bug 3 (print handout): Implemented print-friendly layout in `renderProtocolLiquid` when `?handout=1` (with `@media print`, `window.print()` trigger, hidden banner/Add buttons, and settings `handoutText` and `footerDisclaimer`). Chosen over hiding the link because M4 already built handout/QR modules and theme-native client hydration provides a superior print experience.
   - Automated unit test coverage: 493 passing tests across 109 suites (including node:vm script parse regression guards).
-- [x] **M9b-3b: Protocol Lifecycle Management (Archive, Restore, Duplicate) (IMPLEMENTED, PENDING LIVE DEV-STORE VERIFICATION)**:
+- [x] **M9b-3b: Protocol Lifecycle Management (Archive, Restore, Duplicate) (VERIFIED LIVE on the dev store)**:
   - App Proxy mutating JSON POST actions (`action=archive&id=<id>`, `action=restore&id=<id>`, `action=duplicate&id=<id>`) with CSRF protection (exact `application/json` Content-Type, `Sec-Fetch-Site: same-origin` check) and unknown action rejection (400).
   - Strict Rule 4 tenant and ownership isolation: cross-owner and cross-shop archive/restore/duplicate requests return 404 without leaking existence; starter templates cannot be modified or archived (403).
   - Duplicating own protocols or starter templates creates a practitioner-owned active copy (`ownerType: 'customer'`, `isStarter: false`) prefixed with `"Copy of <name>"` (trimmed to $\le 60$), copying all lines (`variantGid`, `productHandle`, `quantity`, `usageNote`), with a fresh ID and unique share token.
   - Client link lifecycle: archived protocols render inactive client state ("Protocol No Longer Active" / "This recommendation is no longer active" with zero Add buttons), and restoring brings back the active client page under the exact same share token.
   - Practitioner portal UI: in-page confirmation UI for archiving (inline Confirm/Cancel, strictly zero `window.confirm`, `window.alert`, or `window.prompt` dialogs), dedicated "Archived Protocols (n)" section with Restore buttons, "Use as template" buttons on brand starter templates, and `#portal-global-error` in-page error reporting with `textContent`.
-  - Automated unit test coverage: 493 passing tests across 109 suites (`npm test`).
+  - VERIFIED LIVE on dev store: in-page archive flow with inline confirmation UI, archived protocol rendering inactive client page with zero Add buttons under its original share token, dedicated Archived Protocols section in portal with one-click Restore, reactivating protocol and immediately restoring active client page under same token, and duplicate-own-protocol producing fresh active copy prefixed with `"Copy of <name>"`.
+  - NOT verified live (explicitly stated): checkout to orders/paid, the logged-out guest view, handoutText/footerDisclaimer rendering, real printing, duplicate-from-starter, live cross-owner/cross-shop denial, non-Latin handles.
+- [x] **Pre-Submission Hardening, Security Headers, Privacy & Starter UX**:
+  - OAuth state security fix: HMAC-signed `shopify_oauth_state` cookie (`HttpOnly; Secure; SameSite=Lax`, Max-Age 600, Path=/api/auth), validated via `crypto.timingSafeEqual` with 600s max-age, cleared afterwards with Max-Age 0, storing `'authenticated'` in `Session.state`.
+  - Public Privacy Policy page: `GET /privacy` (public HTML, status 200, UTF-8, zero shopper PII, read_orders aggregate attribution only, compliance webhooks, sub-processors Railway & Shopify, optional `PRIVACY_CONTACT_EMAIL`, zero health claims).
+  - Security headers: `Strict-Transport-Security: max-age=31536000; includeSubDomains` on all responses; expanded embedded App Bridge `Content-Security-Policy`.
+  - Admin starter UX: interactive product catalog search replacing typed variant GID input in `#create-starter-modal`.
+  - Small fixes: suppressed professional banner on archived client page, fixed unauthenticated `GET /api/admin/practitioners` 401 with retry header, renamed settings label to "Individual Mode (Customer Account)", added `.github/CODEOWNERS` with `@arsalan-arshad`.
+  - Assets: generated simplified icon `assets/brand/icon-v3-1200.png` (1200x1200 PNG), verified `assets/brand/thumbnail-1280x640.png`, and added Playwright fixture script `scripts/screenshots.mjs`.
+  - Automated unit test coverage: 505 passing tests across 111 suites (`npm test`).
 
 ## Later
 Practitioner application form · aggregate "client orders" count on protocol cards · protocol version history · Salesforce rollup via Bridge Recipes.

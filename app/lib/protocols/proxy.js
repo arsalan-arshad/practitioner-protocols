@@ -647,7 +647,6 @@ export function renderProtocolLiquid({
   if (state === 'archived') {
     return `${robotsMeta}${styles}
 <div class="protocol-container">
-  ${practitionerBanner}
   <div class="protocol-status-card protocol-archived">
     <div class="protocol-status-icon">
       <svg width="48" height="48" fill="none" viewBox="0 0 24 24" stroke="currentColor">

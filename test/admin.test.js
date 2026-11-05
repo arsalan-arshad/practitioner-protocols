@@ -1349,6 +1349,33 @@ describe('Merchant Admin Layer (app/lib/protocols/admin.js)', () => {
       assert.ok(htmlEnabled.includes('name="allowSelfEnrol" value="true" checked'));
     });
 
+    it('renders create starter modal with product search input instead of typed variant GID', () => {
+      const html = renderAdminHtml({
+        shop: testShop,
+        starters: mockStarters,
+        activeTab: 'starters'
+      });
+
+      assert.ok(html.includes('id="create-starter-modal"'));
+      assert.ok(html.includes('id="admin-starter-search-input"'));
+      assert.ok(html.includes('id="admin-starter-search-btn"'));
+      assert.ok(html.includes('id="admin-starter-search-dropdown"'));
+      assert.ok(html.includes('id="starter-lines-container"'));
+      assert.ok(!html.includes('name="lines[0][variantGid]"'));
+      assert.ok(!html.includes('placeholder="gid://shopify/ProductVariant/...'));
+    });
+
+    it('renders Individual Mode (Customer Account) option label in settings tab', () => {
+      const html = renderAdminHtml({
+        shop: testShop,
+        settings: { mode: 'tag' },
+        activeTab: 'settings'
+      });
+
+      assert.ok(html.includes('<option value="tag" selected>Individual Mode (Customer Account)</option>'));
+      assert.ok(!html.includes('Customer Tag "practitioner"'));
+    });
+
     it('renders pending practitioner row with (requested, unverified) and link to shopify admin customer page', () => {
       const html = renderAdminHtml({
         shop: testShop,

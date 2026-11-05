@@ -1,6 +1,6 @@
 # Practitioner Protocols — Project Context (for Claude)
 
-_Snapshot: 2026-11-05 · Live Railway deployment active (`practitioner-protocols-production.up.railway.app`) with internal Postgres & ledger migrations · Production app record "Practitioner Protocols" released (v2, Public distribution) · Production hardening complete · Milestones M9a, M9b-1, M9b-2, M9b-3a & M9b-3b VERIFIED LIVE on dev store · Pre-submission hardening complete (OAuth state cookie security fix, public /privacy page, Strict-Transport-Security on all responses, expanded embedded App Bridge CSP, admin starter product search UX, individual mode settings label, CODEOWNERS, screenshots fixture generator) · Spikes S2, S3, S4, S5, S6 resolved; S1 resolved on the Plus dev store only · Brand assets v2 & v3 produced and verified · 505 tests passing across 111 suites._
+_Snapshot: 2026-11-05 · Live Railway deployment active (`practitioner-protocols-production.up.railway.app`) with internal Postgres & ledger migrations · Production app record "Practitioner Protocols" released (v2, Public distribution) · Production hardening complete · Milestones M9a, M9b-1, M9b-2, M9b-3a & M9b-3b VERIFIED LIVE on dev store · Pre-submission hardening complete (OAuth state cookie security fix, public /privacy page, Strict-Transport-Security on all responses, expanded embedded App Bridge CSP, attribution contract fix, admin starter product search UX & fallback, individual mode settings label, CODEOWNERS, screenshots fixture generator) · Spikes S2, S3, S4, S5, S6 resolved; S1 resolved on the Plus dev store only · Brand assets v2 & v3 produced and verified · 507 tests passing across 111 suites._
 _Contains NO secrets. Never paste `.env` values or tokens into chat or docs._
 
 ## 1. What this is
@@ -943,14 +943,16 @@ Run the five spikes in a day or two on a dev store; write the answers into secti
   - Dedicated "Archived Protocols" section in practitioner portal showing archived protocols with one-click "Restore".
   - One-click restore reactivates protocol and immediately restores active client page under the exact same share token.
   - Duplicate-own-protocol produces a fresh active copy prefixed with `"Copy of <name>"`, with a new unique share token and copied lines.
+  - Duplicate-from-starter produces a fresh practitioner-owned copy with copied lines.
+  - Checkout completing to `orders/paid` (webhook 200, ProtocolOrderStat row written with orders=1, units=3, revenueMinor=192135).
 - **NOT Verified Live (Explicitly Stated):**
-  - Checkout completing to `orders/paid` (live payment credentials not entered).
   - The logged-out guest view.
   - `handoutText` and `footerDisclaimer` rendering (settings empty on the dev store).
   - Real printing dialog execution.
-  - Duplicate-from-starter (tested on practitioner-owned protocols).
   - Live cross-owner and cross-shop access denial (covered by automated unit tests).
   - Non-Latin product handles (known validator limitation).
+  - Discounted-order attribution live.
+  - New CSP inside real admin iframe.
 - **Claim Nothing Else:** Only the items above are live-verified; all others remain covered by automated unit/integration tests.
 
 ## 45. Pre-Submission Hardening, Security Fixes & Assets (2026-11-05)
@@ -973,21 +975,27 @@ Run the five spikes in a day or two on a dev store; write the answers into secti
   3. **App Store Security Headers (`server.js` & `routes.js`):**
      - `Strict-Transport-Security: max-age=31536000; includeSubDomains` added to ALL responses (including `/health`, `/admin`, `/privacy`, `/api/auth`, `/api/proxy`).
      - Enhanced `Content-Security-Policy` on embedded admin pages: preserves `frame-ancestors https://${shop} https://admin.shopify.com;`, adds `default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.shopify.com https://cdn.shopifycdn.net; style-src 'self' 'unsafe-inline' https://cdn.shopify.com; img-src 'self' data: https:; connect-src 'self' https://admin.shopify.com https://${shop};`.
-  4. **Admin Starter Form UX (`app/lib/protocols/admin.js`):**
+  4. **Attribution Reporting Contract Fix (`admin.js`, `server.js`, `routes.js`):**
+     - Live order #1022 produced a correct `ProtocolOrderStat` row (orders=1, units=3, revenueMinor=192135, currency=USD, month=2026-11) but the admin attribution tab rendered $0.00 / 0 / 0 because `renderAttributionTab()` read legacy top-level properties while `getAttributionReport()` returned `{ summary, rows, byPractice, byProtocol }`.
+     - Unified single contract `{ month, summary, rows, byPractice, byProtocol }` across data service, renderer, demo data, and RFC 4180 CSV export.
+     - Replaced hard-coded "$" with `Intl.NumberFormat` currency formatting (`formatCurrencyMinor`).
+     - Added one non-PII log line per `orders/paid` webhook in `handleOrdersPaid`.
+  5. **Admin Starter Form UX (`app/lib/protocols/admin.js`):**
      - Replaced typed variant GID text input in `#create-starter-modal` with interactive product catalog search matching practitioner editor UX (`#admin-starter-search-input`, `#admin-starter-search-btn`, `#admin-starter-search-dropdown`, `#starter-lines-container`).
-     - Client script fetches debounced `/search/suggest.json` and loads variants via `/products/<handle>.js` (or `/apps/protocols?action=search` fallback in demo mode) requiring zero new scopes.
-     - Selected items dynamically populate hidden `lines[i][variantGid]`, hidden `lines[i][productHandle]`, quantity stepper (1–10), usage note ($\le 200$ chars), and remove buttons.
-  5. **Small Fixes & Hygiene:**
+     - Added collapsible "Advanced: Enter Variant GID directly" fallback (`#admin-starter-manual-gid`, `#admin-starter-manual-handle`, `#admin-starter-manual-title`, `#admin-starter-manual-add-btn`) allowing merchants to add variants directly without requiring additional scopes (`read_products`), since Storefront Ajax API cannot be called cross-origin from an embedded admin iframe without CORS violation.
+     - Client script clearly degrades search with an informative message when storefront lookup fails.
+  6. **Small Fixes & Hygiene:**
      - Suppressed "signed in as a professional" banner on inactive (archived) client pages in `app/lib/protocols/proxy.js`.
      - Fixed `GET /api/admin/practitioners`: now returns HTTP 401 with `X-Shopify-Retry-Invalid-Session-Request: 1` when unauthenticated in production mode instead of 404.
      - Settings tab: renamed stale option label `Tag Mode (Customer Tag "practitioner")` to `Individual Mode (Customer Account)`.
      - Added `.github/CODEOWNERS` designating `* @arsalan-arshad` as owner of all repository files.
      - Non-Latin product handle investigation: Shopify automatically transliterates non-Latin Unicode characters (Cyrillic, Arabic, Chinese, accents) into ASCII-safe strings upon creation. Querying `/products/<handle>.js` with raw Unicode returns 404 because handles are stored in ASCII format (`^[a-z0-9][a-z0-9-]*$`). Therefore, `PRODUCT_HANDLE_PATTERN` is intentionally left unchanged per instructions.
-  6. **Assets & Screenshots:**
-     - Generated simplified app icon `assets/brand/icon-v3-1200.png` (1200x1200 PNG, single bold mark: off-white rounded protocol card with central coral QR node on deep teal, readable at 64px, zero text, zero Shopify marks).
+  7. **Assets & Screenshots:**
+     - Re-exported `assets/brand/icon-v3-1200.png` under 800 KB (579 KB, 1200x1200 lossless PNG, < 1 MB App Store limit).
+     - Tracked and committed 3 compressed files: `assets/brand/icon-v3-1200-under1mb.png` (579 KB), `assets/listing/app-icon-1200-under1mb.png` (666 KB), `assets/listing/feature-image-1600x900-under1mb.png` (526 KB) and documented in `assets/listing/README.md`.
      - Verified `assets/brand/thumbnail-1280x640.png` meets GitHub social preview criteria.
-     - Added `scripts/screenshots.mjs` providing static fixtures (portal, editor, client page, handout, admin list) for Playwright (1600x900 viewport, deviceScaleFactor 1) with fixtures-only rendering and zero real shop data.
-  7. **Automated Test Coverage:**
-     - 505 unit tests passing across 111 suites (`npm test`).
+     - Added `scripts/screenshots.mjs` providing static fixtures (portal, editor, client page, handout, admin list) for Playwright (1600x900 viewport, deviceScaleFactor 1) with fixtures-only rendering and zero real shop data. Note: Playwright Chromium browser binaries are not installed locally in the repo (per zero external dependencies rule).
+  8. **Automated Test Coverage:**
+     - 507 unit tests passing across 111 suites (`npm test`).
 
 

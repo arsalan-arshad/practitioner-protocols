@@ -62,3 +62,12 @@ sips -g pixelWidth -g pixelHeight app-icon-1200.png feature-image-1600x900.png
 ```
 - `app-icon-1200.png`: `pixelWidth: 1200`, `pixelHeight: 1200`, size: 1.2 MB (< 2 MB)
 - `feature-image-1600x900.png`: `pixelWidth: 1600`, `pixelHeight: 900`, size: 1.0 MB (< 2 MB)
+
+---
+
+## 5. Optimized Listing Assets (< 1 MB Submissions)
+
+For upload surfaces strictly enforcing < 1 MB thresholds:
+- `app-icon-1200-under1mb.png` (666 KB, 1200 × 1200 px, lossless 8-bit colormap PNG)
+- `feature-image-1600x900-under1mb.png` (526 KB, 1600 × 900 px, lossless 8-bit colormap PNG)
+- Brand asset `assets/brand/icon-v3-1200.png` and `assets/brand/icon-v3-1200-under1mb.png` (579 KB, 1200 × 1200 px, < 800 KB limit)

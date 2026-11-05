@@ -573,6 +573,7 @@ export async function handleOrdersPaid(db, payload, options = {}) {
   // Return early if order has no protocol attributions: avoids opening a database transaction
   // or recording an unused ProcessedWebhook row for normal non-protocol orders (Item 5).
   if (!attributions || attributions.length === 0) {
+    console.log('[Webhook:orders/paid] topic=orders/paid shop=%s attributedLines=0 rowsUpdated=0 duplicate=no reason="No protocol attribution in order"', shop || 'unknown');
     return {
       success: true,
       shop,
@@ -597,6 +598,7 @@ export async function handleOrdersPaid(db, payload, options = {}) {
   const currency = options.currency || order?.currency || order?.presentment_currency || 'USD';
 
   if (!shop) {
+    console.log('[Webhook:orders/paid] topic=orders/paid shop="" attributedLines=%d rowsUpdated=0 duplicate=no reason="Missing shop identifier"', attributions.length);
     return {
       success: false,
       reason: 'MISSING_SHOP',
@@ -618,6 +620,7 @@ export async function handleOrdersPaid(db, payload, options = {}) {
   });
 
   if (result.duplicate) {
+    console.log('[Webhook:orders/paid] topic=orders/paid shop=%s attributedLines=%d rowsUpdated=0 duplicate=yes reason="Duplicate webhook ID"', shop, attributions.length);
     return {
       success: true,
       duplicate: true,
@@ -629,6 +632,7 @@ export async function handleOrdersPaid(db, payload, options = {}) {
     };
   }
 
+  console.log('[Webhook:orders/paid] topic=orders/paid shop=%s attributedLines=%d rowsUpdated=%d duplicate=no', shop, attributions.length, result.updatedCount);
   return {
     success: true,
     shop,

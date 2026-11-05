@@ -1,10 +1,12 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import {
   ProtocolAdminError,
   ADMIN_ERROR_CODES,
   assertNoPii,
   validatePracticeName,
+  formatCurrencyMinor,
   formatRevenue,
   escapeCsvField,
   listPractitionerProfiles,
@@ -31,6 +33,12 @@ import {
   verifyAdminSessionToken,
   extractAdminSession
 } from '../app/lib/protocols/admin.js';
+import { DEMO_REPORT } from '../server.js';
+import {
+  handleWebhookRequest,
+  handleAdminDashboardRequest,
+  handleAdminAttributionCsvRequest
+} from '../app/lib/protocols/routes.js';
 
 describe('Merchant Admin Layer (app/lib/protocols/admin.js)', () => {
   const testShop = 'brand-store.myshopify.com';
@@ -294,11 +302,47 @@ describe('Merchant Admin Layer (app/lib/protocols/admin.js)', () => {
           return { rows: [{ ...created }] };
         }
 
+        // Protocol lookup by token
+        if (sql.includes('FROM "Protocol"') && sql.includes('WHERE shop = $1 AND token = $2')) {
+          const proto = state.protocols.find(p => p.shop === params[0] && p.token === params[1]);
+          return { rows: proto ? [{ id: proto.id, ownerId: proto.ownerId }] : [] };
+        }
+
+        // ProcessedWebhook INSERT
+        if (sql.includes('INSERT INTO "ProcessedWebhook"')) {
+          return { rowCount: 1, rows: [{ id: 'wh_test_1' }] };
+        }
+
+        // ProtocolOrderStat UPSERT
+        if (sql.includes('INSERT INTO "ProtocolOrderStat"')) {
+          const [shop, protocolId, ownerId, month, units, revenueMinor, currency] = params;
+          let stat = state.orderStats.find(s => s.shop === shop && s.protocolId === protocolId && s.month === month && s.currency === currency);
+          if (stat) {
+            stat.orders += 1;
+            stat.units += units;
+            stat.revenueMinor += revenueMinor;
+          } else {
+            stat = {
+              id: `stat_${Date.now()}`,
+              shop,
+              protocolId,
+              ownerId,
+              month,
+              orders: 1,
+              units,
+              revenueMinor,
+              currency
+            };
+            state.orderStats.push(stat);
+          }
+          return { rows: [{ ...stat }] };
+        }
+
         // Attribution Report SELECT
         if (sql.includes('FROM "ProtocolOrderStat" s')) {
           let stats = state.orderStats.filter(s => s.shop === params[0]);
-          if (params.includes('2026-10')) {
-            stats = stats.filter(s => s.month === '2026-10');
+          if (params.length > 1 && params[1]) {
+            stats = stats.filter(s => s.month === params[1]);
           }
           const rows = stats.map(s => {
             const proto = state.protocols.find(p => p.id === s.protocolId);
@@ -1052,12 +1096,12 @@ describe('Merchant Admin Layer (app/lib/protocols/admin.js)', () => {
       assert.equal(report.summary.totalOrders, 17);
       assert.equal(report.summary.totalUnits, 34);
       assert.equal(report.summary.totalRevenueMinor, 35550);
-      assert.equal(report.summary.totalRevenueFormatted, '355.50');
+      assert.equal(report.summary.totalRevenueFormatted, '$355.50');
 
       assert.equal(report.byPractice.length, 2);
       const drSmith = report.byPractice.find(p => p.ownerId === 'gid://shopify/Customer/101');
       assert.equal(drSmith.orders, 12);
-      assert.equal(drSmith.revenueFormatted, '245.50');
+      assert.equal(drSmith.revenueFormatted, '$245.50');
 
       assert.equal(report.byProtocol.length, 2);
       const starterProto = report.byProtocol.find(p => p.protocolId === 'proto_2');
@@ -1153,6 +1197,130 @@ describe('Merchant Admin Layer (app/lib/protocols/admin.js)', () => {
       assert.ok(csvOutput.includes('245.50'));
       assert.ok(csvOutput.includes('110.00'));
     });
+
+    it('enforces that DEMO_REPORT shape and getAttributionReport return shape stay in sync', async () => {
+      const db = createMockDb({
+        profiles: mockProfiles,
+        protocols: mockProtocols,
+        orderStats: mockStats
+      });
+
+      const report = await getAttributionReport(db, { shop: testShop, month: '2026-10' });
+
+      const demoKeys = Object.keys(DEMO_REPORT).sort();
+      const reportKeys = Object.keys(report).sort();
+      assert.deepEqual(reportKeys, demoKeys, 'Top-level report keys must match DEMO_REPORT');
+
+      const demoSummaryKeys = Object.keys(DEMO_REPORT.summary).sort();
+      const reportSummaryKeys = Object.keys(report.summary).sort();
+      assert.deepEqual(reportSummaryKeys, demoSummaryKeys, 'Summary keys must match DEMO_REPORT.summary');
+    });
+
+    it('integration test: records orders/paid webhook attribution and renders real numbers in admin dashboard HTML and CSV', async () => {
+      const apiSecret = 'test_webhook_secret_key_123';
+      const apiKey = 'test_api_key_456';
+      const webhookShop = testShop;
+      const testToken = 'tok_live_1022';
+
+      const mockDb = createMockDb({
+        profiles: [
+          {
+            id: 'prof_1',
+            shop: webhookShop,
+            ownerGid: 'gid://shopify/Customer/101',
+            practiceName: 'Apex Integrative Wellness',
+            isApproved: true
+          }
+        ],
+        protocols: [
+          {
+            id: 'proto_1022',
+            shop: webhookShop,
+            token: testToken,
+            name: 'Cellular Restoration Protocol',
+            ownerId: 'gid://shopify/Customer/101',
+            isStarter: false
+          }
+        ],
+        orderStats: []
+      });
+
+      // 1. Prepare REST-shaped orders/paid payload
+      const orderPayload = {
+        id: 1022,
+        created_at: '2026-11-05T12:00:00Z',
+        currency: 'USD',
+        line_items: [
+          {
+            id: 991,
+            variant_id: 12345,
+            quantity: 3,
+            price: '640.45',
+            discount_allocations: [],
+            properties: [
+              { name: '_protocol_token', value: testToken }
+            ]
+          }
+        ]
+      };
+      const rawPayload = JSON.stringify(orderPayload);
+      const hmac = crypto.createHmac('sha256', apiSecret).update(rawPayload, 'utf8').digest('base64');
+
+      const webhookReq = new Request(`https://${webhookShop}/webhooks`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-shopify-topic': 'orders/paid',
+          'x-shopify-shop-domain': webhookShop,
+          'x-shopify-hmac-sha256': hmac,
+          'x-shopify-webhook-id': 'wh_evt_1022'
+        },
+        body: rawPayload
+      });
+
+      const webhookRes = await handleWebhookRequest(mockDb, webhookReq, { apiSecret });
+      assert.equal(webhookRes.status, 200, 'Webhook handler must return 200');
+
+      // 2. Query admin attribution tab through handleAdminDashboardRequest
+      const token = createAdminSessionToken({ shop: webhookShop, apiKey }, apiSecret);
+      const dashReq = new Request(`https://${webhookShop}/admin?tab=attribution&month=2026-11`, {
+        method: 'GET',
+        headers: {
+          authorization: `Bearer ${token}`
+        }
+      });
+
+      const dashRes = await handleAdminDashboardRequest(mockDb, dashReq, { apiSecret, apiKey, expectedShop: webhookShop });
+      assert.equal(dashRes.status, 200);
+      const dashHtml = await dashRes.text();
+
+      // Assert real numbers in HTML
+      assert.ok(dashHtml.includes('$1,921.35'), 'HTML must render formatted revenue $1,921.35');
+      assert.ok(dashHtml.includes('Apex Integrative Wellness'), 'HTML must include practice name');
+      assert.ok(dashHtml.includes('Cellular Restoration Protocol'), 'HTML must include protocol name');
+      assert.ok(dashHtml.includes('>1<'), 'HTML must show 1 attributed order');
+      assert.ok(dashHtml.includes('>3<'), 'HTML must show 3 total units');
+
+      // 3. Export CSV through handleAdminAttributionCsvRequest
+      const csvReq = new Request(`https://${webhookShop}/api/admin/attribution.csv?month=2026-11`, {
+        method: 'GET',
+        headers: {
+          authorization: `Bearer ${token}`
+        }
+      });
+
+      const csvRes = await handleAdminAttributionCsvRequest(mockDb, csvReq, { apiSecret, expectedShop: webhookShop });
+      assert.equal(csvRes.status, 200);
+      const csvText = await csvRes.text();
+
+      // Assert CSV structure and numbers
+      assert.ok(csvText.includes('Month,Practice Name,Owner GID,Protocol ID,Protocol Name,Is Starter,Orders,Units,Revenue,Currency'), 'CSV must contain standard RFC 4180 headers');
+      assert.ok(csvText.includes('2026-11'), 'CSV must contain month 2026-11');
+      assert.ok(csvText.includes('Apex Integrative Wellness'), 'CSV must contain practice name');
+      assert.ok(csvText.includes('Cellular Restoration Protocol'), 'CSV must contain protocol name');
+      assert.ok(csvText.includes('1921.35'), 'CSV must contain unquoted numeric revenue 1921.35');
+      assert.ok(csvText.includes('USD'), 'CSV must contain USD currency');
+    });
   });
 
   describe('renderAdminHtml (M6 Embedded Polaris Admin UI)', () => {
@@ -1184,6 +1352,45 @@ describe('Merchant Admin Layer (app/lib/protocols/admin.js)', () => {
 
     const mockReport = {
       month: '2026-10',
+      summary: {
+        totalOrders: 14,
+        totalUnits: 38,
+        totalRevenueMinor: 124550,
+        totalRevenueFormatted: '$1,245.50',
+        currency: 'USD'
+      },
+      rows: [
+        {
+          month: '2026-10',
+          practiceName: 'Elite Naturopathic Clinic',
+          protocolName: 'Daily Gut Regimen',
+          orders: 10,
+          units: 25,
+          revenueMinor: 85000,
+          revenueFormatted: '$850.00',
+          currency: 'USD'
+        }
+      ],
+      byPractice: [
+        {
+          practiceName: 'Elite Naturopathic Clinic',
+          orders: 10,
+          units: 25,
+          revenueMinor: 85000,
+          revenueFormatted: '$850.00',
+          currency: 'USD'
+        }
+      ],
+      byProtocol: [
+        {
+          protocolName: 'Daily Gut Regimen',
+          orders: 10,
+          units: 25,
+          revenueMinor: 85000,
+          revenueFormatted: '$850.00',
+          currency: 'USD'
+        }
+      ],
       totalOrders: 14,
       totalUnits: 38,
       totalRevenueFormatted: '$1,245.50',
@@ -1193,7 +1400,9 @@ describe('Merchant Admin Layer (app/lib/protocols/admin.js)', () => {
           protocolName: 'Daily Gut Regimen',
           orders: 10,
           units: 25,
-          revenueFormatted: '$850.00'
+          revenueMinor: 85000,
+          revenueFormatted: '$850.00',
+          currency: 'USD'
         }
       ]
     };

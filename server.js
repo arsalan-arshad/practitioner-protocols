@@ -13,7 +13,7 @@ import crypto from 'node:crypto';
 import { URL, URLSearchParams, fileURLToPath } from 'node:url';
 import pg from 'pg';
 import { getDatabaseSslConfig } from './scripts/migrate.js';
-import { renderAdminHtml, renderAdminBootstrapHtml } from './app/lib/protocols/admin.js';
+import { renderAdminHtml, renderAdminBootstrapHtml, formatAttributionCsv } from './app/lib/protocols/admin.js';
 import { renderPortalLiquid } from './app/lib/protocols/portal.js';
 import { renderProtocolLiquid, verifyAppProxyHmac, verifyOAuthHmac } from './app/lib/protocols/proxy.js';
 import { renderHandoutHtml } from './app/lib/protocols/handout.js';
@@ -124,23 +124,112 @@ export const DEMO_STARTERS = [
 
 export const DEMO_REPORT = {
   month: '2026-10',
+  summary: {
+    totalOrders: 18,
+    totalUnits: 46,
+    totalRevenueMinor: 184550,
+    totalRevenueFormatted: '$1,845.50',
+    currency: 'USD',
+  },
+  rows: [
+    {
+      month: '2026-10',
+      ownerId: 'gid://shopify/Customer/1001',
+      practiceName: 'Apex Integrative Wellness',
+      protocolId: 'proto_demo_1',
+      protocolName: 'Daily Essentials Protocol',
+      isStarter: false,
+      orders: 12,
+      units: 32,
+      revenueMinor: 129000,
+      revenueFormatted: '$1,290.00',
+      currency: 'USD',
+    },
+    {
+      month: '2026-10',
+      ownerId: 'gid://shopify/Customer/1002',
+      practiceName: 'Summit Performance Studio',
+      protocolId: 'proto_demo_2',
+      protocolName: 'Active Recovery Routine',
+      isStarter: false,
+      orders: 6,
+      units: 14,
+      revenueMinor: 55550,
+      revenueFormatted: '$555.50',
+      currency: 'USD',
+    },
+  ],
+  byPractice: [
+    {
+      ownerId: 'gid://shopify/Customer/1001',
+      practiceName: 'Apex Integrative Wellness',
+      orders: 12,
+      units: 32,
+      revenueMinor: 129000,
+      revenueFormatted: '$1,290.00',
+      currency: 'USD',
+    },
+    {
+      ownerId: 'gid://shopify/Customer/1002',
+      practiceName: 'Summit Performance Studio',
+      orders: 6,
+      units: 14,
+      revenueMinor: 55550,
+      revenueFormatted: '$555.50',
+      currency: 'USD',
+    },
+  ],
+  byProtocol: [
+    {
+      protocolId: 'proto_demo_1',
+      protocolName: 'Daily Essentials Protocol',
+      isStarter: false,
+      orders: 12,
+      units: 32,
+      revenueMinor: 129000,
+      revenueFormatted: '$1,290.00',
+      currency: 'USD',
+    },
+    {
+      protocolId: 'proto_demo_2',
+      protocolName: 'Active Recovery Routine',
+      isStarter: false,
+      orders: 6,
+      units: 14,
+      revenueMinor: 55550,
+      revenueFormatted: '$555.50',
+      currency: 'USD',
+    },
+  ],
   totalOrders: 18,
   totalUnits: 46,
   totalRevenueFormatted: '$1,845.50',
   items: [
     {
+      month: '2026-10',
+      ownerId: 'gid://shopify/Customer/1001',
       practiceName: 'Apex Integrative Wellness',
+      protocolId: 'proto_demo_1',
       protocolName: 'Daily Essentials Protocol',
+      isStarter: false,
       orders: 12,
       units: 32,
+      revenueMinor: 129000,
       revenueFormatted: '$1,290.00',
+      currency: 'USD',
     },
     {
+      month: '2026-10',
+      ownerId: 'gid://shopify/Customer/1002',
       practiceName: 'Summit Performance Studio',
+      protocolId: 'proto_demo_2',
       protocolName: 'Active Recovery Routine',
+      isStarter: false,
       orders: 6,
       units: 14,
+      revenueMinor: 55550,
       revenueFormatted: '$555.50',
+      currency: 'USD',
     },
   ],
 };
@@ -229,20 +318,9 @@ async function parseFormData(req) {
  * @param {string} [month]
  * @returns {string}
  */
-function generateDemoAttributionCsv(month = DEMO_REPORT.month) {
-  const headers = ['Month', 'Practice Name', 'Protocol', 'Orders', 'Units', 'Revenue'];
-  const lines = [headers.join(',')];
-  for (const item of DEMO_REPORT.items) {
-    lines.push([
-      `"${month || DEMO_REPORT.month}"`,
-      `"${item.practiceName.replace(/"/g, '""')}"`,
-      `"${item.protocolName.replace(/"/g, '""')}"`,
-      item.orders,
-      item.units,
-      `"${item.revenueFormatted}"`,
-    ].join(','));
-  }
-  return lines.join('\r\n') + '\r\n';
+export function generateDemoAttributionCsv(month = DEMO_REPORT.month) {
+  const rows = (DEMO_REPORT.rows || []).map(r => ({ ...r, month }));
+  return formatAttributionCsv({ rows });
 }
 
 /**

@@ -218,7 +218,7 @@ describe('Server & Configuration Hardening (server.js, shopify.app.toml, README.
 
       assert.equal(res.statusCode, 200);
       assert.ok(res.headers['Content-Type'].includes('text/csv'));
-      assert.ok(res.body.includes('Month,Practice Name,Protocol,Orders,Units,Revenue'));
+      assert.ok(res.body.includes('Month,Practice Name,Owner GID,Protocol ID,Protocol Name,Is Starter,Orders,Units,Revenue,Currency'));
       assert.ok(res.body.includes('Daily Essentials Protocol'));
     });
   });

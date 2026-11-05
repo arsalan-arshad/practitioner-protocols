@@ -98,6 +98,25 @@ export function validatePracticeName(name) {
 }
 
 /**
+ * Formats minor units (cents) into a localized currency string using Intl.NumberFormat.
+ *
+ * @param {number | bigint | string} minorUnits
+ * @param {string} [currency='USD']
+ * @param {string} [locale='en-US']
+ * @returns {string} E.g. "$1,921.35", "CA$1,921.35"
+ */
+export function formatCurrencyMinor(minorUnits, currency = 'USD', locale = 'en-US') {
+  const val = Number(minorUnits);
+  const amount = isNaN(val) ? 0 : val / 100;
+  const safeCurrency = (typeof currency === 'string' && currency.length === 3) ? currency.toUpperCase() : 'USD';
+  try {
+    return new Intl.NumberFormat(locale, { style: 'currency', currency: safeCurrency }).format(amount);
+  } catch {
+    return `${safeCurrency} ${amount.toFixed(2)}`;
+  }
+}
+
+/**
  * Formats minor currency units (cents) into a 2-decimal string.
  *
  * @param {number | bigint | string} revenueMinor
@@ -817,27 +836,54 @@ export async function getAttributionReport(db, { shop, month, ownerId, protocolI
 
   const byPractice = Array.from(practiceMap.values()).map(p => ({
     ...p,
-    revenueFormatted: formatRevenue(p.revenueMinor),
+    revenueFormatted: formatCurrencyMinor(p.revenueMinor, currency),
     currency
   }));
 
   const byProtocol = Array.from(protocolMap.values()).map(p => ({
     ...p,
-    revenueFormatted: formatRevenue(p.revenueMinor),
+    revenueFormatted: formatCurrencyMinor(p.revenueMinor, currency),
     currency
   }));
 
+  const formattedRows = rows.map(r => {
+    const revMinor = Number(r.revenueMinor) || 0;
+    const rowCurrency = r.currency || currency;
+    return {
+      month: r.month || month || new Date().toISOString().slice(0, 7),
+      ownerId: r.ownerId,
+      practiceName: r.practiceName || 'Direct',
+      protocolId: r.protocolId,
+      protocolName: r.protocolName || 'General',
+      isStarter: Boolean(r.isStarter),
+      sourceProtocolId: r.sourceProtocolId || null,
+      orders: Number(r.orders) || 0,
+      units: Number(r.units) || 0,
+      revenueMinor: revMinor,
+      revenueFormatted: formatCurrencyMinor(revMinor, rowCurrency),
+      currency: rowCurrency
+    };
+  });
+
+  const reportMonth = month || rows[0]?.month || new Date().toISOString().slice(0, 7);
+  const totalRevenueFormatted = formatCurrencyMinor(totalRevenueMinor, currency);
+
   return {
-    rows,
+    month: reportMonth,
     summary: {
       totalOrders,
       totalUnits,
       totalRevenueMinor,
-      totalRevenueFormatted: formatRevenue(totalRevenueMinor),
+      totalRevenueFormatted,
       currency
     },
+    rows: formattedRows,
     byPractice,
-    byProtocol
+    byProtocol,
+    totalOrders,
+    totalUnits,
+    totalRevenueFormatted,
+    items: formattedRows
   };
 }
 
@@ -885,7 +931,9 @@ export function formatAttributionCsv(reportData) {
     if (row.revenueMinor !== undefined && row.revenueMinor !== null) {
       revenue = formatRevenue(row.revenueMinor);
     } else if (row.revenueFormatted !== undefined) {
-      revenue = String(row.revenueFormatted);
+      const cleaned = String(row.revenueFormatted).replace(/[^0-9.-]+/g, '');
+      const parsed = parseFloat(cleaned);
+      revenue = isNaN(parsed) ? '0.00' : parsed.toFixed(2);
     } else if (row.revenue !== undefined) {
       const parsed = parseFloat(row.revenue);
       revenue = isNaN(parsed) ? '0.00' : parsed.toFixed(2);
@@ -1630,13 +1678,39 @@ export function renderAdminHtml(options = {}) {
             <textarea name="introNote" rows="2" maxlength="500" placeholder="Brand guidance for specialists..." style="width:100%; padding:0.5rem; border:1px solid var(--p-color-border); border-radius:4px; box-sizing:border-box;"></textarea>
           </div>
           <div style="margin-bottom:1rem;">
-            <label style="display:block; font-weight:600; margin-bottom:0.5rem; font-size:0.875rem;">Product Line Items (1–20)</label>
-            <div id="starter-lines-container">
-              <div class="starter-line-row" style="display:flex; gap:0.5rem; margin-bottom:0.5rem; align-items:center;">
-                <input type="text" name="lines[0][variantGid]" required placeholder="gid://shopify/ProductVariant/..." style="flex:2; padding:0.4rem; border:1px solid var(--p-color-border); border-radius:4px; font-size:0.8125rem;">
-                <input type="number" name="lines[0][quantity]" value="1" min="1" max="10" required style="width:60px; padding:0.4rem; border:1px solid var(--p-color-border); border-radius:4px; font-size:0.8125rem;">
-                <input type="text" name="lines[0][usageNote]" placeholder="Usage instructions" maxlength="200" style="flex:2; padding:0.4rem; border:1px solid var(--p-color-border); border-radius:4px; font-size:0.8125rem;">
+            <label style="display:block; font-weight:600; margin-bottom:0.5rem; font-size:0.875rem;">Add Products to Starter</label>
+            <div style="display:flex; gap:0.5rem; position:relative;">
+              <input type="text" id="admin-starter-search-input" placeholder="Search catalog by product name..." style="flex:1; padding:0.5rem; border:1px solid var(--p-color-border); border-radius:4px; font-size:0.875rem; box-sizing:border-box;">
+              <button type="button" id="admin-starter-search-btn" class="Polaris-Button">Search</button>
+              <div id="admin-starter-search-dropdown" style="display:none; position:absolute; top:100%; left:0; right:0; background:#fff; border:1px solid var(--p-color-border); border-radius:4px; max-height:220px; overflow-y:auto; z-index:10000; box-shadow:0 4px 6px -1px rgba(0,0,0,0.1); margin-top:2px;"></div>
+            </div>
+            <details style="margin-top:0.75rem; border:1px solid var(--p-color-border); border-radius:4px; padding:0.5rem 0.75rem;">
+              <summary style="cursor:pointer; font-size:0.8125rem; color:var(--p-color-text-subdued); font-weight:600;">Advanced: Enter Variant GID directly</summary>
+              <div style="margin-top:0.5rem; display:flex; flex-direction:column; gap:0.5rem;">
+                <div>
+                  <label style="display:block; font-size:0.75rem; color:var(--p-color-text-subdued); margin-bottom:0.25rem;">Variant GID (Required, e.g. gid://shopify/ProductVariant/123456789)</label>
+                  <input type="text" id="admin-starter-manual-gid" placeholder="Enter variant GID or numeric ID" style="width:100%; padding:0.4rem; border:1px solid var(--p-color-border); border-radius:4px; font-size:0.8125rem; box-sizing:border-box;">
+                </div>
+                <div style="display:flex; gap:0.5rem;">
+                  <div style="flex:1;">
+                    <label style="display:block; font-size:0.75rem; color:var(--p-color-text-subdued); margin-bottom:0.25rem;">Product Handle (Optional)</label>
+                    <input type="text" id="admin-starter-manual-handle" placeholder="e.g. daily-protein" style="width:100%; padding:0.4rem; border:1px solid var(--p-color-border); border-radius:4px; font-size:0.8125rem; box-sizing:border-box;">
+                  </div>
+                  <div style="flex:1;">
+                    <label style="display:block; font-size:0.75rem; color:var(--p-color-text-subdued); margin-bottom:0.25rem;">Product Title (Optional)</label>
+                    <input type="text" id="admin-starter-manual-title" placeholder="e.g. Daily Protein" style="width:100%; padding:0.4rem; border:1px solid var(--p-color-border); border-radius:4px; font-size:0.8125rem; box-sizing:border-box;">
+                  </div>
+                </div>
+                <div>
+                  <button type="button" id="admin-starter-manual-add-btn" class="Polaris-Button" style="font-size:0.8125rem; padding:0.35rem 0.75rem;">Add Variant</button>
+                </div>
               </div>
+            </details>
+          </div>
+          <div style="margin-bottom:1rem;">
+            <label style="display:block; font-weight:600; margin-bottom:0.5rem; font-size:0.875rem;">Selected Items (<span id="starter-lines-count">0</span>/20)</label>
+            <div id="starter-lines-container" style="display:flex; flex-direction:column; gap:0.5rem;">
+              <div id="starter-lines-empty" style="color:var(--p-color-text-subdued); font-size:0.875rem; padding:0.5rem; background:#f9fafb; border-radius:4px; text-align:center;">No products added yet. Use the search above to add products.</div>
             </div>
           </div>
           <div style="display:flex; justify-content:flex-end; gap:0.5rem; margin-top:1.5rem; border-top:1px solid var(--p-color-border); padding-top:1rem;">
@@ -1650,22 +1724,49 @@ export function renderAdminHtml(options = {}) {
 
   // Tab 3: Monthly Attribution Reports
   const renderAttributionTab = () => {
-    const totalRev = report?.totalRevenueFormatted || '$0.00';
-    const totalOrders = report?.totalOrders ?? 0;
-    const totalUnits = report?.totalUnits ?? 0;
+    const summary = report?.summary || {};
+    const currency = summary.currency || report?.rows?.[0]?.currency || 'USD';
+    const totalRev = summary.totalRevenueFormatted || report?.totalRevenueFormatted || (summary.totalRevenueMinor !== undefined ? formatCurrencyMinor(summary.totalRevenueMinor, currency) : formatCurrencyMinor(0, currency));
+    const totalOrders = summary.totalOrders ?? report?.totalOrders ?? 0;
+    const totalUnits = summary.totalUnits ?? report?.totalUnits ?? 0;
     const month = escapeAdminText(report?.month || new Date().toISOString().slice(0, 7));
 
-    const rows = (report?.items || []).map((item) => {
+    const reportRows = report?.rows || report?.items || [];
+    const rows = reportRows.map((item) => {
       const practice = escapeAdminText(item.practiceName || 'Direct');
       const protocol = escapeAdminText(item.protocolName || 'General');
       const orders = item.orders ?? 0;
       const units = item.units ?? 0;
-      const rev = escapeAdminText(item.revenueFormatted || '$0.00');
+      const rowCurrency = item.currency || currency;
+      const rev = escapeAdminText(
+        item.revenueFormatted ||
+        (item.revenueMinor !== undefined ? formatCurrencyMinor(item.revenueMinor, rowCurrency) : formatCurrencyMinor(0, rowCurrency))
+      );
 
       return `
       <tr>
         <td><strong>${practice}</strong></td>
         <td>${protocol}</td>
+        <td>${orders}</td>
+        <td>${units}</td>
+        <td><strong>${rev}</strong></td>
+      </tr>`;
+    }).join('');
+
+    const practiceSummary = report?.byPractice || [];
+    const practiceRows = practiceSummary.map((p) => {
+      const practice = escapeAdminText(p.practiceName || 'Direct');
+      const orders = p.orders ?? 0;
+      const units = p.units ?? 0;
+      const pCurrency = p.currency || currency;
+      const rev = escapeAdminText(
+        p.revenueFormatted ||
+        (p.revenueMinor !== undefined ? formatCurrencyMinor(p.revenueMinor, pCurrency) : formatCurrencyMinor(0, pCurrency))
+      );
+
+      return `
+      <tr>
+        <td><strong>${practice}</strong></td>
         <td>${orders}</td>
         <td>${units}</td>
         <td><strong>${rev}</strong></td>
@@ -1704,20 +1805,41 @@ export function renderAdminHtml(options = {}) {
         </div>
       </div>
 
-      <table class="Polaris-Table">
-        <thead>
-          <tr>
-            <th>Practice Name</th>
-            <th>Protocol</th>
-            <th>Orders</th>
-            <th>Units</th>
-            <th>Revenue</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${rows || '<tr><td colspan="5" style="text-align:center; color:#6d7175;">No attributed orders recorded this month.</td></tr>'}
-        </tbody>
-      </table>
+      <div style="margin-top:1.5rem;">
+        <h3 style="font-size:1rem; font-weight:600; margin-bottom:0.75rem;">Attribution by Protocol</h3>
+        <table class="Polaris-Table">
+          <thead>
+            <tr>
+              <th>Practice Name</th>
+              <th>Protocol</th>
+              <th>Orders</th>
+              <th>Units</th>
+              <th>Revenue</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rows || '<tr><td colspan="5" style="text-align:center; color:#6d7175;">No attributed orders recorded this month.</td></tr>'}
+          </tbody>
+        </table>
+      </div>
+
+      ${practiceSummary.length > 0 ? `
+      <div style="margin-top:1.5rem;">
+        <h3 style="font-size:1rem; font-weight:600; margin-bottom:0.75rem;">Practice Summary</h3>
+        <table class="Polaris-Table">
+          <thead>
+            <tr>
+              <th>Practice Name</th>
+              <th>Orders</th>
+              <th>Units</th>
+              <th>Revenue</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${practiceRows}
+          </tbody>
+        </table>
+      </div>` : ''}
     </div>`;
   };
 
@@ -1735,7 +1857,7 @@ export function renderAdminHtml(options = {}) {
         <div style="margin-bottom: 1rem;">
           <label style="display:block; font-weight:600; margin-bottom:0.25rem;">Identity Mode</label>
           <select name="mode" style="padding:0.5rem; width:100%; max-width:320px; border-radius:4px; border:1px solid var(--p-color-border);">
-            <option value="tag" ${mode === 'tag' ? 'selected' : ''}>Tag Mode (Customer Tag "practitioner")</option>
+            <option value="tag" ${mode === 'tag' ? 'selected' : ''}>Individual Mode (Customer Account)</option>
             <option value="company" ${mode === 'company' ? 'selected' : ''}>Company Mode (B2B Company Contact)</option>
           </select>
         </div>
@@ -1932,6 +2054,255 @@ ${appBridgeHead}  <title>Practitioner Protocols &mdash; Admin</title>
           window.location.href = targetUrl.toString();
         });
       });
+
+      // Admin Starter Product Search & Selection
+      const starterSearchInput = document.getElementById('admin-starter-search-input');
+      const starterSearchBtn = document.getElementById('admin-starter-search-btn');
+      const starterSearchDropdown = document.getElementById('admin-starter-search-dropdown');
+      const starterLinesContainer = document.getElementById('starter-lines-container');
+      const starterLinesCount = document.getElementById('starter-lines-count');
+      const starterLinesEmpty = document.getElementById('starter-lines-empty');
+      const starterForm = document.getElementById('admin-create-starter-form');
+
+      let starterItems = [];
+
+      function updateStarterRows() {
+        if (!starterLinesContainer) return;
+        starterLinesContainer.querySelectorAll('.starter-line-row').forEach(function(el) { el.remove(); });
+        if (starterItems.length === 0) {
+          if (starterLinesEmpty) starterLinesEmpty.style.display = 'block';
+        } else {
+          if (starterLinesEmpty) starterLinesEmpty.style.display = 'none';
+        }
+        if (starterLinesCount) starterLinesCount.textContent = String(starterItems.length);
+
+        starterItems.forEach(function(item, idx) {
+          const row = document.createElement('div');
+          row.className = 'starter-line-row';
+          row.style.cssText = 'display:flex; gap:0.5rem; align-items:center; background:#f9fafb; padding:0.5rem; border-radius:4px; border:1px solid var(--p-color-border);';
+
+          const gidInput = document.createElement('input');
+          gidInput.type = 'hidden';
+          gidInput.name = 'lines[' + idx + '][variantGid]';
+          gidInput.value = item.variantGid;
+          row.appendChild(gidInput);
+
+          if (item.productHandle) {
+            const handleInput = document.createElement('input');
+            handleInput.type = 'hidden';
+            handleInput.name = 'lines[' + idx + '][productHandle]';
+            handleInput.value = item.productHandle;
+            row.appendChild(handleInput);
+          }
+
+          const titleDiv = document.createElement('div');
+          titleDiv.style.cssText = 'flex:2; font-size:0.8125rem; font-weight:500; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;';
+          titleDiv.textContent = item.title;
+          row.appendChild(titleDiv);
+
+          const qtyInput = document.createElement('input');
+          qtyInput.type = 'number';
+          qtyInput.name = 'lines[' + idx + '][quantity]';
+          qtyInput.value = String(item.quantity || 1);
+          qtyInput.min = '1';
+          qtyInput.max = '10';
+          qtyInput.required = true;
+          qtyInput.style.cssText = 'width:55px; padding:0.35rem; border:1px solid var(--p-color-border); border-radius:4px; font-size:0.8125rem;';
+          qtyInput.addEventListener('change', function(e) {
+            const v = parseInt(e.target.value, 10);
+            if (v >= 1 && v <= 10) item.quantity = v;
+          });
+          row.appendChild(qtyInput);
+
+          const noteInput = document.createElement('input');
+          noteInput.type = 'text';
+          noteInput.name = 'lines[' + idx + '][usageNote]';
+          noteInput.value = item.usageNote || '';
+          noteInput.placeholder = 'Usage instructions';
+          noteInput.maxLength = 200;
+          noteInput.style.cssText = 'flex:2; padding:0.35rem; border:1px solid var(--p-color-border); border-radius:4px; font-size:0.8125rem;';
+          noteInput.addEventListener('input', function(e) {
+            item.usageNote = e.target.value;
+          });
+          row.appendChild(noteInput);
+
+          const removeBtn = document.createElement('button');
+          removeBtn.type = 'button';
+          removeBtn.style.cssText = 'background:none; border:none; color:#dc2626; cursor:pointer; font-size:1.25rem; padding:0 0.25rem;';
+          removeBtn.innerHTML = '&times;';
+          removeBtn.title = 'Remove item';
+          removeBtn.addEventListener('click', function() {
+            starterItems.splice(idx, 1);
+            updateStarterRows();
+          });
+          row.appendChild(removeBtn);
+
+          starterLinesContainer.appendChild(row);
+        });
+      }
+
+      function performStarterSearch() {
+        const q = (starterSearchInput ? starterSearchInput.value : '').trim();
+        if (q.length < 2 || !starterSearchDropdown) return;
+        starterSearchDropdown.style.display = 'block';
+        starterSearchDropdown.innerHTML = '<div style="padding:0.75rem; color:#6b7280; font-size:0.875rem;">Searching...</div>';
+
+        const searchUrl = '/search/suggest.json?resources[type]=product&resources[limit]=10&resources[options][unavailable_products]=show&q=' + encodeURIComponent(q);
+        fetch(searchUrl, { headers: { Accept: 'application/json' } })
+          .then(function(r) { return r.ok ? r.json() : Promise.reject(new Error('Search failed')); })
+          .then(function(data) {
+            let products = (data && data.resources && data.resources.results && data.resources.results.products) || data.products || [];
+            if (!products.length) {
+              starterSearchDropdown.innerHTML = '<div style="padding:0.75rem; color:#6b7280; font-size:0.875rem;">No products found</div>';
+              return;
+            }
+            starterSearchDropdown.innerHTML = '';
+            products.forEach(function(p) {
+              const itemDiv = document.createElement('div');
+              itemDiv.style.cssText = 'padding:0.5rem 0.75rem; cursor:pointer; border-bottom:1px solid #f3f4f6; display:flex; justify-content:space-between; align-items:center;';
+              itemDiv.innerHTML = '<div><div style="font-weight:500; font-size:0.875rem;">' + (p.title || 'Untitled') + '</div><div style="font-size:0.75rem; color:#6b7280;">' + (p.price ? '$' + p.price : '') + '</div></div>';
+              itemDiv.addEventListener('click', function() {
+                const handle = p.handle || '';
+                if (!handle && p.variants && p.variants.length > 0) {
+                  addVariantToStarter(p, p.variants[0], handle);
+                  return;
+                }
+                fetch('/products/' + encodeURIComponent(handle) + '.js', { headers: { Accept: 'application/json' } })
+                  .then(function(res) { return res.json(); })
+                  .then(function(fullProd) {
+                    const vars = fullProd.variants || [];
+                    if (vars.length <= 1) {
+                      addVariantToStarter(fullProd, vars[0] || {}, handle);
+                    } else {
+                      showVariantPicker(fullProd, vars, handle);
+                    }
+                  })
+                  .catch(function() {
+                    if (p.variants && p.variants.length > 0) {
+                      addVariantToStarter(p, p.variants[0], handle);
+                    } else {
+                      alert('Could not load product variants');
+                    }
+                  });
+              });
+              starterSearchDropdown.appendChild(itemDiv);
+            });
+          })
+          .catch(function() {
+            if (starterSearchDropdown) {
+              starterSearchDropdown.style.display = 'block';
+              starterSearchDropdown.innerHTML = '<div style="padding:0.75rem; color:#b45309; font-size:0.8125rem; line-height:1.4;">Storefront catalog search is unavailable from the embedded admin iframe without storefront CORS. Please use the <strong>Advanced: Enter Variant GID directly</strong> section below to add product variants.</div>';
+            }
+          });
+      }
+
+      function addVariantToStarter(prod, variant, handle) {
+        if (starterItems.length >= 20) {
+          alert('Maximum 20 lines allowed per starter template.');
+          return;
+        }
+        const vGid = variant.id ? (String(variant.id).startsWith('gid://') ? String(variant.id) : 'gid://shopify/ProductVariant/' + variant.id) : '';
+        if (!vGid) {
+          alert('Invalid variant');
+          return;
+        }
+        if (starterItems.some(function(i) { return i.variantGid === vGid; })) {
+          alert('This product variant is already in the starter template.');
+          return;
+        }
+        const title = variant.title && variant.title !== 'Default Title' ? (prod.title + ' - ' + variant.title) : (prod.title || 'Product');
+        starterItems.push({
+          variantGid: vGid,
+          productHandle: handle || '',
+          title: title,
+          quantity: 1,
+          usageNote: '',
+        });
+        if (starterSearchDropdown) starterSearchDropdown.style.display = 'none';
+        if (starterSearchInput) starterSearchInput.value = '';
+        updateStarterRows();
+      }
+
+      function showVariantPicker(prod, variants, handle) {
+        if (!starterSearchDropdown) return;
+        starterSearchDropdown.innerHTML = '<div style="padding:0.5rem 0.75rem; font-weight:600; font-size:0.8125rem; background:#f9fafb; border-bottom:1px solid #e5e7eb;">Select variant for ' + prod.title + '</div>';
+        variants.forEach(function(v) {
+          const vDiv = document.createElement('div');
+          vDiv.style.cssText = 'padding:0.5rem 0.75rem; cursor:pointer; border-bottom:1px solid #f3f4f6; font-size:0.8125rem;';
+          const priceStr = v.price ? ' (' + (parseFloat(v.price)/100).toFixed(2) + ')' : '';
+          vDiv.textContent = v.title + priceStr;
+          vDiv.addEventListener('click', function() {
+            addVariantToStarter(prod, v, handle);
+          });
+          starterSearchDropdown.appendChild(vDiv);
+        });
+      }
+
+      const manualGidInput = document.getElementById('admin-starter-manual-gid');
+      const manualHandleInput = document.getElementById('admin-starter-manual-handle');
+      const manualTitleInput = document.getElementById('admin-starter-manual-title');
+      const manualAddBtn = document.getElementById('admin-starter-manual-add-btn');
+
+      if (manualAddBtn) {
+        manualAddBtn.addEventListener('click', function() {
+          let gid = (manualGidInput ? manualGidInput.value : '').trim();
+          if (!gid) {
+            alert('Please enter a variant GID.');
+            return;
+          }
+          if (!gid.startsWith('gid://shopify/ProductVariant/')) {
+            if (/^\d+$/.test(gid)) {
+              gid = 'gid://shopify/ProductVariant/' + gid;
+            } else {
+              alert('Variant ID must be numeric or gid://shopify/ProductVariant/<id>');
+              return;
+            }
+          }
+          if (starterItems.some(function(i) { return i.variantGid === gid; })) {
+            alert('This product variant is already in the starter template.');
+            return;
+          }
+          if (starterItems.length >= 20) {
+            alert('Maximum 20 lines allowed per starter template.');
+            return;
+          }
+          const handle = (manualHandleInput ? manualHandleInput.value : '').trim().toLowerCase();
+          const title = (manualTitleInput ? manualTitleInput.value : '').trim() || ('Variant ' + gid.replace('gid://shopify/ProductVariant/', ''));
+
+          starterItems.push({
+            variantGid: gid,
+            productHandle: handle,
+            title: title,
+            quantity: 1,
+            usageNote: ''
+          });
+
+          if (manualGidInput) manualGidInput.value = '';
+          if (manualHandleInput) manualHandleInput.value = '';
+          if (manualTitleInput) manualTitleInput.value = '';
+
+          updateStarterRows();
+        });
+      }
+
+      if (starterSearchBtn) {
+        starterSearchBtn.addEventListener('click', performStarterSearch);
+      }
+      if (starterSearchInput) {
+        let debounceTimer;
+        starterSearchInput.addEventListener('input', function() {
+          clearTimeout(debounceTimer);
+          debounceTimer = setTimeout(performStarterSearch, 300);
+        });
+      }
+      if (starterForm) {
+        starterForm.addEventListener('submit', function(e) {
+          if (starterItems.length === 0) {
+            e.preventDefault();
+            alert('Please add at least one product line item to the starter template.');
+          }
+        });
+      }
     })();
   </script>
 </body>

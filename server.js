@@ -13,7 +13,7 @@ import crypto from 'node:crypto';
 import { URL, URLSearchParams, fileURLToPath } from 'node:url';
 import pg from 'pg';
 import { getDatabaseSslConfig } from './scripts/migrate.js';
-import { renderAdminHtml, renderAdminBootstrapHtml } from './app/lib/protocols/admin.js';
+import { renderAdminHtml, renderAdminBootstrapHtml, formatAttributionCsv } from './app/lib/protocols/admin.js';
 import { renderPortalLiquid } from './app/lib/protocols/portal.js';
 import { renderProtocolLiquid, verifyAppProxyHmac, verifyOAuthHmac } from './app/lib/protocols/proxy.js';
 import { renderHandoutHtml } from './app/lib/protocols/handout.js';
@@ -21,6 +21,7 @@ import { generateQrSvg } from './app/lib/protocols/qr.js';
 import {
   handleAppProxyRequest,
   handleWebhookRequest,
+  handleAdminPractitionersListRequest,
   handleAdminPractitionerStatusRequest,
   handleAdminPracticeNameRequest,
   handleAdminCreateStarterRequest,
@@ -123,23 +124,112 @@ export const DEMO_STARTERS = [
 
 export const DEMO_REPORT = {
   month: '2026-10',
+  summary: {
+    totalOrders: 18,
+    totalUnits: 46,
+    totalRevenueMinor: 184550,
+    totalRevenueFormatted: '$1,845.50',
+    currency: 'USD',
+  },
+  rows: [
+    {
+      month: '2026-10',
+      ownerId: 'gid://shopify/Customer/1001',
+      practiceName: 'Apex Integrative Wellness',
+      protocolId: 'proto_demo_1',
+      protocolName: 'Daily Essentials Protocol',
+      isStarter: false,
+      orders: 12,
+      units: 32,
+      revenueMinor: 129000,
+      revenueFormatted: '$1,290.00',
+      currency: 'USD',
+    },
+    {
+      month: '2026-10',
+      ownerId: 'gid://shopify/Customer/1002',
+      practiceName: 'Summit Performance Studio',
+      protocolId: 'proto_demo_2',
+      protocolName: 'Active Recovery Routine',
+      isStarter: false,
+      orders: 6,
+      units: 14,
+      revenueMinor: 55550,
+      revenueFormatted: '$555.50',
+      currency: 'USD',
+    },
+  ],
+  byPractice: [
+    {
+      ownerId: 'gid://shopify/Customer/1001',
+      practiceName: 'Apex Integrative Wellness',
+      orders: 12,
+      units: 32,
+      revenueMinor: 129000,
+      revenueFormatted: '$1,290.00',
+      currency: 'USD',
+    },
+    {
+      ownerId: 'gid://shopify/Customer/1002',
+      practiceName: 'Summit Performance Studio',
+      orders: 6,
+      units: 14,
+      revenueMinor: 55550,
+      revenueFormatted: '$555.50',
+      currency: 'USD',
+    },
+  ],
+  byProtocol: [
+    {
+      protocolId: 'proto_demo_1',
+      protocolName: 'Daily Essentials Protocol',
+      isStarter: false,
+      orders: 12,
+      units: 32,
+      revenueMinor: 129000,
+      revenueFormatted: '$1,290.00',
+      currency: 'USD',
+    },
+    {
+      protocolId: 'proto_demo_2',
+      protocolName: 'Active Recovery Routine',
+      isStarter: false,
+      orders: 6,
+      units: 14,
+      revenueMinor: 55550,
+      revenueFormatted: '$555.50',
+      currency: 'USD',
+    },
+  ],
   totalOrders: 18,
   totalUnits: 46,
   totalRevenueFormatted: '$1,845.50',
   items: [
     {
+      month: '2026-10',
+      ownerId: 'gid://shopify/Customer/1001',
       practiceName: 'Apex Integrative Wellness',
+      protocolId: 'proto_demo_1',
       protocolName: 'Daily Essentials Protocol',
+      isStarter: false,
       orders: 12,
       units: 32,
+      revenueMinor: 129000,
       revenueFormatted: '$1,290.00',
+      currency: 'USD',
     },
     {
+      month: '2026-10',
+      ownerId: 'gid://shopify/Customer/1002',
       practiceName: 'Summit Performance Studio',
+      protocolId: 'proto_demo_2',
       protocolName: 'Active Recovery Routine',
+      isStarter: false,
       orders: 6,
       units: 14,
+      revenueMinor: 55550,
       revenueFormatted: '$555.50',
+      currency: 'USD',
     },
   ],
 };
@@ -223,25 +313,253 @@ async function parseFormData(req) {
 }
 
 /**
- * Formats demo attribution report as RFC 4180 CSV.
+ * Parses demo attribution report as RFC 4180 CSV.
  *
  * @param {string} [month]
  * @returns {string}
  */
-function generateDemoAttributionCsv(month = DEMO_REPORT.month) {
-  const headers = ['Month', 'Practice Name', 'Protocol', 'Orders', 'Units', 'Revenue'];
-  const lines = [headers.join(',')];
-  for (const item of DEMO_REPORT.items) {
-    lines.push([
-      `"${month || DEMO_REPORT.month}"`,
-      `"${item.practiceName.replace(/"/g, '""')}"`,
-      `"${item.protocolName.replace(/"/g, '""')}"`,
-      item.orders,
-      item.units,
-      `"${item.revenueFormatted}"`,
-    ].join(','));
+export function generateDemoAttributionCsv(month = DEMO_REPORT.month) {
+  const rows = (DEMO_REPORT.rows || []).map(r => ({ ...r, month }));
+  return formatAttributionCsv({ rows });
+}
+
+/**
+ * Builds Content-Security-Policy header string for Shopify Admin embedded pages.
+ * Preserves frame-ancestors, allows App Bridge from cdn.shopify.com, inline scripts and styles.
+ *
+ * @param {string} [shopParam]
+ * @returns {string}
+ */
+export function buildAdminCsp(shopParam = '') {
+  const frameAncestors = shopParam && shopParam !== DEMO_SHOP && SHOPIFY_DOMAIN_REGEX.test(shopParam)
+    ? `https://${shopParam} https://admin.shopify.com`
+    : `https://*.myshopify.com https://admin.shopify.com`;
+  const connectShop = shopParam && SHOPIFY_DOMAIN_REGEX.test(shopParam) ? ` https://${shopParam}` : '';
+  return `frame-ancestors ${frameAncestors}; default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.shopify.com https://cdn.shopifycdn.net; style-src 'self' 'unsafe-inline' https://cdn.shopify.com; img-src 'self' data: https:; connect-src 'self' https://admin.shopify.com${connectShop};`;
+}
+
+/**
+ * Parses HTTP Cookie header string into a key-value dictionary.
+ *
+ * @param {string} cookieHeader
+ * @returns {Record<string, string>}
+ */
+export function parseCookies(cookieHeader) {
+  const cookies = {};
+  if (!cookieHeader || typeof cookieHeader !== 'string') return cookies;
+  const pairs = cookieHeader.split(';');
+  for (const pair of pairs) {
+    const idx = pair.indexOf('=');
+    if (idx === -1) continue;
+    const key = pair.slice(0, idx).trim();
+    const val = pair.slice(idx + 1).trim();
+    if (key) {
+      cookies[key] = decodeURIComponent(val);
+    }
   }
-  return lines.join('\r\n') + '\r\n';
+  return cookies;
+}
+
+/**
+ * Signs an OAuth state string with timestamp and HMAC-SHA256 signature using the app secret.
+ * Format: `${state}.${timestamp}.${hmac}`
+ *
+ * @param {string} state
+ * @param {string} secret
+ * @returns {string}
+ */
+export function signOAuthState(state, secret) {
+  const ts = Date.now().toString();
+  const data = `${state}.${ts}`;
+  const hmac = crypto.createHmac('sha256', secret || 'default-secret').update(data).digest('hex');
+  return `${state}.${ts}.${hmac}`;
+}
+
+/**
+ * Verifies that a signed OAuth state cookie matches the expected query state parameter,
+ * has valid HMAC signature, and has not expired (Max-Age 600 seconds = 10 minutes).
+ *
+ * @param {string} cookieVal
+ * @param {string} queryState
+ * @param {string} secret
+ * @returns {boolean}
+ */
+export function verifyOAuthState(cookieVal, queryState, secret) {
+  if (!cookieVal || !queryState || typeof cookieVal !== 'string' || typeof queryState !== 'string') {
+    return false;
+  }
+  const parts = cookieVal.split('.');
+  if (parts.length === 3) {
+    const [cookieState, tsStr, hmac] = parts;
+    const ts = parseInt(tsStr, 10);
+    if (isNaN(ts) || Date.now() - ts > 600 * 1000 || ts > Date.now() + 60 * 1000) {
+      return false;
+    }
+    const expectedData = `${cookieState}.${tsStr}`;
+    const expectedHmac = crypto.createHmac('sha256', secret || 'default-secret').update(expectedData).digest('hex');
+    if (hmac.length !== expectedHmac.length) return false;
+    if (!crypto.timingSafeEqual(Buffer.from(hmac, 'utf8'), Buffer.from(expectedHmac, 'utf8'))) {
+      return false;
+    }
+    if (cookieState.length !== queryState.length) return false;
+    return crypto.timingSafeEqual(Buffer.from(cookieState, 'utf8'), Buffer.from(queryState, 'utf8'));
+  }
+  if (parts.length === 2) {
+    const [cookieState, hmac] = parts;
+    const expectedHmac = crypto.createHmac('sha256', secret || 'default-secret').update(cookieState).digest('hex');
+    if (hmac.length !== expectedHmac.length) return false;
+    if (!crypto.timingSafeEqual(Buffer.from(hmac, 'utf8'), Buffer.from(expectedHmac, 'utf8'))) {
+      return false;
+    }
+    if (cookieState.length !== queryState.length) return false;
+    return crypto.timingSafeEqual(Buffer.from(cookieState, 'utf8'), Buffer.from(queryState, 'utf8'));
+  }
+  return false;
+}
+
+/**
+ * Renders the clean, public HTML privacy policy page.
+ * Strictly honest language, zero client PII stored, read_orders aggregate attribution only,
+ * compliance webhooks, sub-processors, and optional contact email. Zero health claims.
+ *
+ * @param {{ contactEmail?: string }} [options]
+ * @returns {string}
+ */
+export function renderPrivacyHtml({ contactEmail = '' } = {}) {
+  const safeContact = contactEmail
+    ? `<p>If you have any questions about this Privacy Policy or data handling practices, please contact us at <a href="mailto:${contactEmail.replace(/"/g, '&quot;')}">${contactEmail.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</a>.</p>`
+    : `<p>If you have any questions about this Privacy Policy or data handling practices, please contact the store administrator.</p>`;
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Privacy Policy &mdash; Practitioner Protocols</title>
+  <meta name="robots" content="noindex, nofollow">
+  <style>
+    :root {
+      --color-bg: #f9fafb;
+      --color-surface: #ffffff;
+      --color-border: #e5e7eb;
+      --color-text: #1f2937;
+      --color-text-muted: #4b5563;
+      --color-primary: #0f766e;
+    }
+    body {
+      margin: 0;
+      padding: 2rem 1rem;
+      background: var(--color-bg);
+      color: var(--color-text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      line-height: 1.6;
+    }
+    .privacy-container {
+      max-width: 760px;
+      margin: 0 auto;
+      background: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-radius: 8px;
+      padding: 2.5rem;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+    }
+    h1 {
+      margin-top: 0;
+      font-size: 1.875rem;
+      color: var(--color-text);
+      border-bottom: 2px solid var(--color-primary);
+      padding-bottom: 0.75rem;
+    }
+    h2 {
+      margin-top: 2rem;
+      font-size: 1.25rem;
+      color: var(--color-primary);
+    }
+    p, li {
+      color: var(--color-text-muted);
+      font-size: 0.9375rem;
+    }
+    ul {
+      padding-left: 1.5rem;
+    }
+    li {
+      margin-bottom: 0.5rem;
+    }
+    .badge {
+      display: inline-block;
+      padding: 0.25rem 0.5rem;
+      background: #ecfdf5;
+      color: #065f46;
+      border-radius: 4px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    a {
+      color: var(--color-primary);
+      text-decoration: underline;
+    }
+    .privacy-footer {
+      margin-top: 2.5rem;
+      padding-top: 1.5rem;
+      border-top: 1px solid var(--color-border);
+      font-size: 0.8125rem;
+      color: #9ca3af;
+    }
+  </style>
+</head>
+<body>
+  <div class="privacy-container">
+    <div style="margin-bottom: 1rem;"><span class="badge">Privacy Policy</span></div>
+    <h1>Practitioner Protocols Privacy Policy</h1>
+    <p>Last updated: November 2026</p>
+
+    <p>Practitioner Protocols is built with privacy by design. Our architecture ensures that shoppers and clients can receive recommendations and purchase retail products with zero personal or health data collected or stored by the application.</p>
+
+    <h2>1. What the App Stores</h2>
+    <p>To operate recommendation workflows for direct-to-consumer and professional brands, the application stores only:</p>
+    <ul>
+      <li><strong>Shop Domain:</strong> The store domain (e.g. <code>example.myshopify.com</code>) to scope protocols and settings.</li>
+      <li><strong>Offline Access Token:</strong> Stored securely to verify platform webhooks and authenticate merchant admin operations.</li>
+      <li><strong>Practitioner Approval Records:</strong> Professional practice names and approval statuses as authorized by the merchant.</li>
+      <li><strong>Protocols and Share Tokens:</strong> Protocol titles, intro messages, selected product variant identifiers (GIDs and handles), recommended quantities, usage directions, and unguessable cryptographic share tokens.</li>
+      <li><strong>Aggregate Attribution Counts:</strong> Monthly aggregate order counts and attributed gross revenue per protocol and practice.</li>
+    </ul>
+
+    <h2>2. What the App Does NOT Store</h2>
+    <p>The application strictly enforces a zero-PII (Personally Identifiable Information) barrier:</p>
+    <ul>
+      <li><strong>No Shopper Identifying Data:</strong> We never collect, accept, or store names, email addresses, phone numbers, shipping addresses, or billing details of shoppers.</li>
+      <li><strong>No Patient or Health Information:</strong> The application does not store diagnostic records, medical conditions, health notes, or patient charts. Protocols are general retail product recommendation lists.</li>
+      <li><strong>Aggregate-Only Order Attribution:</strong> Orders are read with the <code>read_orders</code> permission solely to match the hidden line-item property (<code>_protocol_token</code>) against active protocols and increment aggregate monthly counters. Individual order IDs and customer identifiers are never retained.</li>
+    </ul>
+
+    <h2>3. Data Retention and Deletion</h2>
+    <p>We comply fully with platform data protection standards and mandatory compliance webhooks:</p>
+    <ul>
+      <li><strong>Customer Data Requests (<code>customers/data_request</code>):</strong> Because the application does not store shopper data, no personal data records exist to report.</li>
+      <li><strong>Customer Redaction (<code>customers/redact</code>):</strong> Automatically removes practitioner records when requested, while preserving non-identifying historical aggregates.</li>
+      <li><strong>Shop Redaction (<code>shop/redact</code>):</strong> Immediately and permanently deletes all protocols, line items, practice profiles, settings, sessions, and attribution records associated with the store upon receipt.</li>
+      <li><strong>App Uninstallation (<code>app/uninstalled</code>):</strong> Immediately revokes and removes all stored offline access tokens and merchant sessions.</li>
+    </ul>
+
+    <h2>4. Sub-Processors</h2>
+    <p>The application relies on the following infrastructure sub-processors:</p>
+    <ul>
+      <li><strong>Railway:</strong> Application hosting, compute execution, and internal PostgreSQL database persistence.</li>
+      <li><strong>Shopify:</strong> Core commerce platform, App Bridge embedded interface, storefront App Proxy, and webhook delivery.</li>
+    </ul>
+
+    <h2>5. Contact Us</h2>
+    ${safeContact}
+
+    <div class="privacy-footer">
+      &copy; ${new Date().getFullYear()} Practitioner Protocols. Open-source software licensed under MIT.
+    </div>
+  </div>
+</body>
+</html>`;
 }
 
 /**
@@ -268,6 +586,24 @@ export function createRequestListener(options = {}) {
       const url = new URL(req.url, `http://${req.headers.host || 'localhost:3000'}`);
       const pathname = url.pathname;
 
+      // Security: Strict-Transport-Security on all responses (max-age=31536000; includeSubDomains)
+      if (typeof res.setHeader === 'function') {
+        res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+      }
+      const origWriteHead = res.writeHead;
+      res.writeHead = function (status, ...args) {
+        if (typeof this.setHeader === 'function') {
+          this.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+        }
+        let headersArg = args.find((a) => a && typeof a === 'object' && !Array.isArray(a));
+        if (headersArg) {
+          if (!headersArg['Strict-Transport-Security'] && !headersArg['strict-transport-security']) {
+            headersArg['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains';
+          }
+        }
+        return origWriteHead.apply(this, [status, ...args]);
+      };
+
       // Healthcheck endpoint for Railway / load balancer
       if (pathname === '/health') {
         res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -280,6 +616,20 @@ export function createRequestListener(options = {}) {
         res.setHeader('X-Robots-Tag', 'noindex, nofollow');
       }
 
+      // Public Privacy Policy Page: GET /privacy
+      if (pathname === '/privacy' && req.method === 'GET') {
+        const contactEmail = options.privacyContactEmail ?? process.env.PRIVACY_CONTACT_EMAIL ?? '';
+        const html = renderPrivacyHtml({ contactEmail });
+        res.writeHead(200, {
+          'Content-Type': 'text/html; charset=utf-8',
+          'Content-Security-Policy': "default-src 'self'; style-src 'self' 'unsafe-inline'; frame-ancestors 'none';",
+          'X-Content-Type-Options': 'nosniff',
+          'Referrer-Policy': 'strict-origin-when-cross-origin',
+        });
+        res.end(html);
+        return;
+      }
+
       // OAuth Install Initiation: /api/auth or /auth
       if (pathname === '/api/auth' || pathname === '/auth') {
         const shop = (url.searchParams.get('shop') || '').toLowerCase().trim();
@@ -290,12 +640,17 @@ export function createRequestListener(options = {}) {
         }
 
         const state = crypto.randomBytes(16).toString('hex');
+        const signedCookie = signOAuthState(state, apiSecret);
+        const cookiePath = pathname === '/auth' ? '/auth' : '/api/auth';
         const hostHeader = req.headers['x-forwarded-host'] || req.headers.host || 'localhost:3000';
         const proto = req.headers['x-forwarded-proto'] || (String(hostHeader).includes('localhost') ? 'http' : 'https');
         const redirectUri = encodeURIComponent(`${proto}://${hostHeader}/api/auth/callback`);
         const authUrl = `https://${shop}/admin/oauth/authorize?client_id=${encodeURIComponent(apiKey || 'demo-client-id')}&scope=read_orders&redirect_uri=${redirectUri}&state=${state}`;
 
-        res.writeHead(302, { Location: authUrl });
+        res.writeHead(302, {
+          Location: authUrl,
+          'Set-Cookie': `shopify_oauth_state=${signedCookie}; Path=${cookiePath}; Max-Age=600; HttpOnly; Secure; SameSite=Lax`,
+        });
         res.end();
         return;
       }
@@ -305,7 +660,7 @@ export function createRequestListener(options = {}) {
         const shop = (url.searchParams.get('shop') || '').toLowerCase().trim();
         const code = url.searchParams.get('code');
         const hostParam = url.searchParams.get('host') || '';
-        const state = url.searchParams.get('state') || '';
+        const queryState = url.searchParams.get('state');
 
         if (!shop || !SHOPIFY_DOMAIN_REGEX.test(shop)) {
           res.writeHead(400, { 'Content-Type': 'application/json' });
@@ -316,6 +671,27 @@ export function createRequestListener(options = {}) {
         if (!code) {
           res.writeHead(400, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: 'Missing code parameter' }));
+          return;
+        }
+
+        if (!queryState) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Missing state parameter' }));
+          return;
+        }
+
+        const cookies = parseCookies(req.headers?.cookie);
+        const cookieState = cookies.shopify_oauth_state || cookies.oauth_state;
+        if (!cookieState) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Missing OAuth state cookie' }));
+          return;
+        }
+
+        const isStateValid = verifyOAuthState(cookieState, queryState, apiSecret);
+        if (!isStateValid) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Invalid OAuth state' }));
           return;
         }
 
@@ -355,6 +731,7 @@ export function createRequestListener(options = {}) {
             scope = tokenData.scope || scope;
           }
 
+          // Do not store the state in Session.state; store "authenticated".
           await pool.query(
             `INSERT INTO "Session" ("id", "shop", "state", "isOnline", "scope", "accessToken")
              VALUES ($1, $2, $3, false, $4, $5)
@@ -363,12 +740,16 @@ export function createRequestListener(options = {}) {
                "state" = EXCLUDED."state",
                "scope" = EXCLUDED."scope",
                "accessToken" = EXCLUDED."accessToken"`,
-            [`offline_${shop}`, shop, state || 'authenticated', scope, accessToken]
+            [`offline_${shop}`, shop, 'authenticated', scope, accessToken]
           );
         }
 
         const targetUrl = `/admin?shop=${encodeURIComponent(shop)}${hostParam ? `&host=${encodeURIComponent(hostParam)}` : ''}`;
-        res.writeHead(302, { Location: targetUrl });
+        const clearPath = pathname === '/auth/callback' ? '/auth' : '/api/auth';
+        res.writeHead(302, {
+          Location: targetUrl,
+          'Set-Cookie': `shopify_oauth_state=; Path=${clearPath}; Max-Age=0; HttpOnly; Secure; SameSite=Lax`,
+        });
         res.end();
         return;
       }
@@ -377,6 +758,7 @@ export function createRequestListener(options = {}) {
       // When DATABASE_URL is set (production mode), requests require Shopify Admin session-token verification.
       // Missing session tokens return 401 with retry header.
       if (
+        pathname === '/api/admin/practitioners' ||
         pathname === '/api/admin/practitioners/status' ||
         pathname === '/api/admin/practitioners/practice-name' ||
         pathname === '/api/admin/starters/create' ||
@@ -410,7 +792,9 @@ export function createRequestListener(options = {}) {
           let webRes;
           const handlerOpts = { apiSecret, apiKey, isDemoMode: false };
 
-          if (pathname === '/api/admin/practitioners/status') {
+          if (pathname === '/api/admin/practitioners') {
+            webRes = await handleAdminPractitionersListRequest(pool, webReq, handlerOpts);
+          } else if (pathname === '/api/admin/practitioners/status') {
             webRes = await handleAdminPractitionerStatusRequest(pool, webReq, handlerOpts);
           } else if (pathname === '/api/admin/practitioners/practice-name') {
             webRes = await handleAdminPracticeNameRequest(pool, webReq, handlerOpts);
@@ -433,6 +817,12 @@ export function createRequestListener(options = {}) {
         }
 
         // Demo Mode (no DATABASE_URL configured): in-memory mutations only, zero adminUser
+        if (pathname === '/api/admin/practitioners' && req.method === 'GET') {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify(DEMO_PROFILES));
+          return;
+        }
+
         if (pathname === '/api/admin/practitioners/status' && req.method === 'POST') {
           const formData = await parseFormData(req);
           const ownerGid = formData.get('ownerGid');
@@ -547,13 +937,10 @@ export function createRequestListener(options = {}) {
             // Mismatched shop (403 Forbidden) and non-embedded 401s are preserved.
             if (webRes.status === 401 && isEmbedded) {
               const bootstrapHtml = renderAdminBootstrapHtml({ apiKey, shop: shopParam });
-              const frameAncestors = shopParam && SHOPIFY_DOMAIN_REGEX.test(shopParam)
-                ? `https://${shopParam} https://admin.shopify.com`
-                : `https://*.myshopify.com https://admin.shopify.com`;
 
               res.writeHead(200, {
                 'Content-Type': 'text/html; charset=utf-8',
-                'Content-Security-Policy': `frame-ancestors ${frameAncestors};`,
+                'Content-Security-Policy': buildAdminCsp(shopParam),
                 'X-Content-Type-Options': 'nosniff',
                 'Referrer-Policy': 'strict-origin-when-cross-origin',
               });
@@ -573,13 +960,10 @@ export function createRequestListener(options = {}) {
           if (isEmbedded) {
             // Embedded iframe: do NOT redirect to /api/auth. Serve App Bridge bootstrap page.
             const bootstrapHtml = renderAdminBootstrapHtml({ apiKey, shop: shopParam });
-            const frameAncestors = shopParam && SHOPIFY_DOMAIN_REGEX.test(shopParam)
-              ? `https://${shopParam} https://admin.shopify.com`
-              : `https://*.myshopify.com https://admin.shopify.com`;
 
             res.writeHead(200, {
               'Content-Type': 'text/html; charset=utf-8',
-              'Content-Security-Policy': `frame-ancestors ${frameAncestors};`,
+              'Content-Security-Policy': buildAdminCsp(shopParam),
               'X-Content-Type-Options': 'nosniff',
               'Referrer-Policy': 'strict-origin-when-cross-origin',
             });
@@ -617,13 +1001,9 @@ export function createRequestListener(options = {}) {
         });
 
         // App Store security headers: Content-Security-Policy with frame-ancestors, nosniff, Referrer-Policy
-        const frameAncestors = shopParam && shopParam !== DEMO_SHOP && SHOPIFY_DOMAIN_REGEX.test(shopParam)
-          ? `https://${shopParam} https://admin.shopify.com`
-          : `https://*.myshopify.com https://admin.shopify.com`;
-
         res.writeHead(200, {
           'Content-Type': 'text/html; charset=utf-8',
-          'Content-Security-Policy': `frame-ancestors ${frameAncestors};`,
+          'Content-Security-Policy': buildAdminCsp(shopParam),
           'X-Content-Type-Options': 'nosniff',
           'Referrer-Policy': 'strict-origin-when-cross-origin',
         });

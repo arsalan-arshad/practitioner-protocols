@@ -1,6 +1,6 @@
 # Practitioner Protocols — Project Context (for Claude)
 
-_Snapshot: 2026-11-05 · Live Railway deployment active (`practitioner-protocols-production.up.railway.app`) with internal Postgres & ledger migrations · Production app record "Practitioner Protocols" released (v2, Public distribution) · Production hardening complete · Milestones M9a (Embedded Merchant Admin), M9b-1 (allowSelfEnrol Setting, Migration & Pending-Practitioner Admin Review), M9b-2 (Storefront Self-Enrolment Flow, Portal States, and App Proxy CSRF Protection) & M9b-3a (Catalog Search, Production Authoring & Client Page Hydration) verified live on dev store · Milestone M9b-3b (Protocol Lifecycle: Archive, Restore, Duplicate) implemented, pending live dev-store verification · Spikes S2, S3, S4, S5, S6 resolved; S1 resolved on the Plus dev store only · Brand assets v2 produced and verified (text-free App Store icon & feature image; code-composited README hero banner & social thumbnail; shopping-bag glyph eliminated) · 493 tests passing across 109 suites._
+_Snapshot: 2026-11-05 · Live Railway deployment active (`practitioner-protocols-production.up.railway.app`) with internal Postgres & ledger migrations · Production app record "Practitioner Protocols" released (v2, Public distribution) · Production hardening complete · Milestones M9a, M9b-1, M9b-2, M9b-3a & M9b-3b VERIFIED LIVE on dev store · Pre-submission hardening complete (OAuth state cookie security fix, public /privacy page, Strict-Transport-Security on all responses, expanded embedded App Bridge CSP, attribution contract fix, admin starter product search UX & fallback, individual mode settings label, CODEOWNERS, screenshots fixture generator) · Spikes S2, S3, S4, S5, S6 resolved; S1 resolved on the Plus dev store only · Brand assets v2 & v3 produced and verified · 507 tests passing across 111 suites._
 _Contains NO secrets. Never paste `.env` values or tokens into chat or docs._
 
 ## 1. What this is
@@ -933,16 +933,69 @@ Run the five spikes in a day or two on a dev store; write the answers into secti
   - Non-Latin product handles (known validator limitation).
 - **Claim Nothing Else:** Only the items above are live-verified; all others remain covered by automated unit/integration tests.
 
-## 44. Milestone M9b-3b: Protocol Lifecycle (Archive, Restore, Duplicate) — Implemented (2026-11-05)
+## 44. Milestone M9b-3b: Protocol Lifecycle (Archive, Restore, Duplicate) — VERIFIED LIVE on the Dev Store (2026-11-05)
 
-- **Implementation Summary (Implemented, Pending Live Dev-Store Verification):**
-  Full lifecycle actions built and tested across the App Proxy, service layer, and portal UI.
-- **Scope & Verified Behavior (via 493 Automated Tests across 109 Suites):**
-  1. **Mutating App Proxy Endpoints:** `POST /apps/protocols?action=archive&id=<id>`, `POST /apps/protocols?action=restore&id=<id>`, and `POST /apps/protocols?action=duplicate&id=<id>`.
-  2. **CSRF & Security Enforcement:** Requires exact `application/json` Content-Type (rejects non-JSON with 415), validates `Sec-Fetch-Site: same-origin` when present (403 otherwise), rejects unauthenticated requests (401), rejects unapproved practitioners (403), and rejects unknown actions (400) without falling through.
-  3. **Rule 4 Tenant & Ownership Isolation:** Cross-owner or cross-shop requests return 404 (preventing existence enumeration). Starter templates cannot be archived or modified (403 `STARTER_MODIFICATION_FORBIDDEN`).
-  4. **Duplication Rules:** Duplicating own active protocols or brand starter templates produces a fresh protocol owned by the caller (`ownerType: 'customer'`), `isStarter: false`, status `active`, name prefixed with `"Copy of <name>"` (trimmed to $\le 60$), with a new ID, new unique share token, and all lines copied (`variantGid`, `productHandle`, `quantity`, `usageNote`). Never copies ownership or starter flags.
-  5. **Client Link Behavior:** Archived protocol renders inactive state ("Protocol No Longer Active" / "This recommendation is no longer active" with zero Add buttons); restoring returns it to active state under the exact same share token.
-  6. **Practitioner Portal UI:** Active cards include an "Archive" button and in-page confirmation box (inline Confirm/Cancel buttons with zero `window.confirm`, `window.alert`, or `window.prompt` dialogs); starter cards include a "Use as template" button; a dedicated "Archived Protocols (n)" section provides one-click "Restore"; and failures report cleanly via an in-page `#portal-global-error` alert box using `textContent`.
-- **Status:** Implemented and covered by automated test suites; pending live dev-store verification.
+- **Verification Summary:**
+  Milestone M9b-3b is VERIFIED LIVE on the dev store `ai-agent-app-h9qwnwd8.myshopify.com`.
+- **VERIFIED LIVE on Dev Store:**
+  - In-page archive flow with inline confirmation UI (inline Confirm/Cancel buttons; zero `window.confirm`/`alert`/`prompt` dialogs).
+  - Archived protocol renders inactive client state ("Protocol No Longer Active" with zero Add buttons) under its original share token.
+  - Dedicated "Archived Protocols" section in practitioner portal showing archived protocols with one-click "Restore".
+  - One-click restore reactivates protocol and immediately restores active client page under the exact same share token.
+  - Duplicate-own-protocol produces a fresh active copy prefixed with `"Copy of <name>"`, with a new unique share token and copied lines.
+  - Duplicate-from-starter produces a fresh practitioner-owned copy with copied lines.
+  - Checkout completing to `orders/paid` (webhook 200, ProtocolOrderStat row written with orders=1, units=3, revenueMinor=192135).
+- **NOT Verified Live (Explicitly Stated):**
+  - The logged-out guest view.
+  - `handoutText` and `footerDisclaimer` rendering (settings empty on the dev store).
+  - Real printing dialog execution.
+  - Live cross-owner and cross-shop access denial (covered by automated unit tests).
+  - Non-Latin product handles (known validator limitation).
+  - Discounted-order attribution live.
+  - New CSP inside real admin iframe.
+- **Claim Nothing Else:** Only the items above are live-verified; all others remain covered by automated unit/integration tests.
+
+## 45. Pre-Submission Hardening, Security Fixes & Assets (2026-11-05)
+
+- **Scope & Changes:**
+  1. **OAuth State Security Fix (`server.js`):**
+     - `/api/auth` (and `/auth`): Generates cryptographically secure random 16-byte state hex, sets it in an `HttpOnly`, `Secure`, `SameSite=Lax` cookie signed with HMAC-SHA256 using the app secret (`shopify_oauth_state`), format `${state}.${timestamp}.${hmac}`, with `Max-Age=600` (10 minutes) and `Path=/api/auth`.
+     - `/api/auth/callback` (and `/auth/callback`): Before code exchange, requires `state` query parameter and state cookie. Validates state and signature using `crypto.timingSafeEqual` with a 600-second expiration check. Rejects missing query state, missing cookie, state mismatch, or expired/tampered cookies with HTTP 400.
+     - Cookie cleared afterwards via `Max-Age=0`.
+     - In production mode, stores `'authenticated'` in `Session.state` (never the raw state token).
+  2. **Public Privacy Policy Page (`GET /privacy`):**
+     - Serves clean public HTML with status 200, UTF-8 encoding, and no authentication required.
+     - Content in plain honest language:
+       - What the app stores: shop domain, offline access token, practitioner approval records, protocols and share tokens, aggregate attribution counts.
+       - What it does NOT store: shopper-identifying data, shopper names, emails, addresses, payment details. Orders read via `read_orders` solely to match `_protocol_token` for aggregate counts. Zero health, medical, or diagnostic claims.
+       - Retention and deletion: compliance webhooks (`customers/data_request`, `customers/redact`, `shop/redact`) and `app/uninstalled` handling.
+       - Sub-processors: Railway (hosting, compute, Postgres) and Shopify.
+       - Contact email: optionally rendered via `PRIVACY_CONTACT_EMAIL` environment variable.
+     - Security headers: `Content-Security-Policy: default-src 'self'; style-src 'self' 'unsafe-inline'; frame-ancestors 'none';`, `X-Content-Type-Options: nosniff`.
+  3. **App Store Security Headers (`server.js` & `routes.js`):**
+     - `Strict-Transport-Security: max-age=31536000; includeSubDomains` added to ALL responses (including `/health`, `/admin`, `/privacy`, `/api/auth`, `/api/proxy`).
+     - Enhanced `Content-Security-Policy` on embedded admin pages: preserves `frame-ancestors https://${shop} https://admin.shopify.com;`, adds `default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.shopify.com https://cdn.shopifycdn.net; style-src 'self' 'unsafe-inline' https://cdn.shopify.com; img-src 'self' data: https:; connect-src 'self' https://admin.shopify.com https://${shop};`.
+  4. **Attribution Reporting Contract Fix (`admin.js`, `server.js`, `routes.js`):**
+     - Live order #1022 produced a correct `ProtocolOrderStat` row (orders=1, units=3, revenueMinor=192135, currency=USD, month=2026-11) but the admin attribution tab rendered $0.00 / 0 / 0 because `renderAttributionTab()` read legacy top-level properties while `getAttributionReport()` returned `{ summary, rows, byPractice, byProtocol }`.
+     - Unified single contract `{ month, summary, rows, byPractice, byProtocol }` across data service, renderer, demo data, and RFC 4180 CSV export.
+     - Replaced hard-coded "$" with `Intl.NumberFormat` currency formatting (`formatCurrencyMinor`).
+     - Added one non-PII log line per `orders/paid` webhook in `handleOrdersPaid`.
+  5. **Admin Starter Form UX (`app/lib/protocols/admin.js`):**
+     - Replaced typed variant GID text input in `#create-starter-modal` with interactive product catalog search matching practitioner editor UX (`#admin-starter-search-input`, `#admin-starter-search-btn`, `#admin-starter-search-dropdown`, `#starter-lines-container`).
+     - Added collapsible "Advanced: Enter Variant GID directly" fallback (`#admin-starter-manual-gid`, `#admin-starter-manual-handle`, `#admin-starter-manual-title`, `#admin-starter-manual-add-btn`) allowing merchants to add variants directly without requiring additional scopes (`read_products`), since Storefront Ajax API cannot be called cross-origin from an embedded admin iframe without CORS violation.
+     - Client script clearly degrades search with an informative message when storefront lookup fails.
+  6. **Small Fixes & Hygiene:**
+     - Suppressed "signed in as a professional" banner on inactive (archived) client pages in `app/lib/protocols/proxy.js`.
+     - Fixed `GET /api/admin/practitioners`: now returns HTTP 401 with `X-Shopify-Retry-Invalid-Session-Request: 1` when unauthenticated in production mode instead of 404.
+     - Settings tab: renamed stale option label `Tag Mode (Customer Tag "practitioner")` to `Individual Mode (Customer Account)`.
+     - Added `.github/CODEOWNERS` designating `* @arsalan-arshad` as owner of all repository files.
+     - Non-Latin product handle investigation: Shopify automatically transliterates non-Latin Unicode characters (Cyrillic, Arabic, Chinese, accents) into ASCII-safe strings upon creation. Querying `/products/<handle>.js` with raw Unicode returns 404 because handles are stored in ASCII format (`^[a-z0-9][a-z0-9-]*$`). Therefore, `PRODUCT_HANDLE_PATTERN` is intentionally left unchanged per instructions.
+  7. **Assets & Screenshots:**
+     - Re-exported `assets/brand/icon-v3-1200.png` under 800 KB (579 KB, 1200x1200 lossless PNG, < 1 MB App Store limit).
+     - Tracked and committed 3 compressed files: `assets/brand/icon-v3-1200-under1mb.png` (579 KB), `assets/listing/app-icon-1200-under1mb.png` (666 KB), `assets/listing/feature-image-1600x900-under1mb.png` (526 KB) and documented in `assets/listing/README.md`.
+     - Verified `assets/brand/thumbnail-1280x640.png` meets GitHub social preview criteria.
+     - Added `scripts/screenshots.mjs` providing static fixtures (portal, editor, client page, handout, admin list) for Playwright (1600x900 viewport, deviceScaleFactor 1) with fixtures-only rendering and zero real shop data. Note: Playwright Chromium browser binaries are not installed locally in the repo (per zero external dependencies rule).
+  8. **Automated Test Coverage:**
+     - 507 unit tests passing across 111 suites (`npm test`).
+
 

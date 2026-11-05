@@ -1815,7 +1815,8 @@ describe('HTTP Routes & Request Handlers (app/lib/protocols/routes.js)', () => {
 
       const res = await handleAdminDashboardRequest(db, req, { apiSecret, apiKey: 'test_api_key', expectedShop: testShop });
       assert.equal(res.status, 200);
-      assert.equal(res.headers.get('content-security-policy'), `frame-ancestors https://${testShop} https://admin.shopify.com;`);
+      assert.ok(res.headers.get('content-security-policy').startsWith(`frame-ancestors https://${testShop} https://admin.shopify.com;`));
+      assert.ok(res.headers.get('content-security-policy').includes("default-src 'self'"));
       assert.equal(res.headers.get('x-content-type-options'), 'nosniff');
       assert.equal(res.headers.get('referrer-policy'), 'strict-origin-when-cross-origin');
     });

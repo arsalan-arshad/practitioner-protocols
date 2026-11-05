@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { getCanonicalConsentText } from './contacts.js';
 
 /**
  * Normalizes query parameters into a standard key-value map.
@@ -767,7 +768,10 @@ export function renderProtocolLiquid({
   const rawId = String(protocol.id || '');
   const protocolToken = escapeHtml(rawToken);
   const protocolId = escapeHtml(rawId);
-  const exactConsentText = `I agree to receive emails from ${displayPractice || 'this practice'} and ${displayShop} with product recommendations and offers. I can unsubscribe at any time.`;
+  const exactConsentText = getCanonicalConsentText(1, {
+    practiceName: displayPractice,
+    shopName: displayShop
+  });
 
   const lines = Array.isArray(protocol.lines) ? protocol.lines : [];
 

@@ -745,7 +745,7 @@ describe('Server & Configuration Hardening (server.js, shopify.app.toml, README.
             ledgerRows.push({ id: params[0] });
             return { rows: [] };
           }
-          if (typeof sql === 'string' && (sql.includes('CREATE TABLE "Protocol"') || sql.includes('ProcessedWebhook') || sql.includes('allowSelfEnrol') || sql.includes('productHandle') || sql.includes('ShopperContact'))) {
+          if (typeof sql === 'string' && (sql.includes('CREATE TABLE "Protocol"') || sql.includes('ProcessedWebhook') || sql.includes('allowSelfEnrol') || sql.includes('productHandle') || sql.includes('ShopperContact') || sql.includes('ShopProfile'))) {
             executedMigrations.push(sql);
           }
           return { rows: [] };

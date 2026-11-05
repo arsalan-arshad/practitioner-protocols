@@ -60,12 +60,19 @@ Always `noindex`. Prices are always the store's live retail price — a protocol
 | `PractitionerProfile` | shop, customerGid or companyGid, practiceName (**merchant-controlled**), logo (optional) |
 | `ProtocolOrderStat` | shop, protocolId, ownerId, month, orders, units, revenueMinor, currency — **aggregates only** |
 | `Setting` | shop, mode, footer disclaimer, handout text |
-| `ShopperContact` | id, shop, ownerId, email (lowercased, max 254), firstName (optional, max 60), consentText, consentVersion, consentedAt, source ('protocol_page'), createdAt — **explicit opt-in only** |
-| `MerchantFeedback` | id, shop, shopName, ownerName, replyEmail, planName, country, message (max 1000), kind ('feedback' / 'custom_request'), createdAt |
+| `ShopperContact` | id, shop, ownerId, email (lowercased, max 254), firstName (optional, max 60), consentText, consentVersion, consentedAt, source ('protocol_page'), createdAt — **explicit opt-in only**; unique (shop, ownerId, email) |
+| `MerchantFeedback` | id, shop, shopName, ownerName, replyEmail, planName, country, message (max 1000), rating (1–5, optional), kind ('feedback' / 'custom_request'), createdAt |
+| `ShopProfile` | id, shop (unique), shopName, ownerName, email, planName, country, installedAt, uninstalledAt (nullable), marketingOptIn (boolean), marketingOptInAt (nullable), createdAt, updatedAt — synchronized via Admin GraphQL `shop` query |
+| `Session` | id, shop, state, isOnline, scope, accessToken (**encrypted at rest using AES-256-GCM**, `enc:v1:<iv>:<tag>:<ciphertext>`), createdAt, updatedAt |
 
 > [!NOTE]
 > **Decision Record (Owner Decision, 2026-11-05 — M11):**
-> The "zero shopper PII" rule is relaxed ONLY for an explicit, opt-in "stay in touch" contact entered by the shopper on a protocol recommendation page. Nothing else changes: browsing shoppers still have zero PII collected or stored, and opted-in contacts store NO protocolId, NO order ID, NO purchased product or health data, NO IP address, and NO user agent. Purpose is marketing emails sent directly by the merchant or practice via their own tools (never sent by this app).
+> The "zero shopper PII" rule is relaxed ONLY for an explicit, opt-in "stay in touch" contact entered by the shopper on a protocol recommendation page. Nothing else changes: browsing shoppers still have zero PII collected or stored, and opted-in contacts store NO protocolId, NO order ID, NO purchased product or health data, NO IP address, and NO user agent.
+> - **Canonical Consent Enforcement:** Server-defined canonical text is enforced per version; client-supplied text is ignored and unknown versions rejected.
+> - **Email Verification Honesty:** The application does not send emails or verify addresses. All exports and docs honestly label contacts as `Verified = "no"` so merchants confirm subscriptions in their email tools.
+> - **Rate Limiting:** Dedicated sliding-window rate limit of 5 requests/hour per client key on shopper opt-in subscriptions.
+> - **Merchant Contact & Feedback:** `ShopProfile` metadata is synced via Admin GraphQL with offline tokens. Merchants can opt in to developer contact via Settings ("Contact & feedback" card with rating 1–5), which sets `marketingOptIn` and timestamp. Custom requests count as reply-only consent.
+> - **Credential Protection:** Session access tokens are encrypted at rest with AES-256-GCM (`SESSION_ENCRYPTION_KEY`). All merchant and shopper data is permanently wiped on `shop/redact`.
 
 No client diagnosis, medical note, or non-consented shopper PII exists anywhere.
 

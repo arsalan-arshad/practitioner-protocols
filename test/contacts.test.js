@@ -4,10 +4,13 @@ import {
   EMAIL_MAX_LENGTH,
   FIRST_NAME_MAX_LENGTH,
   CUSTOM_REQUEST_MESSAGE_MAX_LENGTH,
+  CANONICAL_CONSENT_TEMPLATES,
+  getCanonicalConsentText,
   ContactValidationError,
   validateContactEmail,
   validateContactFirstName,
   validateCustomRequestMessage,
+  validateFeedbackRating,
   saveShopperContact,
   listPractitionerContacts,
   deletePractitionerContact,
@@ -16,7 +19,12 @@ import {
   deleteMerchantContact,
   deleteMerchantPracticeContacts,
   exportMerchantContactsCsv,
+  getShopProfile,
+  upsertShopProfile,
+  updateShopMarketingOptIn,
+  syncShopProfile,
   saveMerchantCustomRequest,
+  saveMerchantFeedback,
   listMerchantFeedback
 } from '../app/lib/protocols/contacts.js';
 
@@ -107,6 +115,42 @@ describe('Contacts & Merchant Feedback Service (app/lib/protocols/contacts.js)',
         (err) => err instanceof ContactValidationError && err.code === 'MESSAGE_TOO_LONG'
       );
     });
+
+    it('validates feedback rating 1-5', () => {
+      assert.equal(validateFeedbackRating(null), null);
+      assert.equal(validateFeedbackRating(undefined), null);
+      assert.equal(validateFeedbackRating(''), null);
+      assert.equal(validateFeedbackRating(1), 1);
+      assert.equal(validateFeedbackRating(5), 5);
+      assert.equal(validateFeedbackRating('3'), 3);
+
+      assert.throws(() => validateFeedbackRating(0), { message: /Rating must be an integer between 1 and 5/ });
+      assert.throws(() => validateFeedbackRating(6), { message: /Rating must be an integer between 1 and 5/ });
+      assert.throws(() => validateFeedbackRating(-1), { message: /Rating must be an integer between 1 and 5/ });
+      assert.throws(() => validateFeedbackRating(3.5), { message: /Rating must be an integer between 1 and 5/ });
+      assert.throws(() => validateFeedbackRating('invalid'), { message: /Rating must be an integer between 1 and 5/ });
+    });
+
+    it('generates canonical consent texts and rejects unknown consent versions', () => {
+      const text = getCanonicalConsentText(1, { practiceName: 'Dr. Jane Clinic', shopName: 'my-store.myshopify.com' });
+      assert.equal(
+        text,
+        'I agree to receive emails from Dr. Jane Clinic and my-store.myshopify.com with product recommendations and offers. I can unsubscribe at any time.'
+      );
+
+      // Default fallbacks
+      const fallbackText = getCanonicalConsentText(1, { practiceName: null, shopName: null });
+      assert.equal(
+        fallbackText,
+        'I agree to receive emails from this practice and this store with product recommendations and offers. I can unsubscribe at any time.'
+      );
+
+      // Unknown version throws
+      assert.throws(
+        () => getCanonicalConsentText(99),
+        (err) => err instanceof ContactValidationError && err.code === 'INVALID_CONSENT_VERSION'
+      );
+    });
   });
 
   describe('saveShopperContact', () => {
@@ -122,7 +166,7 @@ describe('Contacts & Merchant Feedback Service (app/lib/protocols/contacts.js)',
         async query(sql, params = []) {
           state.queries.push({ sql, params });
 
-          // 1. SELECT "id", "ownerId", "status" FROM "Protocol" WHERE "shop" = $1 AND "token" = $2
+          // 1. SELECT pr."id", pr."ownerId", pr."status", pp."practiceName" FROM "Protocol" ...
           if (sql.includes('FROM "Protocol"') && sql.includes('"token" = $2')) {
             const [shop, token] = params;
             const proto = state.protocols.find(p => p.shop === shop && p.token === token);
@@ -173,6 +217,7 @@ describe('Contacts & Merchant Feedback Service (app/lib/protocols/contacts.js)',
       shop: 'test.myshopify.com',
       token: 'tok_abc456',
       ownerId: 'gid://shopify/Customer/101',
+      practiceName: 'Wellness Partners',
       status: 'active'
     };
 
@@ -183,7 +228,6 @@ describe('Contacts & Merchant Feedback Service (app/lib/protocols/contacts.js)',
         token: 'tok_abc456',
         email: 'spammer@bot.com',
         consent: true,
-        consentText: 'I agree',
         honeypot: 'bot filled this'
       });
 
@@ -199,8 +243,7 @@ describe('Contacts & Merchant Feedback Service (app/lib/protocols/contacts.js)',
           shop: 'test.myshopify.com',
           token: 'tok_abc456',
           email: 'user@example.com',
-          consent: false,
-          consentText: 'I agree'
+          consent: false
         }),
         (err) => err instanceof ContactValidationError && err.code === 'CONSENT_REQUIRED'
       );
@@ -221,8 +264,7 @@ describe('Contacts & Merchant Feedback Service (app/lib/protocols/contacts.js)',
           shop: 'test.myshopify.com',
           token: 'tok_nonexistent',
           email: 'user@example.com',
-          consent: true,
-          consentText: 'I agree'
+          consent: true
         }),
         (err) => err instanceof ContactValidationError && err.code === 'PROTOCOL_INACTIVE'
       );
@@ -232,23 +274,21 @@ describe('Contacts & Merchant Feedback Service (app/lib/protocols/contacts.js)',
           shop: 'test.myshopify.com',
           token: 'tok_disabled',
           email: 'user@example.com',
-          consent: true,
-          consentText: 'I agree'
+          consent: true
         }),
         (err) => err instanceof ContactValidationError && err.code === 'PROTOCOL_INACTIVE'
       );
     });
 
-    it('saves opted-in contact and guarantees zero shopper tracking across protocols/orders', async () => {
+    it('ignores client-supplied consentText and stores canonical text server-side', async () => {
       const db = createMockDb([activeProto]);
-      const consentText = 'I agree to receive communications from Dr. Smith.';
       const res = await saveShopperContact(db, {
         shop: 'test.myshopify.com',
         token: 'tok_abc456',
         email: 'Shopper@Example.COM',
         firstName: 'Alice',
         consent: true,
-        consentText,
+        consentText: 'ANYTHING I WANT', // Forged text from client
         consentVersion: 1
       });
 
@@ -258,47 +298,56 @@ describe('Contacts & Merchant Feedback Service (app/lib/protocols/contacts.js)',
       assert.equal(contact.email, 'shopper@example.com');
       assert.equal(contact.firstName, 'Alice');
       assert.equal(contact.ownerId, 'gid://shopify/Customer/101');
-      assert.equal(contact.consentText, consentText);
-      assert.equal(contact.source, 'protocol_page');
 
-      // Verify that no protocolId, order id, or PII tracking was stored in contact
-      assert.equal(contact.protocolId, undefined);
-      assert.equal(contact.orderId, undefined);
-      assert.equal(contact.ip, undefined);
-      assert.equal(contact.userAgent, undefined);
+      // Canonical server text MUST be stored, forged text ignored
+      assert.equal(
+        contact.consentText,
+        'I agree to receive emails from Wellness Partners and test.myshopify.com with product recommendations and offers. I can unsubscribe at any time.'
+      );
+      assert.equal(contact.consentVersion, 1);
+      assert.equal(contact.source, 'protocol_page');
     });
 
-    it('handles idempotent submissions for the same (shop, ownerId, email)', async () => {
+    it('rejects unknown consent version values', async () => {
       const db = createMockDb([activeProto]);
-      const firstText = 'Consent v1';
-      const secondText = 'Consent v2';
+      await assert.rejects(
+        () => saveShopperContact(db, {
+          shop: 'test.myshopify.com',
+          token: 'tok_abc456',
+          email: 'shopper@example.com',
+          consent: true,
+          consentVersion: 999
+        }),
+        (err) => err instanceof ContactValidationError && err.code === 'INVALID_CONSENT_VERSION'
+      );
+    });
+
+    it('treats Jane@X.com and jane@x.com as the exact same contact on (shop, ownerId, email)', async () => {
+      const db = createMockDb([activeProto]);
 
       await saveShopperContact(db, {
         shop: 'test.myshopify.com',
         token: 'tok_abc456',
-        email: 'shopper@example.com',
-        firstName: null,
+        email: 'Jane@X.com',
+        firstName: 'Jane',
         consent: true,
-        consentText: firstText,
         consentVersion: 1
       });
 
       assert.equal(db.state.contacts.length, 1);
+      assert.equal(db.state.contacts[0].email, 'jane@x.com');
 
       await saveShopperContact(db, {
         shop: 'test.myshopify.com',
         token: 'tok_abc456',
-        email: 'shopper@example.com',
-        firstName: 'Updated Alice',
+        email: 'jane@x.com',
+        firstName: 'Updated Jane',
         consent: true,
-        consentText: secondText,
-        consentVersion: 2
+        consentVersion: 1
       });
 
-      assert.equal(db.state.contacts.length, 1, 'Duplicate contact must not create second row');
-      assert.equal(db.state.contacts[0].firstName, 'Updated Alice');
-      assert.equal(db.state.contacts[0].consentText, secondText);
-      assert.equal(db.state.contacts[0].consentVersion, 2);
+      assert.equal(db.state.contacts.length, 1, 'Same contact under case-insensitive comparison');
+      assert.equal(db.state.contacts[0].firstName, 'Updated Jane');
     });
   });
 
@@ -354,7 +403,7 @@ describe('Contacts & Merchant Feedback Service (app/lib/protocols/contacts.js)',
       assert.equal(contacts.length, 2);
     });
 
-    it('exports practitioner contacts to RFC 4180 CSV with Email, First Name, Consented At', () => {
+    it('exports practitioner contacts to RFC 4180 CSV with Verified = no and disclaimer comment', () => {
       const contacts = [
         {
           email: 'jane@example.com',
@@ -370,13 +419,14 @@ describe('Contacts & Merchant Feedback Service (app/lib/protocols/contacts.js)',
 
       const csv = exportPractitionerContactsCsv(contacts);
       const lines = csv.split('\r\n');
-      assert.equal(lines[0], 'Email,First Name,Consented At');
-      assert.equal(lines[1], 'jane@example.com,"Jane, M.D.",2026-11-05T12:00:00.000Z');
-      assert.equal(lines[2], 'bob@example.com,,2026-11-05T13:00:00Z');
+      assert.match(lines[0], /^# Note: Email addresses are collected with opt-in consent but are not verified/);
+      assert.equal(lines[1], 'Email,First Name,Consented At,Verified');
+      assert.equal(lines[2], 'jane@example.com,"Jane, M.D.",2026-11-05T12:00:00.000Z,no');
+      assert.equal(lines[3], 'bob@example.com,,2026-11-05T13:00:00Z,no');
     });
   });
 
-  describe('Merchant Admin Contacts & Custom Requests', () => {
+  describe('Merchant Admin Contacts & CSV Export', () => {
     it('lists merchant contacts and computes practice rollups', async () => {
       const mockRows = [
         { id: '1', shop: 'shop.myshopify.com', ownerId: 'p1', email: 'a@test.com', firstName: 'A', practiceName: 'Practice Alpha' },
@@ -399,7 +449,7 @@ describe('Contacts & Merchant Feedback Service (app/lib/protocols/contacts.js)',
       assert.equal(result.practices[1].count, 1);
     });
 
-    it('exports all merchant contacts to RFC 4180 CSV with 9 columns', () => {
+    it('exports all merchant contacts to RFC 4180 CSV with Verified = no and disclaimer comment', () => {
       const contacts = [
         {
           shop: 'demo.myshopify.com',
@@ -416,44 +466,248 @@ describe('Contacts & Merchant Feedback Service (app/lib/protocols/contacts.js)',
 
       const csv = exportMerchantContactsCsv(contacts, 'demo.myshopify.com');
       const lines = csv.split('\r\n');
-      assert.equal(lines[0], 'Shop,Practice Name,Owner GID,Email,First Name,Consent Text,Consent Version,Consented At,Created At');
-      assert.ok(lines[1].includes('demo.myshopify.com,Elite Health,gid://shopify/Customer/99,patient@example.com,John,"I consent to ""stay in touch"".",1,2026-11-05T10:00:00.000Z,2026-11-05T10:00:00.000Z'));
+      assert.match(lines[0], /^# Note: Email addresses are collected with opt-in consent but are not verified/);
+      assert.equal(lines[1], 'Shop,Practice Name,Owner GID,Email,First Name,Consent Text,Consent Version,Consented At,Created At,Verified');
+      assert.ok(lines[2].includes('demo.myshopify.com,Elite Health,gid://shopify/Customer/99,patient@example.com,John,"I consent to ""stay in touch"".",1,2026-11-05T10:00:00.000Z,2026-11-05T10:00:00.000Z,no'));
     });
+  });
 
-    it('saves and lists merchant custom requests', async () => {
-      const feedbackRows = [];
+  describe('ShopProfile & Merchant Feedback Management', () => {
+    it('upserts ShopProfile and preserves marketingOptIn on reinstall', async () => {
+      let storedProfile = null;
+
       const mockDb = {
         async query(sql, params) {
-          if (sql.includes('INSERT INTO "MerchantFeedback"')) {
-            const [shop, shopName, ownerName, replyEmail, planName, country, message, kind] = params;
-            const newRow = { id: 'fb_1', shop, shopName, ownerName, replyEmail, planName, country, message, kind, createdAt: new Date() };
-            feedbackRows.push(newRow);
-            return { rowCount: 1, rows: [{ id: newRow.id }] };
+          if (sql.includes('INSERT INTO "ShopProfile"')) {
+            const [shop, shopName, ownerName, email, planName, country] = params;
+            if (!storedProfile) {
+              storedProfile = {
+                id: 'sp_1',
+                shop,
+                shopName,
+                ownerName,
+                email,
+                planName,
+                country,
+                installedAt: new Date(),
+                uninstalledAt: null,
+                marketingOptIn: false,
+                marketingOptInAt: null,
+                updatedAt: new Date()
+              };
+            } else {
+              // Reinstall simulation: clears uninstalledAt, keeps marketingOptIn
+              storedProfile = {
+                ...storedProfile,
+                shopName: shopName || storedProfile.shopName,
+                ownerName: ownerName || storedProfile.ownerName,
+                email: email || storedProfile.email,
+                planName: planName || storedProfile.planName,
+                country: country || storedProfile.country,
+                uninstalledAt: null,
+                updatedAt: new Date()
+              };
+            }
+            return { rows: [storedProfile] };
           }
-          if (sql.includes('SELECT') && sql.includes('FROM "MerchantFeedback"')) {
-            const [shop, kind] = params;
-            return { rows: feedbackRows.filter(r => r.shop === shop && r.kind === kind) };
+          if (sql.includes('SELECT * FROM "ShopProfile"')) {
+            return { rows: storedProfile ? [storedProfile] : [] };
           }
           return { rows: [] };
         }
       };
 
-      const res = await saveMerchantCustomRequest(mockDb, {
+      // 1. Initial install
+      const p1 = await upsertShopProfile(mockDb, {
         shop: 'store.myshopify.com',
-        shopName: 'Health Store',
-        ownerName: 'Alice Merchant',
-        replyEmail: 'merchant@store.com',
-        message: 'Could you add support for barcode scanner input?'
+        shopName: 'Organic Apothecary',
+        ownerName: 'Dr. Jane',
+        email: 'jane@apothecary.com',
+        planName: 'Shopify Plus',
+        country: 'CA'
+      });
+      assert.equal(p1.shop, 'store.myshopify.com');
+      assert.equal(p1.marketingOptIn, false);
+      assert.equal(p1.uninstalledAt, null);
+
+      // 2. Merchant opts in
+      storedProfile.marketingOptIn = true;
+      storedProfile.marketingOptInAt = new Date();
+
+      // 3. Merchant uninstalls
+      storedProfile.uninstalledAt = new Date();
+
+      // 4. Reinstall: must clear uninstalledAt and KEEP marketingOptIn = true
+      const p2 = await upsertShopProfile(mockDb, {
+        shop: 'store.myshopify.com',
+        shopName: 'Organic Apothecary 2.0'
+      });
+      assert.equal(p2.uninstalledAt, null, 'Reinstall clears uninstalledAt');
+      assert.equal(p2.marketingOptIn, true, 'Reinstall preserves prior marketing opt-in');
+      assert.ok(p2.marketingOptInAt instanceof Date);
+    });
+
+    it('updates marketingOptIn and sets/clears timestamp', async () => {
+      let stored = {
+        shop: 'store.myshopify.com',
+        marketingOptIn: false,
+        marketingOptInAt: null
+      };
+
+      const mockDb = {
+        async query(sql, params) {
+          if (sql.includes('UPDATE "ShopProfile"')) {
+            const [shop, isOptedIn] = params;
+            stored.marketingOptIn = isOptedIn;
+            stored.marketingOptInAt = isOptedIn ? new Date() : null;
+            return { rows: [stored] };
+          }
+          return { rows: [] };
+        }
+      };
+
+      const optIn = await updateShopMarketingOptIn(mockDb, { shop: 'store.myshopify.com', marketingOptIn: true });
+      assert.equal(optIn.marketingOptIn, true);
+      assert.ok(optIn.marketingOptInAt instanceof Date);
+
+      const optOut = await updateShopMarketingOptIn(mockDb, { shop: 'store.myshopify.com', marketingOptIn: false });
+      assert.equal(optOut.marketingOptIn, false);
+      assert.equal(optOut.marketingOptInAt, null);
+    });
+
+    it('saves merchant feedback with rating and message', async () => {
+      const feedbackRows = [];
+      const mockDb = {
+        async query(sql, params) {
+          if (sql.includes('INSERT INTO "MerchantFeedback"')) {
+            const [shop, shopName, ownerName, replyEmail, planName, country, message, rating] = params;
+            const newRow = { id: 'fb_1', shop, shopName, ownerName, replyEmail, planName, country, message, rating, kind: 'feedback', createdAt: new Date() };
+            feedbackRows.push(newRow);
+            return { rowCount: 1, rows: [{ id: newRow.id }] };
+          }
+          if (sql.includes('SELECT * FROM "ShopProfile"')) {
+            return { rows: [{ shop: 'test.myshopify.com', shopName: 'Herbal Shop', email: 'owner@herbal.com' }] };
+          }
+          if (sql.includes('UPDATE "ShopProfile"')) {
+            return { rows: [] };
+          }
+          return { rows: [] };
+        }
+      };
+
+      const res = await saveMerchantFeedback(mockDb, {
+        shop: 'test.myshopify.com',
+        rating: 5,
+        message: 'The protocol editor has been amazing for our staff.',
+        marketingOptIn: true
       });
 
       assert.equal(res.success, true);
       assert.equal(feedbackRows.length, 1);
-      assert.equal(feedbackRows[0].replyEmail, 'merchant@store.com');
-      assert.equal(feedbackRows[0].kind, 'custom_request');
+      assert.equal(feedbackRows[0].rating, 5);
+      assert.equal(feedbackRows[0].message, 'The protocol editor has been amazing for our staff.');
+      assert.equal(feedbackRows[0].replyEmail, 'owner@herbal.com');
+    });
 
-      const listed = await listMerchantFeedback(mockDb, { shop: 'store.myshopify.com' });
-      assert.equal(listed.length, 1);
-      assert.equal(listed[0].message, 'Could you add support for barcode scanner input?');
+    it('prefills metadata from ShopProfile on custom request and never turns on marketingOptIn', async () => {
+      const feedbackRows = [];
+      let shopProfile = {
+        shop: 'test.myshopify.com',
+        shopName: 'Clinic One',
+        ownerName: 'Dr. Roberts',
+        email: 'roberts@clinic.com',
+        planName: 'Grow',
+        country: 'US',
+        marketingOptIn: false
+      };
+
+      const mockDb = {
+        async query(sql, params) {
+          if (sql.includes('SELECT * FROM "ShopProfile"')) {
+            return { rows: [shopProfile] };
+          }
+          if (sql.includes('INSERT INTO "MerchantFeedback"')) {
+            const [shop, shopName, ownerName, replyEmail, planName, country, message, kind] = params;
+            const newRow = { id: 'cr_1', shop, shopName, ownerName, replyEmail, planName, country, message, kind };
+            feedbackRows.push(newRow);
+            return { rowCount: 1, rows: [{ id: newRow.id }] };
+          }
+          return { rows: [] };
+        }
+      };
+
+      await saveMerchantCustomRequest(mockDb, {
+        shop: 'test.myshopify.com',
+        message: 'Can we have customizable color themes?'
+      });
+
+      assert.equal(feedbackRows.length, 1);
+      assert.equal(feedbackRows[0].shopName, 'Clinic One');
+      assert.equal(feedbackRows[0].ownerName, 'Dr. Roberts');
+      assert.equal(feedbackRows[0].replyEmail, 'roberts@clinic.com');
+      assert.equal(feedbackRows[0].planName, 'Grow');
+      assert.equal(feedbackRows[0].country, 'US');
+      assert.equal(shopProfile.marketingOptIn, false, 'Custom request must never turn on marketingOptIn');
+    });
+
+    it('syncShopProfile queries GraphQL and handles failures gracefully without blocking', async () => {
+      let storedProfile = null;
+      const mockDb = {
+        async query(sql, params) {
+          if (sql.includes('SELECT "accessToken" FROM "Session"')) {
+            return { rows: [{ accessToken: 'mock_shpat_valid_token' }] };
+          }
+          if (sql.includes('INSERT INTO "ShopProfile"')) {
+            const [shop, shopName, ownerName, email, planName, country] = params;
+            storedProfile = { shop, shopName, ownerName, email, planName, country };
+            return { rows: [storedProfile] };
+          }
+          return { rows: [] };
+        }
+      };
+
+      // 1. Success path
+      const fakeFetchSuccess = async () => ({
+        ok: true,
+        json: async () => ({
+          data: {
+            shop: {
+              name: 'Holistic Care',
+              email: 'info@holistic.com',
+              shopOwnerName: 'Alice Green',
+              plan: { publicDisplayName: 'Advanced' },
+              billingAddress: { countryCodeV2: 'GB' }
+            }
+          }
+        })
+      });
+
+      const res = await syncShopProfile(mockDb, { shop: 'holistic.myshopify.com', fetchFn: fakeFetchSuccess });
+      assert.ok(res);
+      assert.equal(res.shopName, 'Holistic Care');
+      assert.equal(res.email, 'info@holistic.com');
+      assert.equal(res.ownerName, 'Alice Green');
+      assert.equal(res.planName, 'Advanced');
+      assert.equal(res.country, 'GB');
+
+      // 2. Failed fetch must never throw or block
+      const origWarn = console.warn;
+      const warnings = [];
+      console.warn = (...args) => warnings.push(args.join(' '));
+
+      try {
+        const fakeFetchFail = async () => ({
+          ok: false,
+          status: 500
+        });
+
+        const failRes = await syncShopProfile(mockDb, { shop: 'holistic.myshopify.com', fetchFn: fakeFetchFail });
+        assert.equal(failRes, null);
+        assert.equal(warnings.length, 1);
+        assert.match(warnings[0], /Failed to fetch shop profile/);
+      } finally {
+        console.warn = origWarn;
+      }
     });
   });
 });

@@ -223,6 +223,7 @@ describe('Shopify Compliance & Attribution Webhooks (app/lib/protocols/webhooks.
       assert.ok(mockDb.state.queries.some(q => q.sql.includes('DELETE FROM "PractitionerProfile"')));
       assert.ok(mockDb.state.queries.some(q => q.sql.includes('DELETE FROM "ShopperContact"')), 'Must delete ShopperContact on shop redact');
       assert.ok(mockDb.state.queries.some(q => q.sql.includes('DELETE FROM "MerchantFeedback"')), 'Must delete MerchantFeedback on shop redact');
+      assert.ok(mockDb.state.queries.some(q => q.sql.includes('DELETE FROM "ShopProfile"')), 'Must delete ShopProfile on shop redact');
     });
 
     it('handleAppUninstalled revokes sessions and updates shop state', async () => {
@@ -233,6 +234,7 @@ describe('Shopify Compliance & Attribution Webhooks (app/lib/protocols/webhooks.
       assert.equal(res.success, true);
       assert.ok(res.uninstalledAt);
       assert.ok(mockDb.state.queries.some(q => q.sql.includes('DELETE FROM "Session"')));
+      assert.ok(mockDb.state.queries.some(q => q.sql.includes('UPDATE "ShopProfile" SET "uninstalledAt"')), 'Must set uninstalledAt on ShopProfile');
     });
 
     it('handleOrdersPaid extracts protocol attributions and triggers stats update', async () => {

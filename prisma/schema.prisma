@@ -173,9 +173,29 @@ model MerchantFeedback {
   planName   String?
   country    String?
   message    String
+  rating     Int?     // 1-5 rating (for kind='feedback')
   kind       String   @default("feedback") // 'feedback' | 'custom_request'
   createdAt  DateTime @default(now())
 
   @@index([shop])
   @@index([kind])
+}
+
+/// Merchant store profile synchronized via Admin GraphQL shop query on OAuth and admin load.
+model ShopProfile {
+  id               String    @id @default(cuid())
+  shop             String    @unique
+  shopName         String?
+  ownerName        String?
+  email            String?
+  planName         String?
+  country          String?
+  installedAt      DateTime  @default(now())
+  uninstalledAt    DateTime?
+  marketingOptIn   Boolean   @default(false)
+  marketingOptInAt DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @default(now()) @updatedAt
+
+  @@index([shop])
 }

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 /**
- * @file CLI Script for listing Custom Feature Requests and Opted-In Shopper Contacts.
+ * @file CLI Script for listing Opted-In Merchants, Custom Feature Requests, and Shopper Contacts.
  * Usage: node scripts/contacts.mjs [shop]
  */
 
@@ -13,8 +13,10 @@ if (arg === '--help' || arg === '-h') {
   console.log(`
 Usage: node scripts/contacts.mjs [shop]
 
-Lists custom feature requests from merchants (listed first) and
-opted-in shopper contacts (listed second) from the database.
+Lists:
+  1. Opted-in, currently-installed shops (marketingOptIn = true, uninstalledAt IS NULL)
+  2. Custom feature requests from merchants
+  3. Opted-in shopper contacts ("Stay in touch")
 
 Arguments:
   [shop]    Optional shop domain filter (e.g. store.myshopify.com)
@@ -45,13 +47,55 @@ async function main() {
     await client.connect();
 
     console.log('='.repeat(80));
-    console.log('PRACTITIONER PROTOCOLS — CUSTOM REQUESTS & OPTED-IN CONTACTS');
+    console.log('PRACTITIONER PROTOCOLS — OPTED-IN MERCHANTS, REQUESTS & SHOPPER CONTACTS');
     console.log('='.repeat(80));
     console.log(`Database connected. Shop filter: ${shopFilter || 'ALL SHOPS'}\n`);
 
-    // 1. Custom Feature Requests (listed first)
+    // 1. Opted-In Currently-Installed Merchants
+    // Privacy safeguard: never print shops that did not opt in, except custom requests
     console.log('-'.repeat(80));
-    console.log('1. MERCHANT CUSTOM FEATURE REQUESTS (kind = \'custom_request\')');
+    console.log('1. OPTED-IN INSTALLED SHOPS (marketingOptIn = true, uninstalledAt IS NULL)');
+    console.log('-'.repeat(80));
+
+    let shopSql = `
+      SELECT "shop", "shopName", "ownerName", "email", "planName", "country", "installedAt", "marketingOptInAt"
+      FROM "ShopProfile"
+      WHERE "marketingOptIn" = true AND "uninstalledAt" IS NULL
+    `;
+    const shopParams = [];
+    if (shopFilter) {
+      shopSql += ' AND "shop" = $1';
+      shopParams.push(shopFilter);
+    }
+    shopSql += ' ORDER BY "installedAt" DESC';
+
+    let shopRows = [];
+    try {
+      const sRes = await client.query(shopSql, shopParams);
+      shopRows = sRes.rows || [];
+    } catch (err) {
+      console.warn(`[Warning] Could not query ShopProfile: ${err.message}`);
+    }
+
+    if (shopRows.length === 0) {
+      console.log('  No opted-in, currently-installed shops found.\n');
+    } else {
+      console.log(`  Found ${shopRows.length} opted-in installed shop(s):\n`);
+      for (const s of shopRows) {
+        console.log(`  [Shop: ${s.shop}] Store: ${s.shopName || '—'} | Owner: ${s.ownerName || '—'}`);
+        console.log(`    Contact Email: ${s.email || '—'}`);
+        console.log(`    Plan: ${s.planName || '—'} | Country: ${s.country || '—'}`);
+        console.log(`    Installed: ${new Date(s.installedAt).toISOString()}`);
+        if (s.marketingOptInAt) {
+          console.log(`    Opted In At: ${new Date(s.marketingOptInAt).toISOString()}`);
+        }
+        console.log('');
+      }
+    }
+
+    // 2. Custom Feature Requests
+    console.log('-'.repeat(80));
+    console.log('2. MERCHANT CUSTOM FEATURE REQUESTS (kind = \'custom_request\')');
     console.log('-'.repeat(80));
 
     let feedbackSql = `
@@ -94,9 +138,9 @@ async function main() {
       }
     }
 
-    // 2. Opted-In Shopper Contacts
+    // 3. Opted-In Shopper Contacts
     console.log('-'.repeat(80));
-    console.log('2. OPTED-IN SHOPPER CONTACTS ("Stay in touch")');
+    console.log('3. OPTED-IN SHOPPER CONTACTS ("Stay in touch")');
     console.log('-'.repeat(80));
 
     let contactsSql = `

@@ -1395,6 +1395,7 @@ export function renderAdminHtml(options = {}) {
     report = null,
     settings = null,
     contactsData = null,
+    shopProfile = null,
     adminEmail = '',
     activeTab = 'practitioners'
   } = options;
@@ -1898,6 +1899,37 @@ export function renderAdminHtml(options = {}) {
     </div>
 
     <div class="Polaris-Card">
+      <h2 class="Polaris-Card-Title">Contact &amp; feedback</h2>
+      <p style="color: var(--p-color-text-subdued); margin-bottom: 1rem; font-size: 0.875rem;">
+        Help us improve Practitioner Protocols. Your feedback and opt-in preferences are shared directly with the app developer.
+      </p>
+      <form method="POST" action="/api/admin/feedback">
+        <input type="hidden" name="_is_feedback_form" value="1" />
+        <div style="margin-bottom: 1rem;">
+          <label style="display:flex; align-items:flex-start; gap:0.5rem; cursor:pointer; font-size:0.875rem;">
+            <input type="checkbox" id="merchant-marketing-optin" name="marketingOptIn" value="1" ${shopProfile?.marketingOptIn ? 'checked' : ''} style="margin-top:0.2rem;" />
+            <span>You may contact me at <strong>${escapeAdminText(shopProfile?.email || adminEmail || 'this email')}</strong> about feedback, custom work and product updates.</span>
+          </label>
+        </div>
+        <div style="margin-bottom: 1rem;">
+          <label style="display:block; font-weight:600; margin-bottom:0.25rem;">Rate your experience (1&ndash;5)</label>
+          <div style="display:flex; gap:1.25rem; align-items:center; font-size:0.875rem;">
+            ${[1, 2, 3, 4, 5].map(val => `
+              <label style="display:flex; align-items:center; gap:0.25rem; cursor:pointer;">
+                <input type="radio" name="rating" value="${val}" /> ${val}
+              </label>`).join('')}
+          </div>
+        </div>
+        <div style="margin-bottom: 1rem;">
+          <label style="display:block; font-weight:600; margin-bottom:0.25rem;">Message (optional)</label>
+          <textarea name="message" rows="3" maxlength="1000" placeholder="How has the app been working for your practice? What could we improve?" style="width:100%; border-radius:4px; border:1px solid var(--p-color-border); padding:0.5rem;"></textarea>
+          <div style="color: var(--p-color-text-subdued); font-size: 0.75rem; margin-top: 0.25rem;">Max 1000 characters.</div>
+        </div>
+        <button type="submit" class="Polaris-Button Polaris-Button--primary">Save Preferences &amp; Send Feedback</button>
+      </form>
+    </div>
+
+    <div class="Polaris-Card">
       <h2 class="Polaris-Card-Title">Need a change or a custom feature?</h2>
       <p style="color: var(--p-color-text-subdued); margin-bottom: 1rem; font-size: 0.875rem;">
         Let the developer know what feature, workflow, or custom integration would help your brand or practice.
@@ -1910,7 +1942,7 @@ export function renderAdminHtml(options = {}) {
         </div>
         <div style="margin-bottom: 1rem;">
           <label style="display:block; font-weight:600; margin-bottom:0.25rem;">How should we reach you?</label>
-          <input type="email" name="replyEmail" maxlength="254" value="${escapeAdminText(adminEmail || '')}" placeholder="you@example.com" style="width:100%; max-width:360px; border-radius:4px; border:1px solid var(--p-color-border); padding:0.5rem;">
+          <input type="email" name="replyEmail" maxlength="254" value="${escapeAdminText(shopProfile?.email || adminEmail || '')}" placeholder="you@example.com" style="width:100%; max-width:360px; border-radius:4px; border:1px solid var(--p-color-border); padding:0.5rem;">
           <div style="color: var(--p-color-text-subdued); font-size: 0.75rem; margin-top: 0.25rem;">
             This sends a request to the app developer. We'll only use your email to reply.
           </div>

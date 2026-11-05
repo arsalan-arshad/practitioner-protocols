@@ -107,13 +107,14 @@
   - Data model: `ShopperContact` (id, shop, ownerId, email, firstName, consentText, consentVersion, consentedAt, source, createdAt) and `MerchantFeedback` (id, shop, shopName, ownerName, replyEmail, planName, country, message, kind, createdAt); DDL migration `20261105_add_shopper_contact_and_feedback/migration.sql`, registered in `scripts/migrate.js`, mirrored in `prisma/schema.prisma`.
   - Shopper capture (guest via App Proxy): optional "Stay in touch with {practiceName}" card under "Add all to cart", email input, optional first name, unticked checkbox with exact consent text, link to `/privacy`, honeypot, anti-enumeration generic response, and zero PII logging.
   - New proxy action `subscribe` (POST, exact `application/json` else 415, `Sec-Fetch-Site: same-origin` else 403, rate limited, active protocol check, idempotent upsert).
-  - Practitioner portal: "My contacts" count, table with inline two-step delete button, and RFC 4180 CSV export (`Email,First Name,Consented At`) scoped server-side to practitioner's ownerId.
-  - Merchant admin: new "Contacts" Polaris tab with counts per practice, global RFC 4180 CSV export (`Shop,Practice Name,Owner GID,Email,First Name,Consent Text,Consent Version,Consented At,Created At`), single delete, and delete-all-for-practice.
-  - Merchant custom feature request (Settings tab): "Need a change or a custom feature?" card with message ($\le 1000$ chars), prefilled/editable replyEmail, reply-only consent, and 3/hr per-shop rate limit.
-  - Compliance webhooks: `customers/redact` deletes matching `ShopperContact` rows by lowercased email; `customers/data_request` includes matching `ShopperContact` rows; `shop/redact` deletes all `ShopperContact` and `MerchantFeedback` rows for the shop; documented retention policy in `handleAppUninstalled`.
-  - CLI script: `scripts/contacts.mjs` listing custom feature requests first, followed by opted-in contacts.
-  - Updated `/privacy`, `README.md`, `docs/SPEC.md`, and `PROJECT_CONTEXT.md` honestly stating data handling practices.
-  - Automated unit test coverage: 542 passing tests across 117 suites (`npm test`).
+  - Practitioner portal: "My contacts" count, table with inline two-step delete button, and RFC 4180 CSV export (`Email,First Name,Consented At,Verified`) scoped server-side to practitioner's ownerId.
+  - Merchant admin: new "Contacts" Polaris tab with counts per practice, global RFC 4180 CSV export (`Shop,Practice Name,Owner GID,Email,First Name,Consent Text,Consent Version,Consented At,Created At,Verified`), single delete, and delete-all-for-practice.
+  - Merchant contact & feedback (Settings tab): "Contact & feedback" card with 1–5 rating, optional feedback message, and unticked marketing opt-in checkbox; "Need a change or a custom feature?" card with prefilled replyEmail from `ShopProfile.email`, reply-only consent, and 3/hr per-shop rate limit.
+  - Compliance webhooks & lifecycle: `customers/redact` deletes matching `ShopperContact` rows by lowercased email; `customers/data_request` includes matching `ShopperContact` rows; `app/uninstalled` sets `uninstalledAt` on `ShopProfile` and revokes sessions; `shop/redact` deletes all `ShopperContact`, `MerchantFeedback`, and `ShopProfile` rows for the shop.
+  - Cryptography & Security: AES-256-GCM token encryption at rest for `Session.accessToken` (`enc:v1:<iv>:<tag>:<ciphertext>`), canonical server-enforced consent texts, and dedicated 5/hr rate limiter on shopper opt-in subscriptions.
+  - CLI scripts: `scripts/contacts.mjs` listing opted-in installed shops, custom feature requests, and shopper contacts; `scripts/stats.mjs` reporting aggregate platform metrics.
+  - Updated `/privacy`, `README.md`, `docs/SPEC.md`, and `PROJECT_CONTEXT.md` honestly stating data handling practices and unverified email disclosure.
+  - Automated unit test coverage: 566 passing tests across 123 suites (`npm test`).
 
 ## Later
 Practitioner application form · aggregate "client orders" count on protocol cards · protocol version history · Salesforce rollup via Bridge Recipes.

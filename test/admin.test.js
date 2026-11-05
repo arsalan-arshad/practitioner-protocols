@@ -1683,11 +1683,15 @@ describe('Merchant Admin Layer (app/lib/protocols/admin.js)', () => {
       assert.ok(html.includes('action="/api/admin/contacts/delete-practice"'), 'Must render delete all for practice form');
     });
 
-    it('renders M11 custom feature request card in Settings tab and parses scripts cleanly', () => {
+    it('renders M11 custom feature request card and Contact & feedback card in Settings tab and parses scripts cleanly', () => {
       const html = renderAdminHtml({
         shop: testShop,
         activeTab: 'settings',
-        adminEmail: 'merchant@test.myshopify.com'
+        adminEmail: 'merchant@test.myshopify.com',
+        shopProfile: {
+          email: 'custom_owner@test.myshopify.com',
+          marketingOptIn: true
+        }
       });
 
       // Script parsing check
@@ -1699,11 +1703,17 @@ describe('Merchant Admin Layer (app/lib/protocols/admin.js)', () => {
         );
       }
 
+      assert.ok(html.includes('Contact &amp; feedback'), 'Must render Contact & feedback card heading');
+      assert.ok(html.includes('action="/api/admin/feedback"'), 'Must render feedback form');
+      assert.ok(html.includes('name="marketingOptIn"'), 'Must render marketing opt-in checkbox');
+      assert.ok(html.includes('checked'), 'Opted-in profile must render checked box');
+      assert.ok(html.includes('name="rating"'), 'Must render rating radio buttons');
+
       assert.ok(html.includes('Need a change or a custom feature?'), 'Must render custom feature card heading');
       assert.ok(html.includes('action="/api/admin/feedback/custom-request"'), 'Must render custom request form');
       assert.ok(html.includes('name="message"'), 'Must render custom request message textarea');
       assert.ok(html.includes('name="replyEmail"'), 'Must render custom request reply email input');
-      assert.ok(html.includes('merchant@test.myshopify.com'), 'Must pre-fill admin reply email');
+      assert.ok(html.includes('custom_owner@test.myshopify.com'), 'Must pre-fill admin reply email from shopProfile');
     });
   });
 

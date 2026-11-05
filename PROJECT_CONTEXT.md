@@ -1,6 +1,6 @@
 # Practitioner Protocols — Project Context (for Claude)
 
-_Snapshot: 2026-11-05 · Live Railway deployment active (`practitioner-protocols-production.up.railway.app`) with internal Postgres & ledger migrations · Production app record "Practitioner Protocols" released (v2, Public distribution) · Production hardening complete · Milestones M9a, M9b-1, M9b-2, M9b-3a & M9b-3b VERIFIED LIVE on dev store · Milestone M11 (Shopper Opt-In & Merchant Custom Request) implemented · Pre-submission hardening complete · Spikes S2, S3, S4, S5, S6 resolved; S1 resolved on the Plus dev store only · Brand assets v2 & v3 produced and verified · 542 tests passing across 117 suites._
+_Snapshot: 2026-11-05 · Live Railway deployment active (`practitioner-protocols-production.up.railway.app`) with internal Postgres & ledger migrations · Production app record "Practitioner Protocols" released (v2, Public distribution) · Production hardening complete · Milestones M9a, M9b-1, M9b-2, M9b-3a & M9b-3b VERIFIED LIVE on dev store · Milestone M11 (Shopper Opt-In & Merchant Contact Hardening) implemented · Pre-submission hardening complete · Spikes S2, S3, S4, S5, S6 resolved; S1 resolved on the Plus dev store only · Brand assets v2 & v3 produced and verified · 566 tests passing across 123 suites._
 _Contains NO secrets. Never paste `.env` values or tokens into chat or docs._
 
 ## 1. What this is
@@ -1026,5 +1026,39 @@ Run the five spikes in a day or two on a dev store; write the answers into secti
    - `scripts/contacts.mjs`: lists custom requests first and opted-in contacts second, with optional shop domain filter and `--help` support.
 8. **Automated Test Coverage:**
    - 542 unit tests passing across 117 suites (`npm test`). Zero failures.
+
+### 2026-11-05: Milestone M11 Follow-Up Hardening (Part 1 & Part 2)
+1. **Server-Side Canonical Consent Enforcement:**
+   - Defined `CANONICAL_CONSENT_TEMPLATES` constant in `app/lib/protocols/contacts.js` (version 1: `"I agree to receive emails from {practiceName} and {shopName} with product recommendations and offers. I can unsubscribe at any time."`).
+   - `saveShopperContact` strictly ignores any client-supplied `consentText`, resolves practice and shop metadata on the server, and stores the canonical text.
+   - Unknown `consentVersion` values are rejected with `ContactValidationError` (code `INVALID_CONSENT_VERSION`).
+   - Client recommendation page in `app/lib/protocols/proxy.js` renders identical text directly from the canonical helper function.
+2. **Dedicated Subscribe Rate Limiter:**
+   - Implemented dedicated sliding window rate limiter `defaultSubscribeRateLimiter` (5 requests / hour per client key) on App Proxy `action=subscribe`, returning HTTP 429 with generic message `"Too many requests. Please try again later."` upon limit exhaustion.
+3. **Email Verification Transparency:**
+   - Clearly documented in `/privacy`, `README.md`, `docs/SPEC.md`, and CSV exports that the application does not send emails or perform verification.
+   - Both practitioner CSV and merchant contacts CSV include a `# Note: ...` header comment and a dedicated `"Verified"` column with value `"no"`.
+4. **Data Model & Unique Constraints:**
+   - Confirmed unique index on `ShopperContact` is `("shop", "ownerId", "email")` with `email` lowercased at write time. Verified `Jane@X.com` and `jane@x.com` update the exact same row.
+5. **Merchant Profile & Contact Preferences (`ShopProfile`):**
+   - Migration `20261105_add_shop_profile_and_feedback_rating/migration.sql` creates `ShopProfile` (id, shop unique, shopName, ownerName, email, planName, country, installedAt, uninstalledAt, marketingOptIn default false, marketingOptInAt, createdAt, updatedAt) and adds `rating` (1–5) to `MerchantFeedback`.
+   - Registered in `scripts/migrate.js` and mirrored in `prisma/schema.prisma`.
+   - Admin GraphQL `shop` query (`name, email, shopOwnerName, plan.publicDisplayName, billingAddress.countryCodeV2`) synchronized on OAuth code exchange and on admin load if stale (> 7 days). No additional Shopify scopes required (`read_orders` only).
+   - Failed GraphQL profile sync logs a single non-PII warning and never blocks installation.
+   - Reinstallation clears `uninstalledAt = NULL` while strictly preserving existing `marketingOptIn` and `marketingOptInAt`.
+6. **Polaris Admin Settings "Contact & feedback" Card:**
+   - Rendered "Contact & feedback" card with unticked marketing opt-in checkbox ("You may contact me at {email} about feedback, custom work and product updates.") saving `marketingOptIn` and timestamp (cleared when unticked), rating 1–5, and optional message saved in `MerchantFeedback` (`kind='feedback'`).
+   - Custom feature request card prefills `replyEmail` from `ShopProfile.email` and captures shop profile metadata; counts as reply-only consent and never turns on `marketingOptIn`.
+   - Admin routes authorized via session tokens with cross-shop denial tests.
+7. **Session Token Encryption at Rest:**
+   - Implemented AES-256-GCM token encryption in `app/lib/protocols/crypto.js` using `SESSION_ENCRYPTION_KEY` (base64 32 bytes) with format `enc:v1:<iv>:<tag>:<ciphertext>`.
+   - Decrypt on read with seamless backward compatibility for plaintext rows.
+   - If `SESSION_ENCRYPTION_KEY` is missing: logs a single warning, stores plaintext, never crashes.
+   - Throws sanitized errors on tampered ciphertext, bad auth tag, or incorrect key, strictly avoiding credential leaks in logs or errors.
+8. **Tooling & Platform Scripts:**
+   - Updated `scripts/contacts.mjs` to list opted-in installed shops (`marketingOptIn = true AND uninstalledAt IS NULL`), custom requests, and shopper contacts.
+   - Added `scripts/stats.mjs` reporting aggregate platform metrics (installed, active, uninstalled, opt-in count, feedback count & average rating, shopper contacts count, and weekly installation trends) reading `DATABASE_URL` with read-only queries.
+9. **Automated Test Coverage:**
+   - 566 unit tests passing across 123 suites (`npm test`). Zero failures.
 
 

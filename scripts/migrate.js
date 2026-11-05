@@ -20,6 +20,7 @@ export const MIGRATION_FILES = [
   join(ROOT_DIR, 'prisma/migrations/20261103_add_allow_self_enrol/migration.sql'),
   join(ROOT_DIR, 'prisma/migrations/20261104_add_product_handle_to_protocol_line/migration.sql'),
   join(ROOT_DIR, 'prisma/migrations/20261105_add_shopper_contact_and_feedback/migration.sql'),
+  join(ROOT_DIR, 'prisma/migrations/20261105_add_shop_profile_and_feedback_rating/migration.sql'),
 ];
 
 /**

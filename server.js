@@ -18,6 +18,8 @@ import { renderPortalLiquid } from './app/lib/protocols/portal.js';
 import { renderProtocolLiquid, verifyAppProxyHmac, verifyOAuthHmac } from './app/lib/protocols/proxy.js';
 import { renderHandoutHtml } from './app/lib/protocols/handout.js';
 import { generateQrSvg } from './app/lib/protocols/qr.js';
+import { encryptAccessToken } from './app/lib/protocols/crypto.js';
+import { syncShopProfile } from './app/lib/protocols/contacts.js';
 import {
   handleAppProxyRequest,
   handleWebhookRequest,
@@ -32,7 +34,9 @@ import {
   handleAdminContactsCsvRequest,
   handleAdminDeleteContactRequest,
   handleAdminDeletePracticeContactsRequest,
-  handleAdminCustomFeatureRequest
+  handleAdminCustomFeatureRequest,
+  handleAdminFeedbackRequest,
+  handleAdminMarketingOptInRequest
 } from './app/lib/protocols/routes.js';
 import { createFakeVariantResolver } from './app/lib/protocols/catalog.js';
 
@@ -525,12 +529,13 @@ export function renderPrivacyHtml({ contactEmail = '' } = {}) {
     <p>To operate recommendation workflows for direct-to-consumer and professional brands, the application stores only:</p>
     <ul>
       <li><strong>Shop Domain:</strong> The store domain (e.g. <code>example.myshopify.com</code>) to scope protocols and settings.</li>
-      <li><strong>Offline Access Token:</strong> Stored securely to verify platform webhooks and authenticate merchant admin operations.</li>
+      <li><strong>Offline Access Token:</strong> Stored encrypted at rest using AES-256-GCM to verify platform webhooks and authenticate merchant admin operations.</li>
       <li><strong>Practitioner Approval Records:</strong> Professional practice names and approval statuses as authorized by the merchant.</li>
       <li><strong>Protocols and Share Tokens:</strong> Protocol titles, intro messages, selected product variant identifiers (GIDs and handles), recommended quantities, usage directions, and unguessable cryptographic share tokens.</li>
       <li><strong>Aggregate Attribution Counts:</strong> Monthly aggregate order counts and attributed gross revenue per protocol and practice.</li>
-      <li><strong>Opted-In Shopper Contacts:</strong> If and only if a shopper explicitly opts in via the "Stay in touch" form on a protocol recommendation page, the app stores their email address, optional first name, the exact consent text shown, consent version, timestamp, and the associated practice. Purpose: to enable the merchant or practice to send product recommendations and offers directly through their own communication tools (emails are never sent by this application). Legal basis: explicit consent. The app stores NO protocolId, NO order ID, NO purchased product data, NO IP address, and NO user agent with the contact.</li>
-      <li><strong>Merchant Custom Feature Requests:</strong> When a merchant submits a feature request in the admin Settings tab, we store the message and optional reply email. This counts as consent to reply strictly to that inquiry and is never used for marketing.</li>
+      <li><strong>Opted-In Shopper Contacts:</strong> If and only if a shopper explicitly opts in via the "Stay in touch" form on a protocol recommendation page, the app stores their email address, optional first name, the exact canonical consent text, consent version, timestamp, and the associated practice. Purpose: to enable the merchant or practice to send product recommendations and offers directly through their own communication tools (emails are never sent by this application). Legal basis: explicit consent. The app stores NO protocolId, NO order ID, NO purchased product data, NO IP address, and NO user agent with the contact. <em>Note: The application does not send email or perform email verification; merchants and practitioners export contacts to confirm via double opt-in in their own email marketing systems.</em></li>
+      <li><strong>Merchant Store Profile &amp; Feedback:</strong> Basic store profile details (shop name, owner name, contact email, plan name, country) retrieved via the Shopify Admin API. If the merchant opts in via Settings ("Contact &amp; feedback"), we record their marketing consent and timestamp to reach out about feedback, custom work, and product updates. Merchants can also submit ratings (1&ndash;5) and feedback messages.</li>
+      <li><strong>Merchant Custom Feature Requests:</strong> When a merchant submits a feature request in the admin Settings tab, we store the message and optional reply email. This counts as consent to reply strictly to that inquiry and never turns on marketing opt-in.</li>
     </ul>
 
     <h2>2. What the App Does NOT Store</h2>
@@ -547,8 +552,8 @@ export function renderPrivacyHtml({ contactEmail = '' } = {}) {
       <li><strong>How to Withdraw Consent or Request Deletion:</strong> Shoppers can withdraw consent or request deletion at any time by contacting the store or practice. Practitioners can delete contacts from their portal, merchants can delete individual contacts or entire practice contact lists in the admin dashboard, and platform data privacy requests are honored automatically.</li>
       <li><strong>Customer Data Requests (<code>customers/data_request</code>):</strong> Reports any matching practitioner profile records and opted-in shopper contact records.</li>
       <li><strong>Customer Redaction (<code>customers/redact</code>):</strong> Automatically and permanently deletes matching opted-in shopper contacts by email and removes practitioner profile records.</li>
-      <li><strong>Shop Redaction (<code>shop/redact</code>):</strong> Immediately and permanently deletes all protocols, line items, practice profiles, settings, sessions, attribution records, shopper contacts, and merchant feedback rows associated with the store upon receipt.</li>
-      <li><strong>App Uninstallation (<code>app/uninstalled</code>):</strong> Immediately revokes and removes all stored offline access tokens and merchant sessions. Store data is retained during the 48-hour platform grace period in case of reinstallation, then permanently deleted upon receipt of <code>shop/redact</code>.</li>
+      <li><strong>Shop Redaction (<code>shop/redact</code>):</strong> Immediately and permanently deletes all protocols, line items, practice profiles, settings, sessions, attribution records, shopper contacts, merchant feedback, and store profiles associated with the store upon receipt.</li>
+      <li><strong>App Uninstallation (<code>app/uninstalled</code>):</strong> Immediately revokes and removes all stored offline access tokens and merchant sessions, and records the uninstallation timestamp on the store profile. Store data is retained during the 48-hour platform grace period in case of reinstallation, then permanently deleted upon receipt of <code>shop/redact</code>.</li>
     </ul>
 
     <h2>4. Sub-Processors</h2>
@@ -738,7 +743,10 @@ export function createRequestListener(options = {}) {
             scope = tokenData.scope || scope;
           }
 
+          const encryptedToken = encryptAccessToken(accessToken);
+
           // Do not store the state in Session.state; store "authenticated".
+          // Store encrypted access token at rest using AES-256-GCM.
           await pool.query(
             `INSERT INTO "Session" ("id", "shop", "state", "isOnline", "scope", "accessToken")
              VALUES ($1, $2, $3, false, $4, $5)
@@ -747,8 +755,15 @@ export function createRequestListener(options = {}) {
                "state" = EXCLUDED."state",
                "scope" = EXCLUDED."scope",
                "accessToken" = EXCLUDED."accessToken"`,
-            [`offline_${shop}`, shop, 'authenticated', scope, accessToken]
+            [`offline_${shop}`, shop, 'authenticated', scope, encryptedToken]
           );
+
+          // Synchronize ShopProfile via Admin GraphQL shop query (non-blocking, never fails install)
+          try {
+            await syncShopProfile(pool, { shop, accessToken });
+          } catch (syncErr) {
+            console.warn(`[ShopProfile] Failed to sync profile for ${shop} on install: ${syncErr.message}`);
+          }
         }
 
         const targetUrl = `/admin?shop=${encodeURIComponent(shop)}${hostParam ? `&host=${encodeURIComponent(hostParam)}` : ''}`;
@@ -775,7 +790,9 @@ export function createRequestListener(options = {}) {
         pathname === '/api/admin/contacts.csv' ||
         pathname === '/api/admin/contacts/delete' ||
         pathname === '/api/admin/contacts/delete-practice' ||
-        pathname === '/api/admin/feedback/custom-request'
+        pathname === '/api/admin/feedback/custom-request' ||
+        pathname === '/api/admin/feedback' ||
+        pathname === '/api/admin/feedback/contact-optin'
       ) {
         const authHeader = req.headers?.authorization || req.headers?.Authorization;
         const hasSession = Boolean(
@@ -825,6 +842,10 @@ export function createRequestListener(options = {}) {
             webRes = await handleAdminDeletePracticeContactsRequest(pool, webReq, handlerOpts);
           } else if (pathname === '/api/admin/feedback/custom-request') {
             webRes = await handleAdminCustomFeatureRequest(pool, webReq, handlerOpts);
+          } else if (pathname === '/api/admin/feedback') {
+            webRes = await handleAdminFeedbackRequest(pool, webReq, handlerOpts);
+          } else if (pathname === '/api/admin/feedback/contact-optin') {
+            webRes = await handleAdminMarketingOptInRequest(pool, webReq, handlerOpts);
           }
 
           if (webRes) {

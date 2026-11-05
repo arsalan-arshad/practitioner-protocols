@@ -517,6 +517,13 @@ export async function handleShopRedact(db, payload) {
     RETURNING "id"
   `, [shop]);
 
+  // 10. Delete ShopProfile (M11)
+  const shopProfileRes = await db.query(`
+    DELETE FROM "ShopProfile"
+    WHERE "shop" = $1
+    RETURNING "id"
+  `, [shop]);
+
   return {
     success: true,
     shop,
@@ -529,7 +536,8 @@ export async function handleShopRedact(db, payload) {
       sessions: sessionsRes.rowCount ?? sessionsRes.rows?.length ?? 0,
       webhooks: webhooksRes.rowCount ?? webhooksRes.rows?.length ?? 0,
       contacts: contactsRes.rowCount ?? contactsRes.rows?.length ?? 0,
-      feedback: feedbackRes.rowCount ?? feedbackRes.rows?.length ?? 0
+      feedback: feedbackRes.rowCount ?? feedbackRes.rows?.length ?? 0,
+      shopProfile: shopProfileRes.rowCount ?? shopProfileRes.rows?.length ?? 0
     }
   };
 }
@@ -587,6 +595,16 @@ export async function handleAppUninstalled(db, payload) {
     settingUpdated = (settingRes.rowCount ?? settingRes.rows?.length ?? 0) > 0;
   } catch {
     // Non-fatal if setting table or row does not exist
+  }
+
+  // Record uninstallation timestamp on ShopProfile (M11)
+  try {
+    await db.query(
+      'UPDATE "ShopProfile" SET "uninstalledAt" = NOW(), "updatedAt" = NOW() WHERE "shop" = $1 RETURNING "shop"',
+      [shop]
+    );
+  } catch {
+    // Non-fatal if ShopProfile table or row does not exist
   }
 
   return {

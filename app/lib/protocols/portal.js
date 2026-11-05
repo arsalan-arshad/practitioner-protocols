@@ -806,6 +806,7 @@ export function renderPortalLiquid(options = {}) {
     activeProtocols = [],
     archivedProtocols = [],
     starterProtocols = [],
+    contacts = [],
     mode = 'tag',
     allowSelfEnrol = false,
     identityMode = 'tag'
@@ -1429,6 +1430,46 @@ export function renderPortalLiquid(options = {}) {
     <h2 class="portal-section-heading">Archived Protocols (${archivedProtocols.length})</h2>
     ${renderCards(archivedProtocols, false, true)}
   </section>` : ''}
+
+  <section class="portal-contacts-section" style="margin-top:2.5rem;">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem; flex-wrap:wrap; gap:0.5rem;">
+      <h2 class="portal-section-heading" style="margin:0;">My Contacts (${contacts.length})</h2>
+      ${contacts.length > 0 ? `
+      <a href="/apps/protocols?action=contacts_csv" class="portal-btn portal-btn-secondary" style="font-size:0.8125rem; padding:0.375rem 0.75rem;">
+        Export CSV
+      </a>` : ''}
+    </div>
+    ${contacts.length === 0 ? `
+    <div class="portal-empty-card" style="padding:1.5rem; text-align:center; background:#ffffff; border:1px solid #e5e7eb; border-radius:8px; color:#6b7280;">
+      No contacts yet. Shoppers who opt in via your recommendation links will appear here.
+    </div>` : `
+    <div style="background:#ffffff; border:1px solid #e5e7eb; border-radius:8px; overflow-x:auto;">
+      <table style="width:100%; border-collapse:collapse; font-size:0.875rem;">
+        <thead>
+          <tr style="background:#f9fafb; border-bottom:1px solid #e5e7eb; text-align:left;">
+            <th style="padding:0.75rem 1rem; font-weight:600; color:#374151;">Email</th>
+            <th style="padding:0.75rem 1rem; font-weight:600; color:#374151;">First Name</th>
+            <th style="padding:0.75rem 1rem; font-weight:600; color:#374151;">Consented</th>
+            <th style="padding:0.75rem 1rem; font-weight:600; color:#374151; text-align:right;">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${contacts.map(c => `
+          <tr style="border-bottom:1px solid #e5e7eb;" data-contact-row="${safePortalText(c.id)}">
+            <td style="padding:0.75rem 1rem; color:#111827;">${safePortalText(c.email)}</td>
+            <td style="padding:0.75rem 1rem; color:#4b5563;">${c.firstName ? safePortalText(c.firstName) : '—'}</td>
+            <td style="padding:0.75rem 1rem; color:#6b7280;">${safePortalText(c.consentedAt ? new Date(c.consentedAt).toLocaleDateString() : '')}</td>
+            <td style="padding:0.75rem 1rem; text-align:right;">
+              <button type="button" class="portal-btn portal-btn-secondary portal-delete-contact-btn" data-contact-id="${safePortalText(c.id)}" style="padding:0.25rem 0.625rem; font-size:0.75rem; color:#dc2626; border-color:#fca5a5;">
+                Delete
+              </button>
+            </td>
+          </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    </div>`}
+  </section>
 </div>
 
 <!-- Protocol Editor Modal -->
@@ -2248,6 +2289,58 @@ ${protocolsJson}
       });
     });
   }
+
+  // Delete contact handler
+  document.addEventListener('click', function(e) {
+    var btn = e.target && e.target.closest('.portal-delete-contact-btn');
+    if (!btn) return;
+    var contactId = btn.getAttribute('data-contact-id');
+    if (!contactId) return;
+
+    if (btn.getAttribute('data-confirming') !== 'true') {
+      btn.setAttribute('data-confirming', 'true');
+      btn.textContent = 'Confirm?';
+      btn.style.background = '#dc2626';
+      btn.style.color = '#ffffff';
+      setTimeout(function() {
+        if (btn && btn.getAttribute('data-confirming') === 'true') {
+          btn.removeAttribute('data-confirming');
+          btn.textContent = 'Delete';
+          btn.style.background = '';
+          btn.style.color = '#dc2626';
+        }
+      }, 4000);
+      return;
+    }
+
+    btn.disabled = true;
+    btn.textContent = 'Deleting...';
+
+    fetch('/apps/protocols?action=delete_contact', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
+      },
+      body: JSON.stringify({ contactId: contactId })
+    })
+    .then(function(res) {
+      if (!res.ok) throw new Error('Failed to delete contact');
+      return res.json();
+    })
+    .then(function() {
+      var row = document.querySelector('tr[data-contact-row="' + contactId + '"]');
+      if (row) row.remove();
+    })
+    .catch(function(err) {
+      btn.disabled = false;
+      btn.removeAttribute('data-confirming');
+      btn.textContent = 'Delete';
+      btn.style.background = '';
+      btn.style.color = '#dc2626';
+      console.error('[Portal] Unable to delete contact:', err);
+    });
+  });
 })();
 </script>`;
 }

@@ -1394,6 +1394,8 @@ export function renderAdminHtml(options = {}) {
     starters = [],
     report = null,
     settings = null,
+    contactsData = null,
+    adminEmail = '',
     activeTab = 'practitioners'
   } = options;
 
@@ -1404,7 +1406,7 @@ export function renderAdminHtml(options = {}) {
   if (settings) assertNoPii(settings);
 
   const safeShop = escapeAdminText(shop);
-  const currentTab = ['practitioners', 'starters', 'attribution', 'settings'].includes(activeTab)
+  const currentTab = ['practitioners', 'starters', 'attribution', 'contacts', 'settings'].includes(activeTab)
     ? activeTab
     : 'practitioners';
 
@@ -1893,12 +1895,141 @@ export function renderAdminHtml(options = {}) {
       <form method="POST" action="/api/admin/emergency/disable-all">
         <button type="submit" class="Polaris-Button Polaris-Button--critical">Disable All Protocols Storewide</button>
       </form>
+    </div>
+
+    <div class="Polaris-Card">
+      <h2 class="Polaris-Card-Title">Need a change or a custom feature?</h2>
+      <p style="color: var(--p-color-text-subdued); margin-bottom: 1rem; font-size: 0.875rem;">
+        Let the developer know what feature, workflow, or custom integration would help your brand or practice.
+      </p>
+      <form method="POST" action="/api/admin/feedback/custom-request">
+        <div style="margin-bottom: 1rem;">
+          <label style="display:block; font-weight:600; margin-bottom:0.25rem;">What do you need? *</label>
+          <textarea name="message" rows="4" maxlength="1000" required placeholder="Describe what you need..." style="width:100%; border-radius:4px; border:1px solid var(--p-color-border); padding:0.5rem;"></textarea>
+          <div style="color: var(--p-color-text-subdued); font-size: 0.75rem; margin-top: 0.25rem;">Max 1000 characters.</div>
+        </div>
+        <div style="margin-bottom: 1rem;">
+          <label style="display:block; font-weight:600; margin-bottom:0.25rem;">How should we reach you?</label>
+          <input type="email" name="replyEmail" maxlength="254" value="${escapeAdminText(adminEmail || '')}" placeholder="you@example.com" style="width:100%; max-width:360px; border-radius:4px; border:1px solid var(--p-color-border); padding:0.5rem;">
+          <div style="color: var(--p-color-text-subdued); font-size: 0.75rem; margin-top: 0.25rem;">
+            This sends a request to the app developer. We'll only use your email to reply.
+          </div>
+        </div>
+        <button type="submit" class="Polaris-Button Polaris-Button--primary">Send Request</button>
+      </form>
+    </div>`;
+  };
+
+  // Tab 5: Contacts Management (M11 Shopper Opt-In)
+  const renderContactsTab = () => {
+    const practices = contactsData?.practices || [];
+    const contactsList = contactsData?.contacts || [];
+    const totalContacts = contactsData?.totalContacts ?? contactsList.length;
+
+    const practiceRows = practices.map((p) => `
+      <tr style="border-bottom: 1px solid var(--p-color-border);">
+        <td style="padding: 0.75rem 1rem; font-weight: 500;">${escapeAdminText(p.practiceName || 'Individual Practitioner')}</td>
+        <td style="padding: 0.75rem 1rem; color: var(--p-color-text-subdued); font-family: monospace; font-size: 0.8125rem;">${escapeAdminText(p.ownerId)}</td>
+        <td style="padding: 0.75rem 1rem; font-weight: 600;">${p.count}</td>
+        <td style="padding: 0.75rem 1rem; text-align: right;">
+          <form method="POST" action="/api/admin/contacts/delete-practice" style="display:inline;">
+            <input type="hidden" name="ownerId" value="${escapeAdminText(p.ownerId)}">
+            <button type="submit" class="Polaris-Button Polaris-Button--critical" style="font-size: 0.75rem; padding: 0.25rem 0.5rem;">Delete All</button>
+          </form>
+        </td>
+      </tr>
+    `).join('');
+
+    const contactRows = contactsList.map((c) => {
+      const consentedAtStr = c.consentedAt ? new Date(c.consentedAt).toLocaleDateString() : '';
+      return `
+      <tr style="border-bottom: 1px solid var(--p-color-border);">
+        <td style="padding: 0.75rem 1rem; font-weight: 500;">${escapeAdminText(c.email)}</td>
+        <td style="padding: 0.75rem 1rem; color: var(--p-color-text-subdued);">${c.firstName ? escapeAdminText(c.firstName) : '&mdash;'}</td>
+        <td style="padding: 0.75rem 1rem;">${escapeAdminText(c.practiceName || 'Individual Practitioner')}</td>
+        <td style="padding: 0.75rem 1rem; color: var(--p-color-text-subdued); font-size: 0.8125rem;">${consentedAtStr}</td>
+        <td style="padding: 0.75rem 1rem; text-align: right;">
+          <form method="POST" action="/api/admin/contacts/delete" style="display:inline;">
+            <input type="hidden" name="contactId" value="${escapeAdminText(c.id)}">
+            <button type="submit" class="Polaris-Button Polaris-Button--critical" style="font-size: 0.75rem; padding: 0.25rem 0.5rem;">Delete</button>
+          </form>
+        </td>
+      </tr>
+      `;
+    }).join('');
+
+    return `
+    <div class="Polaris-Card">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; flex-wrap: wrap; gap: 1rem;">
+        <div>
+          <h2 class="Polaris-Card-Title" style="margin: 0 0 0.25rem 0;">Opted-In Shopper Contacts</h2>
+          <p style="color: var(--p-color-text-subdued); margin: 0; font-size: 0.875rem;">
+            Explicit opt-in contacts collected when shoppers ask to stay in touch with a practitioner.
+          </p>
+        </div>
+        <a href="/api/admin/contacts.csv" class="Polaris-Button">Export All Contacts (CSV)</a>
+      </div>
+
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-bottom: 1.5rem;">
+        <div style="background: var(--p-color-bg); padding: 1rem; border-radius: 6px;">
+          <div style="font-size: 0.8125rem; color: var(--p-color-text-subdued); margin-bottom: 0.25rem;">Total Opted-In Shoppers</div>
+          <div style="font-size: 1.5rem; font-weight: 700;">${totalContacts}</div>
+        </div>
+        <div style="background: var(--p-color-bg); padding: 1rem; border-radius: 6px;">
+          <div style="font-size: 0.8125rem; color: var(--p-color-text-subdued); margin-bottom: 0.25rem;">Practices with Contacts</div>
+          <div style="font-size: 1.5rem; font-weight: 700;">${practices.length}</div>
+        </div>
+      </div>
+
+      <h3 style="font-size: 1rem; font-weight: 600; margin: 1.5rem 0 0.75rem 0;">Contacts by Practice</h3>
+      ${practices.length === 0 ? `
+      <p style="color: var(--p-color-text-subdued); font-size: 0.875rem;">No contacts recorded yet.</p>
+      ` : `
+      <div style="overflow-x: auto; margin-bottom: 2rem;">
+        <table style="width: 100%; border-collapse: collapse; font-size: 0.875rem;">
+          <thead>
+            <tr style="background: var(--p-color-bg); text-align: left; border-bottom: 1px solid var(--p-color-border);">
+              <th style="padding: 0.75rem 1rem;">Practice Name</th>
+              <th style="padding: 0.75rem 1rem;">Owner GID</th>
+              <th style="padding: 0.75rem 1rem;">Contacts</th>
+              <th style="padding: 0.75rem 1rem; text-align: right;">Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${practiceRows}
+          </tbody>
+        </table>
+      </div>
+      `}
+
+      <h3 style="font-size: 1rem; font-weight: 600; margin: 1.5rem 0 0.75rem 0;">All Contacts (${totalContacts})</h3>
+      ${contactsList.length === 0 ? `
+      <p style="color: var(--p-color-text-subdued); font-size: 0.875rem;">No contacts recorded yet.</p>
+      ` : `
+      <div style="overflow-x: auto;">
+        <table style="width: 100%; border-collapse: collapse; font-size: 0.875rem;">
+          <thead>
+            <tr style="background: var(--p-color-bg); text-align: left; border-bottom: 1px solid var(--p-color-border);">
+              <th style="padding: 0.75rem 1rem;">Email</th>
+              <th style="padding: 0.75rem 1rem;">First Name</th>
+              <th style="padding: 0.75rem 1rem;">Practice</th>
+              <th style="padding: 0.75rem 1rem;">Consented</th>
+              <th style="padding: 0.75rem 1rem; text-align: right;">Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${contactRows}
+          </tbody>
+        </table>
+      </div>
+      `}
     </div>`;
   };
 
   let tabContent = '';
   if (currentTab === 'starters') tabContent = renderStartersTab();
   else if (currentTab === 'attribution') tabContent = renderAttributionTab();
+  else if (currentTab === 'contacts') tabContent = renderContactsTab();
   else if (currentTab === 'settings') tabContent = renderSettingsTab();
   else tabContent = renderPractitionersTab();
 
@@ -1925,6 +2056,7 @@ ${appBridgeHead}  <title>Practitioner Protocols &mdash; Admin</title>
       <a href="?tab=practitioners" class="Polaris-Tab ${currentTab === 'practitioners' ? 'Polaris-Tab--selected' : ''}">Practitioners</a>
       <a href="?tab=starters" class="Polaris-Tab ${currentTab === 'starters' ? 'Polaris-Tab--selected' : ''}">Starter Templates</a>
       <a href="?tab=attribution" class="Polaris-Tab ${currentTab === 'attribution' ? 'Polaris-Tab--selected' : ''}">Attribution &amp; Reports</a>
+      <a href="?tab=contacts" class="Polaris-Tab ${currentTab === 'contacts' ? 'Polaris-Tab--selected' : ''}">Contacts</a>
       <a href="?tab=settings" class="Polaris-Tab ${currentTab === 'settings' ? 'Polaris-Tab--selected' : ''}">Settings &amp; Emergency</a>
     </nav>
 

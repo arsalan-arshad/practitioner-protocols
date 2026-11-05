@@ -1,6 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
+import vm from 'node:vm';
 import {
   ProtocolAdminError,
   ADMIN_ERROR_CODES,
@@ -1625,6 +1626,84 @@ describe('Merchant Admin Layer (app/lib/protocols/admin.js)', () => {
       assert.ok(html.includes('&lt;script&gt;alert(1)&lt;/script&gt;'));
       assert.ok(!html.includes('<img src=x onerror=alert(1)>'));
       assert.ok(html.includes('XSS Clinic &lt;img src=x onerror=alert(1)&gt; (requested, unverified)'));
+    });
+
+    it('renders M11 Contacts tab with summary, practice rollup, and delete controls', () => {
+      const mockContactsData = {
+        totalContacts: 2,
+        practices: [
+          { ownerId: 'gid://shopify/Customer/101', practiceName: 'Elite Naturopathic Clinic', count: 2 }
+        ],
+        contacts: [
+          {
+            id: 'c_adm_1',
+            ownerId: 'gid://shopify/Customer/101',
+            practiceName: 'Elite Naturopathic Clinic',
+            email: 'patient1@example.com',
+            firstName: 'Sarah',
+            consentVersion: 1,
+            consentedAt: new Date('2026-11-05T12:00:00Z')
+          },
+          {
+            id: 'c_adm_2',
+            ownerId: 'gid://shopify/Customer/101',
+            practiceName: 'Elite Naturopathic Clinic',
+            email: 'patient2@example.com',
+            firstName: null,
+            consentVersion: 1,
+            consentedAt: new Date('2026-11-04T12:00:00Z')
+          }
+        ]
+      };
+
+      const html = renderAdminHtml({
+        shop: testShop,
+        activeTab: 'contacts',
+        contactsData: mockContactsData
+      });
+
+      // Script parsing check
+      const matches = [...html.matchAll(/<script(?![^>]*type=["']application\/json["'])>([\s\S]*?)<\/script>/gi)];
+      for (let i = 0; i < matches.length; i++) {
+        assert.doesNotThrow(
+          () => new vm.Script(matches[i][1]),
+          `Admin script index ${i} must parse without SyntaxError`
+        );
+      }
+
+      // Check tab header and links
+      assert.ok(html.includes('href="?tab=contacts"'), 'Must render contacts navigation tab');
+      assert.ok(html.includes('/api/admin/contacts.csv'), 'Must render global contacts CSV export link');
+      assert.ok(html.includes('Opted-In Shopper Contacts'), 'Must render total contacts summary card');
+      assert.ok(html.includes('Elite Naturopathic Clinic'), 'Must render practice rollup name');
+      assert.ok(html.includes('patient1@example.com'), 'Must render first contact email');
+      assert.ok(html.includes('patient2@example.com'), 'Must render second contact email');
+      assert.ok(html.includes('Sarah'), 'Must render contact first name');
+      assert.ok(html.includes('action="/api/admin/contacts/delete"'), 'Must render single contact delete form');
+      assert.ok(html.includes('action="/api/admin/contacts/delete-practice"'), 'Must render delete all for practice form');
+    });
+
+    it('renders M11 custom feature request card in Settings tab and parses scripts cleanly', () => {
+      const html = renderAdminHtml({
+        shop: testShop,
+        activeTab: 'settings',
+        adminEmail: 'merchant@test.myshopify.com'
+      });
+
+      // Script parsing check
+      const matches = [...html.matchAll(/<script(?![^>]*type=["']application\/json["'])>([\s\S]*?)<\/script>/gi)];
+      for (let i = 0; i < matches.length; i++) {
+        assert.doesNotThrow(
+          () => new vm.Script(matches[i][1]),
+          `Admin settings script index ${i} must parse without SyntaxError`
+        );
+      }
+
+      assert.ok(html.includes('Need a change or a custom feature?'), 'Must render custom feature card heading');
+      assert.ok(html.includes('action="/api/admin/feedback/custom-request"'), 'Must render custom request form');
+      assert.ok(html.includes('name="message"'), 'Must render custom request message textarea');
+      assert.ok(html.includes('name="replyEmail"'), 'Must render custom request reply email input');
+      assert.ok(html.includes('merchant@test.myshopify.com'), 'Must pre-fill admin reply email');
     });
   });
 

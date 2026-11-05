@@ -69,7 +69,9 @@ describe('Shopify Compliance & Attribution Webhooks (app/lib/protocols/webhooks.
         profiles: [{ id: 'prof_1', shop: 'test.myshopify.com', ownerGid: 'gid://shopify/Customer/100', practiceName: 'Apex Health' }],
         protocols: [{ id: 'proto_1', shop: 'test.myshopify.com', ownerId: 'gid://shopify/Customer/100', createdBy: 'gid://shopify/Customer/100', ownerType: 'customer', status: 'active' }],
         stats: [{ id: 'stat_1', shop: 'test.myshopify.com', protocolId: 'proto_1', month: '2026-10' }],
-        sessions: [{ id: 'sess_1', shop: 'test.myshopify.com' }]
+        sessions: [{ id: 'sess_1', shop: 'test.myshopify.com' }],
+        contacts: [{ id: 'contact_1', shop: 'test.myshopify.com', ownerId: 'gid://shopify/Customer/100', email: 'shopper@example.com', firstName: 'Alice' }],
+        feedback: [{ id: 'fb_1', shop: 'test.myshopify.com', message: 'Test custom request' }]
       };
 
       return {
@@ -86,6 +88,12 @@ describe('Shopify Compliance & Attribution Webhooks (app/lib/protocols/webhooks.
           // customers/data_request protocols query
           if (sql.includes('FROM "Protocol"') && sql.includes('WHERE "shop" = $1')) {
             const rows = state.protocols.filter(p => p.shop === params[0] && (p.ownerId === params[1] || p.createdBy === params[1]));
+            return { rows };
+          }
+
+          // customers/data_request shopper contacts query (M11)
+          if (sql.includes('FROM "ShopperContact"') && sql.includes('LOWER("email") = $2')) {
+            const rows = state.contacts.filter(c => c.shop === params[0] && c.email.toLowerCase() === String(params[1]).toLowerCase());
             return { rows };
           }
 
@@ -115,6 +123,39 @@ describe('Shopify Compliance & Attribution Webhooks (app/lib/protocols/webhooks.
       assert.equal(res.practitionerProfile.practiceName, 'Apex Health');
       assert.equal(res.clientPii, null);
       assert.equal(res.clientDataStored, false);
+    });
+
+    it('handleCustomersDataRequest reports matching opted-in shopper contacts when customer email is provided (M11)', async () => {
+      const mockDb = createMockDb();
+      const payload = {
+        shop_domain: 'test.myshopify.com',
+        customer: { id: 100, email: 'shopper@example.com' }
+      };
+
+      const res = await handleCustomersDataRequest(mockDb, payload);
+      assert.equal(res.success, true);
+      assert.equal(res.clientDataStored, true);
+      assert.equal(res.shopperContacts.length, 1);
+      assert.equal(res.shopperContacts[0].email, 'shopper@example.com');
+      assert.ok(res.message.includes('explicit consent'));
+    });
+
+    it('handleCustomersRedact deletes matching ShopperContact records by lowercased email (M11)', async () => {
+      const mockDb = createMockDb();
+      const payload = {
+        shop_domain: 'test.myshopify.com',
+        customer: { id: 100, email: 'Shopper@Example.COM' }
+      };
+
+      const res = await handleCustomersRedact(mockDb, payload, { mode: 'tag' });
+      assert.equal(res.success, true);
+      assert.ok(res.contactsDeleted >= 0);
+
+      const deleteContactsQuery = mockDb.state.queries.find(q =>
+        q.sql.includes('DELETE FROM "ShopperContact"') &&
+        q.params.includes('shopper@example.com')
+      );
+      assert.ok(deleteContactsQuery, 'Must execute DELETE on ShopperContact matching lowercased email');
     });
 
     it('handleCustomersRedact handles Tag mode by removing profile and protocols', async () => {
@@ -180,6 +221,8 @@ describe('Shopify Compliance & Attribution Webhooks (app/lib/protocols/webhooks.
       assert.equal(res.shop, 'test.myshopify.com');
       assert.ok(mockDb.state.queries.some(q => q.sql.includes('DELETE FROM "Protocol"')));
       assert.ok(mockDb.state.queries.some(q => q.sql.includes('DELETE FROM "PractitionerProfile"')));
+      assert.ok(mockDb.state.queries.some(q => q.sql.includes('DELETE FROM "ShopperContact"')), 'Must delete ShopperContact on shop redact');
+      assert.ok(mockDb.state.queries.some(q => q.sql.includes('DELETE FROM "MerchantFeedback"')), 'Must delete MerchantFeedback on shop redact');
     });
 
     it('handleAppUninstalled revokes sessions and updates shop state', async () => {

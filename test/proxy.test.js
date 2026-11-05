@@ -576,6 +576,42 @@ describe('Shopify App Proxy & Storefront (app/lib/protocols/proxy.js)', () => {
         assert.ok(!liquid.includes('id="protocol-add-all-btn"'), 'Must not render Add all to cart button in markup');
         assert.ok(!liquid.includes('Add all to cart'), 'Must not render Add all to cart text');
       });
+
+      it('renders M11 Shopper Opt-in Card with unticked consent and parses script cleanly', () => {
+        const liquid = renderProtocolLiquid({
+          protocol: mockProtocol,
+          practiceName: 'Elite Integrative Health'
+        });
+
+        // 1. Script parsing check (M9b-3a / M11 regression guard)
+        assertScriptsParse(liquid, 'client page with M11 opt-in block');
+
+        // 2. UI elements check
+        assert.ok(liquid.includes('Stay in touch with Elite Integrative Health'), 'Must render practice name in card title');
+        assert.ok(liquid.includes('id="protocol-optin-form"'), 'Must render opt-in form');
+        assert.ok(liquid.includes('id="protocol-optin-email"'), 'Must render email input');
+        assert.ok(liquid.includes('id="protocol-optin-first-name"'), 'Must render first name input');
+        assert.ok(liquid.includes('id="protocol-optin-consent"'), 'Must render consent checkbox');
+        // Unticked by default: must NOT have checked attribute
+        assert.ok(!/<input[^>]+id="protocol-optin-consent"[^>]+checked/i.test(liquid), 'Consent checkbox must be unticked by default');
+        assert.ok(liquid.includes('/privacy'), 'Must include link to /privacy policy');
+        assert.ok(liquid.includes('id="protocol-optin-submit"'), 'Must render submit button');
+
+        // 3. Print media stylesheet check
+        assert.ok(liquid.includes('.protocol-optin-card'), 'Must contain opt-in CSS class');
+        assert.ok(liquid.includes('@media print'), 'Must contain @media print block');
+      });
+
+      it('omits M11 Shopper Opt-in Card when isHandout is true', () => {
+        const liquid = renderProtocolLiquid({
+          protocol: mockProtocol,
+          practiceName: 'Elite Integrative Health',
+          isHandout: true
+        });
+
+        assert.ok(!liquid.includes('id="protocol-optin-form"'), 'Must not render opt-in form in handout');
+        assert.ok(!liquid.includes('Stay in touch with'), 'Must not render stay in touch title in handout');
+      });
     });
   });
 });

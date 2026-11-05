@@ -28,7 +28,11 @@ import {
   handleAdminUpdateSettingsRequest,
   handleAdminEmergencyDisableAllRequest,
   handleAdminAttributionCsvRequest,
-  handleAdminDashboardRequest
+  handleAdminDashboardRequest,
+  handleAdminContactsCsvRequest,
+  handleAdminDeleteContactRequest,
+  handleAdminDeletePracticeContactsRequest,
+  handleAdminCustomFeatureRequest
 } from './app/lib/protocols/routes.js';
 import { createFakeVariantResolver } from './app/lib/protocols/catalog.js';
 
@@ -515,7 +519,7 @@ export function renderPrivacyHtml({ contactEmail = '' } = {}) {
     <h1>Practitioner Protocols Privacy Policy</h1>
     <p>Last updated: November 2026</p>
 
-    <p>Practitioner Protocols is built with privacy by design. Our architecture ensures that shoppers and clients can receive recommendations and purchase retail products with zero personal or health data collected or stored by the application.</p>
+    <p>Practitioner Protocols is built with privacy by design. Our architecture ensures that shoppers and clients can receive recommendations and purchase retail products with zero personal or health data collected or stored by default. No shopper personal data is stored unless the shopper explicitly opts in.</p>
 
     <h2>1. What the App Stores</h2>
     <p>To operate recommendation workflows for direct-to-consumer and professional brands, the application stores only:</p>
@@ -525,12 +529,14 @@ export function renderPrivacyHtml({ contactEmail = '' } = {}) {
       <li><strong>Practitioner Approval Records:</strong> Professional practice names and approval statuses as authorized by the merchant.</li>
       <li><strong>Protocols and Share Tokens:</strong> Protocol titles, intro messages, selected product variant identifiers (GIDs and handles), recommended quantities, usage directions, and unguessable cryptographic share tokens.</li>
       <li><strong>Aggregate Attribution Counts:</strong> Monthly aggregate order counts and attributed gross revenue per protocol and practice.</li>
+      <li><strong>Opted-In Shopper Contacts:</strong> If and only if a shopper explicitly opts in via the "Stay in touch" form on a protocol recommendation page, the app stores their email address, optional first name, the exact consent text shown, consent version, timestamp, and the associated practice. Purpose: to enable the merchant or practice to send product recommendations and offers directly through their own communication tools (emails are never sent by this application). Legal basis: explicit consent. The app stores NO protocolId, NO order ID, NO purchased product data, NO IP address, and NO user agent with the contact.</li>
+      <li><strong>Merchant Custom Feature Requests:</strong> When a merchant submits a feature request in the admin Settings tab, we store the message and optional reply email. This counts as consent to reply strictly to that inquiry and is never used for marketing.</li>
     </ul>
 
     <h2>2. What the App Does NOT Store</h2>
-    <p>The application strictly enforces a zero-PII (Personally Identifiable Information) barrier:</p>
+    <p>The application strictly enforces a privacy-first barrier:</p>
     <ul>
-      <li><strong>No Shopper Identifying Data:</strong> We never collect, accept, or store names, email addresses, phone numbers, shipping addresses, or billing details of shoppers.</li>
+      <li><strong>No Shopper Identifying Data Without Consent:</strong> Browsing shoppers have zero personal data collected or stored. We never track shoppers across sessions, nor do we store browsing history, IP addresses, user agents, phone numbers, or physical addresses.</li>
       <li><strong>No Patient or Health Information:</strong> The application does not store diagnostic records, medical conditions, health notes, or patient charts. Protocols are general retail product recommendation lists.</li>
       <li><strong>Aggregate-Only Order Attribution:</strong> Orders are read with the <code>read_orders</code> permission solely to match the hidden line-item property (<code>_protocol_token</code>) against active protocols and increment aggregate monthly counters. Individual order IDs and customer identifiers are never retained.</li>
     </ul>
@@ -538,10 +544,11 @@ export function renderPrivacyHtml({ contactEmail = '' } = {}) {
     <h2>3. Data Retention and Deletion</h2>
     <p>We comply fully with platform data protection standards and mandatory compliance webhooks:</p>
     <ul>
-      <li><strong>Customer Data Requests (<code>customers/data_request</code>):</strong> Because the application does not store shopper data, no personal data records exist to report.</li>
-      <li><strong>Customer Redaction (<code>customers/redact</code>):</strong> Automatically removes practitioner records when requested, while preserving non-identifying historical aggregates.</li>
-      <li><strong>Shop Redaction (<code>shop/redact</code>):</strong> Immediately and permanently deletes all protocols, line items, practice profiles, settings, sessions, and attribution records associated with the store upon receipt.</li>
-      <li><strong>App Uninstallation (<code>app/uninstalled</code>):</strong> Immediately revokes and removes all stored offline access tokens and merchant sessions.</li>
+      <li><strong>How to Withdraw Consent or Request Deletion:</strong> Shoppers can withdraw consent or request deletion at any time by contacting the store or practice. Practitioners can delete contacts from their portal, merchants can delete individual contacts or entire practice contact lists in the admin dashboard, and platform data privacy requests are honored automatically.</li>
+      <li><strong>Customer Data Requests (<code>customers/data_request</code>):</strong> Reports any matching practitioner profile records and opted-in shopper contact records.</li>
+      <li><strong>Customer Redaction (<code>customers/redact</code>):</strong> Automatically and permanently deletes matching opted-in shopper contacts by email and removes practitioner profile records.</li>
+      <li><strong>Shop Redaction (<code>shop/redact</code>):</strong> Immediately and permanently deletes all protocols, line items, practice profiles, settings, sessions, attribution records, shopper contacts, and merchant feedback rows associated with the store upon receipt.</li>
+      <li><strong>App Uninstallation (<code>app/uninstalled</code>):</strong> Immediately revokes and removes all stored offline access tokens and merchant sessions. Store data is retained during the 48-hour platform grace period in case of reinstallation, then permanently deleted upon receipt of <code>shop/redact</code>.</li>
     </ul>
 
     <h2>4. Sub-Processors</h2>
@@ -764,7 +771,11 @@ export function createRequestListener(options = {}) {
         pathname === '/api/admin/starters/create' ||
         pathname === '/api/admin/settings' ||
         pathname === '/api/admin/emergency/disable-all' ||
-        pathname === '/api/admin/attribution.csv'
+        pathname === '/api/admin/attribution.csv' ||
+        pathname === '/api/admin/contacts.csv' ||
+        pathname === '/api/admin/contacts/delete' ||
+        pathname === '/api/admin/contacts/delete-practice' ||
+        pathname === '/api/admin/feedback/custom-request'
       ) {
         const authHeader = req.headers?.authorization || req.headers?.Authorization;
         const hasSession = Boolean(
@@ -806,6 +817,14 @@ export function createRequestListener(options = {}) {
             webRes = await handleAdminEmergencyDisableAllRequest(pool, webReq, handlerOpts);
           } else if (pathname === '/api/admin/attribution.csv') {
             webRes = await handleAdminAttributionCsvRequest(pool, webReq, handlerOpts);
+          } else if (pathname === '/api/admin/contacts.csv') {
+            webRes = await handleAdminContactsCsvRequest(pool, webReq, handlerOpts);
+          } else if (pathname === '/api/admin/contacts/delete') {
+            webRes = await handleAdminDeleteContactRequest(pool, webReq, handlerOpts);
+          } else if (pathname === '/api/admin/contacts/delete-practice') {
+            webRes = await handleAdminDeletePracticeContactsRequest(pool, webReq, handlerOpts);
+          } else if (pathname === '/api/admin/feedback/custom-request') {
+            webRes = await handleAdminCustomFeatureRequest(pool, webReq, handlerOpts);
           }
 
           if (webRes) {

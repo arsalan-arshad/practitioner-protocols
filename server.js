@@ -426,6 +426,80 @@ export function verifyOAuthState(cookieVal, queryState, secret) {
 }
 
 /**
+ * Renders the friendly public root page (status 200).
+ * Displays when a merchant or visitor navigates directly to the app URL outside Shopify admin
+ * without shop, id_token, or session.
+ * Contains no shop-domain input field or login form (to comply with Shopify app review rules).
+ *
+ * @returns {string}
+ */
+export function renderFriendlyRootHtml() {
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Practitioner Protocols</title>
+  <meta name="robots" content="noindex, nofollow">
+  <style>
+    :root {
+      --color-bg: #f9fafb;
+      --color-surface: #ffffff;
+      --color-border: #e5e7eb;
+      --color-text: #1f2937;
+      --color-text-muted: #4b5563;
+      --color-primary: #0f766e;
+    }
+    body {
+      margin: 0;
+      padding: 3rem 1.5rem;
+      background: var(--color-bg);
+      color: var(--color-text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 80vh;
+    }
+    .root-card {
+      max-width: 540px;
+      width: 100%;
+      background: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-radius: 8px;
+      padding: 2.5rem;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+      text-align: center;
+    }
+    h1 {
+      font-size: 1.5rem;
+      margin-top: 0;
+      margin-bottom: 1rem;
+      color: var(--color-text);
+    }
+    p {
+      color: var(--color-text-muted);
+      font-size: 1rem;
+      line-height: 1.5;
+      margin-bottom: 1.5rem;
+    }
+    a {
+      color: var(--color-primary);
+      text-decoration: underline;
+    }
+  </style>
+</head>
+<body>
+  <div class="root-card">
+    <h1>Practitioner Protocols</h1>
+    <p>Practitioner Protocols runs inside your Shopify admin. Open it from your Shopify admin's Apps list.</p>
+    <p style="font-size: 0.875rem;"><a href="/privacy">Privacy Policy</a></p>
+  </div>
+</body>
+</html>`;
+}
+
+/**
  * Renders the clean, public HTML privacy policy page.
  * Strictly honest language, zero client PII stored, read_orders aggregate attribution only,
  * compliance webhooks, sub-processors, and optional contact email. Zero health claims.
@@ -529,7 +603,7 @@ export function renderPrivacyHtml({ contactEmail = '' } = {}) {
     <p>To operate recommendation workflows for direct-to-consumer and professional brands, the application stores only:</p>
     <ul>
       <li><strong>Shop Domain:</strong> The store domain (e.g. <code>example.myshopify.com</code>) to scope protocols and settings.</li>
-      <li><strong>Offline Access Token:</strong> Stored encrypted at rest using AES-256-GCM to verify platform webhooks and authenticate merchant admin operations.</li>
+      <li><strong>Offline Access Token:</strong> Acquired through Shopify managed installation using App Bridge token exchange (RFC 8693, with legacy OAuth fallback) and stored encrypted at rest using AES-256-GCM when <code>SESSION_ENCRYPTION_KEY</code> is configured to verify platform webhooks and authenticate merchant admin operations.</li>
       <li><strong>Practitioner Approval Records:</strong> Professional practice names and approval statuses as authorized by the merchant.</li>
       <li><strong>Protocols and Share Tokens:</strong> Protocol titles, intro messages, selected product variant identifiers (GIDs and handles), recommended quantities, usage directions, and unguessable cryptographic share tokens.</li>
       <li><strong>Aggregate Attribution Counts:</strong> Monthly aggregate order counts and attributed gross revenue per protocol and practice.</li>
@@ -642,7 +716,9 @@ export function createRequestListener(options = {}) {
         return;
       }
 
-      // OAuth Install Initiation: /api/auth or /auth
+// Legacy OAuth Install Initiation: /api/auth or /auth (Fallback only)
+      // Note: Under Shopify Managed Installation, the embedded App Bridge token exchange
+      // flow is primary. This legacy OAuth endpoint is kept as a fallback.
       if (pathname === '/api/auth' || pathname === '/auth') {
         const shop = (url.searchParams.get('shop') || '').toLowerCase().trim();
         if (!shop || !SHOPIFY_DOMAIN_REGEX.test(shop)) {
@@ -667,7 +743,8 @@ export function createRequestListener(options = {}) {
         return;
       }
 
-      // OAuth Callback: /api/auth/callback or /auth/callback
+// Legacy OAuth Callback: /api/auth/callback or /auth/callback (Fallback only)
+      // Note: Primary authentication uses Shopify managed install + App Bridge token exchange.
       if (pathname === '/api/auth/callback' || pathname === '/auth/callback') {
         const shop = (url.searchParams.get('shop') || '').toLowerCase().trim();
         const code = url.searchParams.get('code');
@@ -818,7 +895,7 @@ export function createRequestListener(options = {}) {
         if (databaseUrl && hasSession) {
           const webReq = await toWebRequest(req);
           let webRes;
-          const handlerOpts = { apiSecret, apiKey, isDemoMode: false };
+          const handlerOpts = { apiSecret, apiKey, isDemoMode: false, fetchFn: options.fetchFn };
 
           if (pathname === '/api/admin/practitioners') {
             webRes = await handleAdminPractitionersListRequest(pool, webReq, handlerOpts);
@@ -970,6 +1047,7 @@ export function createRequestListener(options = {}) {
               apiSecret,
               apiKey,
               isDemoMode: false,
+              fetchFn: options.fetchFn,
             });
 
             // If token is invalid/expired (401) and request is inside embedded iframe,
@@ -1018,8 +1096,16 @@ export function createRequestListener(options = {}) {
             return;
           }
 
-          res.writeHead(401, { 'Content-Type': 'text/plain' });
-          res.end('Authentication required: Missing shop or admin session');
+          // Friendly root page: when GET / (or /admin, /app) arrives with no shop, no id_token and no session
+          const rootHtml = renderFriendlyRootHtml();
+          res.writeHead(200, {
+            'Content-Type': 'text/html; charset=utf-8',
+            'Content-Security-Policy': "default-src 'self'; style-src 'self' 'unsafe-inline'; frame-ancestors 'none';",
+            'X-Content-Type-Options': 'nosniff',
+            'Referrer-Policy': 'strict-origin-when-cross-origin',
+            'X-Robots-Tag': 'noindex, nofollow'
+          });
+          res.end(rootHtml);
           return;
         }
 

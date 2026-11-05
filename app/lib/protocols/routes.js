@@ -39,6 +39,7 @@ import {
 } from './catalog.js';
 import { generateShareToken } from './token.js';
 import { renderPortalLiquid } from './portal.js';
+import { ensureOfflineSession } from './exchange.js';
 import {
   saveShopperContact,
   listPractitionerContacts,
@@ -89,6 +90,7 @@ export {
   extractAdminSession,
   renderAdminHtml,
   renderAdminBootstrapHtml,
+  ensureOfflineSession,
   SHOPIFY_DOMAIN_REGEX
 };
 
@@ -1143,11 +1145,23 @@ export async function handleAppProxyRequest(db, request, options = {}) {
     }
   }
 
+  let shopDisplayName = shop;
+  if (db && shop) {
+    try {
+      const profile = await getShopProfile(db, { shop });
+      if (profile?.shopName) {
+        shopDisplayName = profile.shopName;
+      }
+    } catch {
+      // Non-fatal fallback
+    }
+  }
+
   // 6. Render Liquid template
   const liquid = renderProtocolLiquid({
     protocol,
     practiceName: protocol?.practiceName || '',
-    shopName: shop,
+    shopName: shopDisplayName,
     isLoggedInPractitioner: isHandout ? false : isLoggedInPractitioner,
     isHandout,
     handoutText,
@@ -1727,10 +1741,20 @@ export async function handleAdminDashboardRequest(db, request, options = {}) {
     let shopProfile = options.demoData?.shopProfile || null;
 
     if (db && !session.isDemo) {
+      if (session.idToken) {
+        await ensureOfflineSession(db, {
+          shop,
+          idToken: session.idToken,
+          apiKey: options.apiKey,
+          apiSecret: options.apiSecret,
+          fetchFn: options.fetchFn
+        });
+      }
+
       let currentProfile = await getShopProfile(db, { shop });
       const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
       if (!currentProfile || !currentProfile.updatedAt || new Date(currentProfile.updatedAt).getTime() < sevenDaysAgo) {
-        await syncShopProfile(db, { shop });
+        await syncShopProfile(db, { shop, fetchFn: options.fetchFn });
         currentProfile = await getShopProfile(db, { shop });
       }
       shopProfile = currentProfile;

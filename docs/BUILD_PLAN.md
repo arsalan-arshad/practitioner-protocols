@@ -115,6 +115,14 @@
   - CLI scripts: `scripts/contacts.mjs` listing opted-in installed shops, custom feature requests, and shopper contacts; `scripts/stats.mjs` reporting aggregate platform metrics.
   - Updated `/privacy`, `README.md`, `docs/SPEC.md`, and `PROJECT_CONTEXT.md` honestly stating data handling practices and unverified email disclosure.
   - Automated unit test coverage: 566 passing tests across 123 suites (`npm test`).
+- [x] **Shopify Managed Installation & Token Exchange Hardening (IMPLEMENTED, PENDING LIVE DEV-STORE VERIFICATION)**:
+  - Fixed empty `Session` and `ShopProfile` bug on stores installing via Shopify Managed Installation: embedded admin requests without stored offline sessions perform RFC 8693 token exchange via `POST https://{shop}/admin/oauth/access_token` (`grant_type=urn:ietf:params:oauth:grant-type:token-exchange`, `subject_token=<id_token>`, `subject_token_type=urn:ietf:params:oauth:token-type:id_token`, `requested_token_type=urn:shopify:params:oauth:token-type:offline-access-token`, `expiring=0`) with a 5s timeout.
+  - Upserts `Session` with `id="offline_<shop>"`, `state="authenticated"`, and AES-256-GCM encrypted `accessToken`. Calls `syncShopProfile` non-blocking to populate store name, email, plan, and country via GraphQL.
+  - Concurrency & Error Safeguards: Per-shop in-flight lock to deduplicate concurrent exchange requests, 60-second negative cache on exchange failure to protect rate limits, non-PII logging (`[TokenExchange] failed shop=<shop> status=<n>`) with zero token, secret, or body exposure, and normal page rendering on 400 invalid tokens.
+  - Lifecycle: `app/uninstalled` deletes the `Session` row while keeping `ShopProfile` with `uninstalledAt` timestamp; `shop/redact` purges all shop records.
+  - UI: Settings opt-in card displays a disabled checkbox with `"Your store contact email is still being loaded. Reload this page."` when `ShopProfile.email` is absent (never displays `"this email"`), and custom request cards prefill `replyEmail` when present. Shopper consent text uses `ShopProfile.shopName` when available.
+  - Friendly root landing page: `GET /` (or `/admin`, `/app`) outside admin iframe with no session serves status 200 HTML with `"Practitioner Protocols runs inside your Shopify admin. Open it from your Shopify admin's Apps list."`, link to `/privacy`, and zero login or shop domain input fields.
+  - Automated unit test coverage: 578 passing tests across 132 suites (`npm test`).
 
 ## Later
 Practitioner application form · aggregate "client orders" count on protocol cards · protocol version history · Salesforce rollup via Bridge Recipes.

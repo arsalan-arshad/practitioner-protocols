@@ -238,10 +238,18 @@ export async function saveShopperContact(db, {
   const ownerId = protocol.ownerId;
   const practiceName = protocol.practiceName || null;
 
+  let shopDisplayName = shop;
+  try {
+    const profile = await getShopProfile(db, { shop });
+    if (profile?.shopName) {
+      shopDisplayName = profile.shopName;
+    }
+  } catch {}
+
   // Resolve canonical consent text server-side (forged client text is ignored)
   const canonicalConsentText = getCanonicalConsentText(versionNum, {
     practiceName,
-    shopName: shop
+    shopName: shopDisplayName
   });
 
   const now = new Date();
@@ -624,14 +632,23 @@ export async function syncShopProfile(db, { shop, accessToken = null, fetchFn = 
   }
 }`;
 
-    const res = await fetchFn(`https://${shop}/admin/api/2026-10/graphql.json`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Shopify-Access-Token': token
-      },
-      body: JSON.stringify({ query })
-    });
+    const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    const timeoutId = controller ? setTimeout(() => controller.abort(), 5000) : null;
+
+    let res;
+    try {
+      res = await fetchFn(`https://${shop}/admin/api/2026-10/graphql.json`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Shopify-Access-Token': token
+        },
+        body: JSON.stringify({ query }),
+        signal: controller?.signal
+      });
+    } finally {
+      if (timeoutId) clearTimeout(timeoutId);
+    }
 
     if (!res.ok) {
       console.warn(`[ShopProfile] Failed to fetch shop profile for ${shop}: HTTP ${res.status}`);

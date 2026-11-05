@@ -667,23 +667,29 @@ describe('Contacts & Merchant Feedback Service (app/lib/protocols/contacts.js)',
       };
 
       // 1. Success path
-      const fakeFetchSuccess = async () => ({
-        ok: true,
-        json: async () => ({
-          data: {
-            shop: {
-              name: 'Holistic Care',
-              email: 'info@holistic.com',
-              shopOwnerName: 'Alice Green',
-              plan: { publicDisplayName: 'Advanced' },
-              billingAddress: { countryCodeV2: 'GB' }
+      let capturedSignal = null;
+      const fakeFetchSuccess = async (url, options) => {
+        capturedSignal = options?.signal;
+        return {
+          ok: true,
+          json: async () => ({
+            data: {
+              shop: {
+                name: 'Holistic Care',
+                email: 'info@holistic.com',
+                shopOwnerName: 'Alice Green',
+                plan: { publicDisplayName: 'Advanced' },
+                billingAddress: { countryCodeV2: 'GB' }
+              }
             }
-          }
-        })
-      });
+          })
+        };
+      };
 
       const res = await syncShopProfile(mockDb, { shop: 'holistic.myshopify.com', fetchFn: fakeFetchSuccess });
       assert.ok(res);
+      assert.ok(capturedSignal, 'Must pass AbortSignal to GraphQL fetch');
+      assert.equal(typeof capturedSignal.aborted, 'boolean');
       assert.equal(res.shopName, 'Holistic Care');
       assert.equal(res.email, 'info@holistic.com');
       assert.equal(res.ownerName, 'Alice Green');
@@ -705,6 +711,18 @@ describe('Contacts & Merchant Feedback Service (app/lib/protocols/contacts.js)',
         assert.equal(failRes, null);
         assert.equal(warnings.length, 1);
         assert.match(warnings[0], /Failed to fetch shop profile/);
+
+        // 3. Aborted/timed out fetch must be handled gracefully without throwing
+        const fakeFetchTimeout = async () => {
+          const err = new Error('The operation was aborted');
+          err.name = 'AbortError';
+          throw err;
+        };
+
+        const timeoutRes = await syncShopProfile(mockDb, { shop: 'holistic.myshopify.com', fetchFn: fakeFetchTimeout });
+        assert.equal(timeoutRes, null);
+        assert.equal(warnings.length, 2);
+        assert.match(warnings[1], /The operation was aborted/);
       } finally {
         console.warn = origWarn;
       }

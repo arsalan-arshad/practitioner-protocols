@@ -1061,4 +1061,42 @@ Run the five spikes in a day or two on a dev store; write the answers into secti
 9. **Automated Test Coverage:**
    - 566 unit tests passing across 123 suites (`npm test`). Zero failures.
 
+### 2026-11-05: Shopify Managed Installation & Token Exchange Hardening (Branch fix/token-exchange)
+1. **Root Cause Resolution (Empty Session & ShopProfile):**
+   - Apps installed through Shopify Managed Installation do not redirect through `/api/auth` -> `/api/auth/callback` on embed load.
+   - Consequently, the `Session` table remained empty and `ShopProfile` had no offline token to query GraphQL.
+   - Result: Settings card showed "contact me at this email" with no email and empty contact fields.
+2. **Shopify Token Exchange Implementation (`app/lib/protocols/exchange.js`):**
+   - Implemented RFC 8693 token exchange via `POST https://{shop}/admin/oauth/access_token` with parameters:
+     - `client_id`: app API key
+     - `client_secret`: app API secret
+     - `grant_type`: `urn:ietf:params:oauth:grant-type:token-exchange`
+     - `subject_token`: App Bridge `id_token` (from query param on document requests or `Authorization: Bearer` on API requests)
+     - `subject_token_type`: `urn:ietf:params:oauth:token-type:id_token`
+     - `requested_token_type`: `urn:shopify:params:oauth:token-type:offline-access-token`
+     - `expiring`: `0`
+   - Requests use a strict 5-second timeout via `AbortSignal`.
+3. **Session Persistence, Encryption & Profile Sync:**
+   - On exchange success, upserts `Session` with `id="offline_<shop>"`, `shop`, `state="authenticated"`, `isOnline=false`, `scope="read_orders"`, and AES-256-GCM encrypted `accessToken`.
+   - Awaits `syncShopProfile` to query Admin GraphQL (`name, email, shopOwnerName, plan, countryCodeV2`) and upsert `ShopProfile`. Failure logs a single non-PII warning and never blocks page rendering.
+4. **Concurrency Guard & Negative Caching:**
+   - Per-shop in-flight lock (`inFlightExchanges`) deduplicates concurrent admin requests to exactly one token exchange call.
+   - 60-second negative cache (`negativeCache`) records failed exchanges to protect Shopify API rate limits and avoid request storms.
+5. **Non-PII Error Logging & Privacy:**
+   - On HTTP 400 or network failure, logs strictly `[TokenExchange] failed shop=<shop> status=<n>`. Never logs tokens, ID tokens, secrets, or response bodies.
+6. **Lifecycle & Webhooks Compliance:**
+   - `app/uninstalled`: deletes the `Session` row for the uninstalled shop (revoking stored credentials immediately) while retaining `ShopProfile` with `uninstalledAt = NOW()`.
+   - `shop/redact`: permanently wipes all `Session`, `ShopProfile`, `ShopperContact`, `MerchantFeedback`, `Protocol`, and `Setting` records.
+   - Confirmed `shopify.app.toml` does not specify `use_legacy_install_flow`. Legacy OAuth routes in `server.js` marked as fallback only.
+7. **UI Hardening & Loading States:**
+   - Settings tab opt-in card: if `ShopProfile.email` is missing, renders the checkbox disabled with `"Your store contact email is still being loaded. Reload this page."` (completely removes `"this email"`).
+   - Custom feature request card prefills `replyEmail` from `ShopProfile.email` when available, otherwise renders empty.
+   - Shopper consent text uses `ShopProfile.shopName` when available, falling back to shop domain (`shop`).
+8. **Friendly Root Page (`GET /`, `/admin`, `/app`):**
+   - Direct navigation outside embedded iframe with no shop, no id_token, and no session returns status 200 HTML with security headers, `noindex, nofollow`, and friendly message: `"Practitioner Protocols runs inside your Shopify admin. Open it from your Shopify admin's Apps list."` with a link to `/privacy`.
+   - Contains zero `<input>` or `<form>` login/domain elements to ensure compliance with Shopify App Review guidelines.
+9. **Automated Test Coverage:**
+   - Added `test/exchange.test.js` covering RFC 8693 request parameter compliance, encrypted session write, profile sync, second-request bypass, in-flight concurrency lock deduplication, negative cache cooldown, 400 non-blocking render, privacy logging, `app/uninstalled` session cleanup, UI disabled state, and friendly root page.
+   - 578 unit tests passing across 132 suites (`npm test`). Zero failures.
+
 

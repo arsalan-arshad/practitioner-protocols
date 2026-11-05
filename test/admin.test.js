@@ -53,7 +53,8 @@ describe('Merchant Admin Layer (app/lib/protocols/admin.js)', () => {
       protocols: (initialState.protocols || []).map(p => ({ ...p })),
       lines: (initialState.lines || []).map(l => ({ ...l })),
       settings: (initialState.settings || []).map(s => ({ ...s })),
-      orderStats: (initialState.orderStats || []).map(o => ({ ...o }))
+      orderStats: (initialState.orderStats || []).map(o => ({ ...o })),
+      sessions: (initialState.sessions || []).map(s => ({ ...s }))
     };
 
     return {
@@ -363,6 +364,12 @@ describe('Merchant Admin Layer (app/lib/protocols/admin.js)', () => {
             };
           });
           return { rows };
+        }
+
+        if (sql.includes('FROM "Session"')) {
+          const shop = params[0];
+          const session = state.sessions.find(s => s.shop === shop);
+          return { rows: session ? [session] : [] };
         }
 
         return { rows: [] };
@@ -1224,6 +1231,15 @@ describe('Merchant Admin Layer (app/lib/protocols/admin.js)', () => {
       const testToken = 'tok_live_1022';
 
       const mockDb = createMockDb({
+        sessions: [
+          {
+            id: `offline_${webhookShop}`,
+            shop: webhookShop,
+            accessToken: 'mock_token',
+            isOnline: false,
+            scope: 'read_orders'
+          }
+        ],
         profiles: [
           {
             id: 'prof_1',

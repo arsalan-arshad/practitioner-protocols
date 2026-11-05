@@ -591,7 +591,7 @@ export async function updateShopMarketingOptIn(db, { shop, marketingOptIn }) {
 
 /**
  * Synchronizes shop profile data from Shopify Admin GraphQL API.
- * Uses query GetShopProfile: { shop { name email shopOwnerName plan { publicDisplayName } billingAddress { countryCodeV2 } } }
+ * Uses query GetShopProfile: { shop { name email shopOwnerName plan { publicDisplayName } shopAddress { countryCodeV2 } } }
  * Never throws or blocks install if fetch fails; logs a single non-PII warning.
  *
  * @param {any} db
@@ -626,7 +626,7 @@ export async function syncShopProfile(db, { shop, accessToken = null, fetchFn = 
     plan {
       publicDisplayName
     }
-    billingAddress {
+    shopAddress {
       countryCodeV2
     }
   }
@@ -657,7 +657,8 @@ export async function syncShopProfile(db, { shop, accessToken = null, fetchFn = 
 
     const json = await res.json();
     if (json.errors && json.errors.length > 0) {
-      console.warn(`[ShopProfile] GraphQL error fetching shop profile for ${shop}`);
+      const firstMsg = String(json.errors[0]?.message || 'Unknown error').slice(0, 200);
+      console.warn(`[ShopProfile] GraphQL error for ${shop}: ${firstMsg}`);
       return null;
     }
 
@@ -668,7 +669,7 @@ export async function syncShopProfile(db, { shop, accessToken = null, fetchFn = 
     const email = shopData.email || null;
     const ownerName = shopData.shopOwnerName || null;
     const planName = shopData.plan?.publicDisplayName || null;
-    const country = shopData.billingAddress?.countryCodeV2 || null;
+    const country = shopData.shopAddress?.countryCodeV2 || null;
 
     return await upsertShopProfile(db, {
       shop,

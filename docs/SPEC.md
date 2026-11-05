@@ -62,7 +62,7 @@ Always `noindex`. Prices are always the store's live retail price — a protocol
 | `Setting` | shop, mode, footer disclaimer, handout text |
 | `ShopperContact` | id, shop, ownerId, email (lowercased, max 254), firstName (optional, max 60), consentText, consentVersion, consentedAt, source ('protocol_page'), createdAt — **explicit opt-in only**; unique (shop, ownerId, email) |
 | `MerchantFeedback` | id, shop, shopName, ownerName, replyEmail, planName, country, message (max 1000), rating (1–5, optional), kind ('feedback' / 'custom_request'), createdAt |
-| `ShopProfile` | id, shop (unique), shopName, ownerName, email, planName, country, installedAt, uninstalledAt (nullable), marketingOptIn (boolean), marketingOptInAt (nullable), createdAt, updatedAt — synchronized via Admin GraphQL `shop` query |
+| `ShopProfile` | id, shop (unique), shopName, ownerName, email, planName, country (store country from `shopAddress.countryCodeV2`), installedAt, uninstalledAt (nullable), marketingOptIn (boolean), marketingOptInAt (nullable), createdAt, updatedAt — synchronized via Admin GraphQL `shop` query |
 | `Session` | id, shop, state, isOnline, scope, accessToken (**encrypted at rest using AES-256-GCM**, `enc:v1:<iv>:<tag>:<ciphertext>`), createdAt, updatedAt |
 
 > [!NOTE]

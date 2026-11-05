@@ -603,7 +603,7 @@ export function renderPrivacyHtml({ contactEmail = '' } = {}) {
     <p>To operate recommendation workflows for direct-to-consumer and professional brands, the application stores only:</p>
     <ul>
       <li><strong>Shop Domain:</strong> The store domain (e.g. <code>example.myshopify.com</code>) to scope protocols and settings.</li>
-      <li><strong>Offline Access Token:</strong> Acquired through Shopify managed installation using App Bridge token exchange (RFC 8693, with legacy OAuth fallback) and stored encrypted at rest using AES-256-GCM when <code>SESSION_ENCRYPTION_KEY</code> is configured to verify platform webhooks and authenticate merchant admin operations.</li>
+      <li><strong>Offline Access Token:</strong> The app holds a short-lived (1 hour) offline access token, acquired through Shopify managed installation using App Bridge token exchange (RFC 8693) and re-acquired on admin load. Stored encrypted at rest using AES-256-GCM when <code>SESSION_ENCRYPTION_KEY</code> is configured, and deleted immediately on app uninstallation. No refresh token is stored.</li>
       <li><strong>Practitioner Approval Records:</strong> Professional practice names and approval statuses as authorized by the merchant.</li>
       <li><strong>Protocols and Share Tokens:</strong> Protocol titles, intro messages, selected product variant identifiers (GIDs and handles), recommended quantities, usage directions, and unguessable cryptographic share tokens.</li>
       <li><strong>Aggregate Attribution Counts:</strong> Monthly aggregate order counts and attributed gross revenue per protocol and practice.</li>

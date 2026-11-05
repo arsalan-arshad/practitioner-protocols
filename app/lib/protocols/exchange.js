@@ -65,7 +65,7 @@ export async function performTokenExchange({
     subject_token: idToken,
     subject_token_type: TOKEN_TYPE_ID_TOKEN,
     requested_token_type: TOKEN_TYPE_OFFLINE_ACCESS,
-    expiring: 0
+    expiring: 1
   };
 
   try {
@@ -97,7 +97,10 @@ export async function performTokenExchange({
 
     return {
       accessToken: data.access_token,
-      scope: data.scope || 'read_orders'
+      scope: data.scope || 'read_orders',
+      expiresIn: typeof data.expires_in === 'number' ? data.expires_in : 3600,
+      refreshToken: data.refresh_token || null,
+      refreshTokenExpiresIn: typeof data.refresh_token_expires_in === 'number' ? data.refresh_token_expires_in : null
     };
   } catch (err) {
     const status = err?.name === 'AbortError' ? 'timeout' : (err?.status || 'network_error');
@@ -107,9 +110,19 @@ export async function performTokenExchange({
 }
 
 /**
- * Ensures an offline session exists for the given shop.
- * If missing and valid credentials exist, performs token exchange, upserts Session,
- * and synchronizes ShopProfile via GraphQL (non-blocking on failure).
+ * Ensures an offline session exists and is currently valid for the given shop.
+ *
+ * Expiring Offline Tokens Policy:
+ * Shopify mandates expiring offline access tokens for public apps calling the Admin API.
+ * A session is considered USABLE only if `expires` is NOT NULL and `expires > now + 5 minutes`.
+ * If missing, NULL expires (legacy non-expiring token), or expiring within 5 minutes,
+ * performs an RFC 8693 token exchange using the fresh `id_token` provided with the request.
+ *
+ * Zero Refresh Token Storage:
+ * Refresh tokens are intentionally NOT stored in the database to minimize secrets at rest.
+ * Because Practitioner Protocols executes Admin API calls strictly in response to merchant
+ * embedded-admin actions (and never in offline background workers), acquiring a fresh token
+ * via id_token exchange on admin request renders an asynchronous refresh flow unnecessary.
  *
  * Concurrency & Caching:
  * - Employs a per-shop in-flight lock to deduplicate concurrent exchange requests.
@@ -123,7 +136,7 @@ export async function performTokenExchange({
  *   apiSecret: string,
  *   fetchFn?: typeof fetch
  * }} params
- * @returns {Promise<{ shop: string, success: boolean } | null>}
+ * @returns {Promise<{ shop: string, success: boolean, existing?: boolean } | null>}
  */
 export async function ensureOfflineSession(db, {
   shop,
@@ -136,17 +149,22 @@ export async function ensureOfflineSession(db, {
     return null;
   }
 
-  // 1. Check if offline session already exists in DB
+  // 1. Check if offline session already exists in DB and is still usable (> 5 mins remaining)
   try {
     const existing = await db.query(
-      'SELECT "id" FROM "Session" WHERE "shop" = $1 AND "isOnline" = false LIMIT 1',
+      'SELECT "id", "accessToken", "expires" FROM "Session" WHERE "shop" = $1 AND "isOnline" = false LIMIT 1',
       [shop]
     );
-    if (existing?.rows?.length > 0) {
-      return { shop, success: true, existing: true };
+    const row = existing?.rows?.[0];
+    if (row && row.expires) {
+      const expiresAt = new Date(row.expires).getTime();
+      const fiveMinutesFromNow = Date.now() + 5 * 60 * 1000;
+      if (expiresAt > fiveMinutesFromNow) {
+        return { shop, success: true, existing: true };
+      }
     }
   } catch (err) {
-    // If DB check fails, continue or return null
+    // If DB check fails, continue to token exchange
   }
 
   // 2. Check 60-second negative cache
@@ -178,20 +196,30 @@ export async function ensureOfflineSession(db, {
       // Success: clear negative cache
       negativeCache.delete(shop);
 
-      // Upsert Session with encrypted access token
+      // Expiration timestamp: now + expiresIn seconds (~3600s)
+      const expiresInSec = typeof exchangeResult.expiresIn === 'number' ? exchangeResult.expiresIn : 3600;
+      const expiresDate = new Date(Date.now() + expiresInSec * 1000);
+
+      // Upsert Session with encrypted access token and expires date.
+      // Refresh token is intentionally NOT stored (fewer secrets at rest).
+      // Every embedded admin request provides a fresh id_token, so re-exchange
+      // on admin load is sufficient; no background refresh flow is required.
       const encryptedToken = encryptAccessToken(exchangeResult.accessToken);
       await db.query(
-        `INSERT INTO "Session" ("id", "shop", "state", "isOnline", "scope", "accessToken")
-         VALUES ($1, $2, $3, false, $4, $5)
+        `INSERT INTO "Session" ("id", "shop", "state", "isOnline", "scope", "accessToken", "expires", "refreshToken", "refreshTokenExpires")
+         VALUES ($1, $2, $3, false, $4, $5, $6, NULL, NULL)
          ON CONFLICT ("id") DO UPDATE SET
            "shop" = EXCLUDED."shop",
            "state" = EXCLUDED."state",
            "scope" = EXCLUDED."scope",
-           "accessToken" = EXCLUDED."accessToken"`,
-        [`offline_${shop}`, shop, 'authenticated', exchangeResult.scope, encryptedToken]
+           "accessToken" = EXCLUDED."accessToken",
+           "expires" = EXCLUDED."expires",
+           "refreshToken" = NULL,
+           "refreshTokenExpires" = NULL`,
+        [`offline_${shop}`, shop, 'authenticated', exchangeResult.scope, encryptedToken, expiresDate]
       );
 
-      // Synchronize ShopProfile (awaited, non-blocking on failure)
+      // Synchronize ShopProfile with NEW token in the same request (awaited, non-blocking on failure)
       try {
         await syncShopProfile(db, {
           shop,

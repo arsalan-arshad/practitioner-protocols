@@ -654,8 +654,8 @@ describe('Contacts & Merchant Feedback Service (app/lib/protocols/contacts.js)',
       let storedProfile = null;
       const mockDb = {
         async query(sql, params) {
-          if (sql.includes('SELECT "accessToken" FROM "Session"')) {
-            return { rows: [{ accessToken: 'mock_shpat_valid_token' }] };
+          if (sql.includes('SELECT "accessToken"') && sql.includes('FROM "Session"')) {
+            return { rows: [{ accessToken: 'mock_shpat_valid_token', expires: new Date(Date.now() + 3600 * 1000).toISOString() }] };
           }
           if (sql.includes('INSERT INTO "ShopProfile"')) {
             const [shop, shopName, ownerName, email, planName, country] = params;
@@ -701,7 +701,7 @@ describe('Contacts & Merchant Feedback Service (app/lib/protocols/contacts.js)',
       assert.equal(res.planName, 'Advanced');
       assert.equal(res.country, 'GB');
 
-      // 2. Failed fetch must never throw or block
+      // 2. Failed fetch must never throw or block and logs status with response snippet
       const origWarn = console.warn;
       const warnings = [];
       console.warn = (...args) => warnings.push(args.join(' '));
@@ -709,13 +709,14 @@ describe('Contacts & Merchant Feedback Service (app/lib/protocols/contacts.js)',
       try {
         const fakeFetchFail = async () => ({
           ok: false,
-          status: 500
+          status: 403,
+          text: async () => 'Non-expiring access tokens are no longer accepted for the Admin API'
         });
 
         const failRes = await syncShopProfile(mockDb, { shop: 'holistic.myshopify.com', fetchFn: fakeFetchFail });
         assert.equal(failRes, null);
         assert.equal(warnings.length, 1);
-        assert.match(warnings[0], /Failed to fetch shop profile for holistic\.myshopify\.com: HTTP 500/);
+        assert.match(warnings[0], /Failed to fetch shop profile for holistic\.myshopify\.com: HTTP 403 - Non-expiring access tokens are no longer accepted for the Admin API/);
 
         // 3. Aborted/timed out fetch must be handled gracefully without throwing
         const fakeFetchTimeout = async () => {
@@ -742,6 +743,24 @@ describe('Contacts & Merchant Feedback Service (app/lib/protocols/contacts.js)',
         assert.equal(gqlErrRes, null);
         assert.equal(warnings.length, 3);
         assert.match(warnings[2], /^\[ShopProfile\] GraphQL error for holistic\.myshopify\.com: A{200}$/);
+
+        // 5. Expired or null-expires session does not attempt GraphQL fetch
+        let uncalledFetch = false;
+        const fakeFetchNever = async () => {
+          uncalledFetch = true;
+          return { ok: true };
+        };
+        const expiredDb = {
+          async query(sql) {
+            if (sql.includes('FROM "Session"')) {
+              return { rows: [{ accessToken: 'mock_token', expires: null }] };
+            }
+            return { rows: [] };
+          }
+        };
+        const expiredRes = await syncShopProfile(expiredDb, { shop: 'holistic.myshopify.com', fetchFn: fakeFetchNever });
+        assert.equal(expiredRes, null);
+        assert.equal(uncalledFetch, false, 'Must not query GraphQL if stored token has NULL expires');
       } finally {
         console.warn = origWarn;
       }

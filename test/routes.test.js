@@ -512,6 +512,16 @@ describe('HTTP Routes & Request Handlers (app/lib/protocols/routes.js)', () => {
           return { rows };
         }
 
+        if (sql.includes('FROM "Session"')) {
+          const shop = params[0];
+          const session = state.sessions.find(s => s.shop === shop);
+          return { rows: session ? [session] : [] };
+        }
+
+        if (sql.includes('INSERT INTO "Session"')) {
+          return { rowCount: 1, rows: [{ id: params[0] }] };
+        }
+
         return { rows: [] };
       }
     };

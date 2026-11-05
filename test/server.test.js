@@ -950,7 +950,7 @@ describe('Server & Configuration Hardening (server.js, shopify.app.toml, README.
       assert.ok(res.headers.Location.includes(prodShop));
     });
 
-    it('GET / returns 401 on top-level direct navigation with no shop and no session', async () => {
+    it('GET / serves friendly 200 root page on top-level direct navigation with no shop and no session', async () => {
       const req = createMockReq({
         method: 'GET',
         url: '/',
@@ -958,8 +958,12 @@ describe('Server & Configuration Hardening (server.js, shopify.app.toml, README.
       const res = createMockRes();
       await prodListener(req, res);
 
-      assert.equal(res.statusCode, 401);
-      assert.ok(res.body.includes('Authentication required'));
+      assert.equal(res.statusCode, 200);
+      assert.ok(res.headers['Content-Type'].includes('text/html'));
+      assert.ok(res.body.includes('Practitioner Protocols runs inside your Shopify admin. Open it from your Shopify admin\'s Apps list.'));
+      assert.ok(res.body.includes('href="/privacy"'));
+      assert.ok(!res.body.includes('<input')); // No shop-domain input field or login form
+      assert.ok(!res.body.includes('<form'));
     });
 
     it('GET / serves embedded Polaris admin HTML when valid id_token query param is provided', async () => {

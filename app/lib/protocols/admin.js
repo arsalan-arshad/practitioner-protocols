@@ -1195,7 +1195,8 @@ export function verifyAdminSessionToken(token, options = {}) {
     userId: payload.sub || 'gid://shopify/User/admin',
     shop: shopFromDest || expectedShop || '',
     role: 'admin',
-    payload
+    payload,
+    idToken: token
   };
 }
 
@@ -1269,11 +1270,13 @@ export function extractAdminSession(req, options = {}) {
         ADMIN_ERROR_CODES.UNAUTHORIZED
       );
     }
-    return verifyAdminSessionToken(rawToken, {
+    const verifiedSession = verifyAdminSessionToken(rawToken, {
       apiSecret,
       apiKey,
       expectedShop: shopParam || expectedShop
     });
+    verifiedSession.idToken = rawToken;
+    return verifiedSession;
   }
 
   // Demo fallback
@@ -1906,10 +1909,17 @@ export function renderAdminHtml(options = {}) {
       <form method="POST" action="/api/admin/feedback">
         <input type="hidden" name="_is_feedback_form" value="1" />
         <div style="margin-bottom: 1rem;">
-          <label style="display:flex; align-items:flex-start; gap:0.5rem; cursor:pointer; font-size:0.875rem;">
-            <input type="checkbox" id="merchant-marketing-optin" name="marketingOptIn" value="1" ${shopProfile?.marketingOptIn ? 'checked' : ''} style="margin-top:0.2rem;" />
-            <span>You may contact me at <strong>${escapeAdminText(shopProfile?.email || adminEmail || 'this email')}</strong> about feedback, custom work and product updates.</span>
-          </label>
+          ${shopProfile?.email ? `
+            <label style="display:flex; align-items:flex-start; gap:0.5rem; cursor:pointer; font-size:0.875rem;">
+              <input type="checkbox" id="merchant-marketing-optin" name="marketingOptIn" value="1" ${shopProfile.marketingOptIn ? 'checked' : ''} style="margin-top:0.2rem;" />
+              <span>You may contact me at <strong>${escapeAdminText(shopProfile.email)}</strong> about feedback, custom work and product updates.</span>
+            </label>
+          ` : `
+            <label style="display:flex; align-items:flex-start; gap:0.5rem; cursor:not-allowed; font-size:0.875rem; color:var(--p-color-text-subdued);">
+              <input type="checkbox" id="merchant-marketing-optin" name="marketingOptIn" value="1" disabled style="margin-top:0.2rem;" />
+              <span>Your store contact email is still being loaded. Reload this page.</span>
+            </label>
+          `}
         </div>
         <div style="margin-bottom: 1rem;">
           <label style="display:block; font-weight:600; margin-bottom:0.25rem;">Rate your experience (1&ndash;5)</label>
@@ -1942,7 +1952,7 @@ export function renderAdminHtml(options = {}) {
         </div>
         <div style="margin-bottom: 1rem;">
           <label style="display:block; font-weight:600; margin-bottom:0.25rem;">How should we reach you?</label>
-          <input type="email" name="replyEmail" maxlength="254" value="${escapeAdminText(shopProfile?.email || adminEmail || '')}" placeholder="you@example.com" style="width:100%; max-width:360px; border-radius:4px; border:1px solid var(--p-color-border); padding:0.5rem;">
+          <input type="email" name="replyEmail" maxlength="254" value="${escapeAdminText(shopProfile?.email || '')}" placeholder="you@example.com" style="width:100%; max-width:360px; border-radius:4px; border:1px solid var(--p-color-border); padding:0.5rem;">
           <div style="color: var(--p-color-text-subdued); font-size: 0.75rem; margin-top: 0.25rem;">
             This sends a request to the app developer. We'll only use your email to reply.
           </div>

@@ -238,10 +238,18 @@ export async function saveShopperContact(db, {
   const ownerId = protocol.ownerId;
   const practiceName = protocol.practiceName || null;
 
+  let shopDisplayName = shop;
+  try {
+    const profile = await getShopProfile(db, { shop });
+    if (profile?.shopName) {
+      shopDisplayName = profile.shopName;
+    }
+  } catch {}
+
   // Resolve canonical consent text server-side (forged client text is ignored)
   const canonicalConsentText = getCanonicalConsentText(versionNum, {
     practiceName,
-    shopName: shop
+    shopName: shopDisplayName
   });
 
   const now = new Date();

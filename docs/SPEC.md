@@ -68,6 +68,10 @@ Always `noindex`. Prices are always the store's live retail price — a protocol
 > [!NOTE]
 > **Decision Record (Owner Decision, 2026-11-05 — M11):**
 > The "zero shopper PII" rule is relaxed ONLY for an explicit, opt-in "stay in touch" contact entered by the shopper on a protocol recommendation page. Nothing else changes: browsing shoppers still have zero PII collected or stored, and opted-in contacts store NO protocolId, NO order ID, NO purchased product or health data, NO IP address, and NO user agent.
+
+> [!NOTE]
+> **Authentication & Token Architecture (Shopify Managed Installation):**
+> Under Shopify's managed installation architecture, embedded applications acquire offline access tokens via App Bridge token exchange (RFC 8693) on admin request without browser redirect loops. Offline access tokens are stored encrypted at rest using AES-256-GCM (`enc:v1:<iv>:<tag>:<ciphertext>`) when `SESSION_ENCRYPTION_KEY` is configured. Legacy OAuth routes (`/api/auth` and `/api/auth/callback`) are preserved as a fallback only. Top-level direct navigation outside the Shopify admin with no session serves a friendly, noindex status 200 landing page directing the merchant to their Apps list with a link to `/privacy`, with zero login or domain inputs.
 > - **Canonical Consent Enforcement:** Server-defined canonical text is enforced per version; client-supplied text is ignored and unknown versions rejected.
 > - **Email Verification Honesty:** The application does not send emails or verify addresses. All exports and docs honestly label contacts as `Verified = "no"` so merchants confirm subscriptions in their email tools.
 > - **Rate Limiting:** Dedicated sliding-window rate limit of 5 requests/hour per client key on shopper opt-in subscriptions.

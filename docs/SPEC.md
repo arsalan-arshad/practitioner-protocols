@@ -60,7 +60,21 @@ Always `noindex`. Prices are always the store's live retail price — a protocol
 | `PractitionerProfile` | shop, customerGid or companyGid, practiceName (**merchant-controlled**), logo (optional) |
 | `ProtocolOrderStat` | shop, protocolId, ownerId, month, orders, units, revenueMinor, currency — **aggregates only** |
 | `Setting` | shop, mode, footer disclaimer, handout text |
-No client name, email, phone or diagnosis field exists anywhere.
+| `ShopperContact` | id, shop, ownerId, email (lowercased, max 254), firstName (optional, max 60), consentText, consentVersion, consentedAt, source ('protocol_page'), createdAt — **explicit opt-in only**; unique (shop, ownerId, email) |
+| `MerchantFeedback` | id, shop, shopName, ownerName, replyEmail, planName, country, message (max 1000), rating (1–5, optional), kind ('feedback' / 'custom_request'), createdAt |
+| `ShopProfile` | id, shop (unique), shopName, ownerName, email, planName, country, installedAt, uninstalledAt (nullable), marketingOptIn (boolean), marketingOptInAt (nullable), createdAt, updatedAt — synchronized via Admin GraphQL `shop` query |
+| `Session` | id, shop, state, isOnline, scope, accessToken (**encrypted at rest using AES-256-GCM**, `enc:v1:<iv>:<tag>:<ciphertext>`), createdAt, updatedAt |
+
+> [!NOTE]
+> **Decision Record (Owner Decision, 2026-11-05 — M11):**
+> The "zero shopper PII" rule is relaxed ONLY for an explicit, opt-in "stay in touch" contact entered by the shopper on a protocol recommendation page. Nothing else changes: browsing shoppers still have zero PII collected or stored, and opted-in contacts store NO protocolId, NO order ID, NO purchased product or health data, NO IP address, and NO user agent.
+> - **Canonical Consent Enforcement:** Server-defined canonical text is enforced per version; client-supplied text is ignored and unknown versions rejected.
+> - **Email Verification Honesty:** The application does not send emails or verify addresses. All exports and docs honestly label contacts as `Verified = "no"` so merchants confirm subscriptions in their email tools.
+> - **Rate Limiting:** Dedicated sliding-window rate limit of 5 requests/hour per client key on shopper opt-in subscriptions.
+> - **Merchant Contact & Feedback:** `ShopProfile` metadata is synced via Admin GraphQL with offline tokens. Merchants can opt in to developer contact via Settings ("Contact & feedback" card with rating 1–5), which sets `marketingOptIn` and timestamp. Custom requests count as reply-only consent.
+> - **Credential Protection:** Session access tokens are encrypted at rest with AES-256-GCM (`SESSION_ENCRYPTION_KEY`). All merchant and shopper data is permanently wiped on `shop/redact`.
+
+No client diagnosis, medical note, or non-consented shopper PII exists anywhere.
 
 ## 7. Backend API (sketch)
 Practitioner requests are authenticated by the extension session token **or** the HMAC-verified app-proxy signature (per S1). Every handler checks ownership.
@@ -76,11 +90,11 @@ Server-side QR generation (SVG and PNG) from the permanent link; handout is a pr
 4. Not v1: a practitioner-facing "client orders" count (aggregate only, never individual orders).
 
 ## 10. Compliance and data handling
-- `customers/redact`: tag mode → delete the customer's profile and archive/delete their protocols; company mode → keep company protocols, clear the creator reference.
-- `customers/data_request`: report profile and protocol references held for that customer.
-- `shop/redact` and `app/uninstalled`: delete all shop data / revoke access.
+- `customers/redact`: tag mode → delete the customer's profile and archive/delete their protocols; company mode → keep company protocols, clear the creator reference; for all modes → delete any matching `ShopperContact` rows by lowercased email.
+- `customers/data_request`: report profile and protocol references held for that customer, plus any matching opted-in `ShopperContact` records.
+- `shop/redact` and `app/uninstalled`: `shop/redact` permanently deletes all shop data (protocols, lines, stats, profiles, settings, sessions, shopper contacts, merchant feedback); `app/uninstalled` immediately revokes sessions while retaining store data during the 48-hour platform grace window.
 - Declare subscriptions in `shopify.app.toml` and run `shopify app deploy` — editing TOML alone does not register them.
-- Order data used: line items, properties, totals. No client identity is stored.
+- Order data used: line items, properties, totals. No shopper identity is stored from orders.
 
 ## 11. Review and risk
 - Public app: protected customer data request (level 1 for tag lookup; keep order fields minimal), App Proxy review points, health-adjacent categories — keep copy neutral and claim-free.
@@ -97,4 +111,4 @@ Server-side QR generation (SVG and PNG) from the permanent link; handout is a pr
 - A deleted or out-of-stock product never blocks Add all and is flagged to the practitioner.
 - QR scans to the right link; the handout fits one page (Letter and A4).
 - Protocol pages are `noindex` and absent from the sitemap.
-- No field anywhere accepts client-identifying information.
+- No field anywhere accepts client or shopper identifying information, except for explicit opt-in contacts entered with verifiable consent.

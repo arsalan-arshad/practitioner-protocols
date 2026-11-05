@@ -40,6 +40,22 @@ import {
 import { generateShareToken } from './token.js';
 import { renderPortalLiquid } from './portal.js';
 import {
+  saveShopperContact,
+  listPractitionerContacts,
+  deletePractitionerContact,
+  exportPractitionerContactsCsv,
+  listMerchantContacts,
+  deleteMerchantContact,
+  deleteMerchantPracticeContacts,
+  exportMerchantContactsCsv,
+  saveMerchantCustomRequest,
+  saveMerchantFeedback,
+  updateShopMarketingOptIn,
+  getShopProfile,
+  syncShopProfile,
+  ContactValidationError
+} from './contacts.js';
+import {
   ProtocolAdminError,
   ADMIN_ERROR_CODES,
   SHOPIFY_DOMAIN_REGEX,
@@ -130,6 +146,28 @@ export function setDefaultEnrolRateLimiter(limiter) {
 
 export function getDefaultEnrolRateLimiter() {
   return defaultEnrolRateLimiter;
+}
+
+// Module-level default merchant custom feature request limiter (3 requests / hour per shop)
+let defaultCustomRequestRateLimiter = createRateLimiter({ windowMs: 3600000, maxRequests: 3 });
+
+export function setDefaultCustomRequestRateLimiter(limiter) {
+  defaultCustomRequestRateLimiter = limiter;
+}
+
+export function getDefaultCustomRequestRateLimiter() {
+  return defaultCustomRequestRateLimiter;
+}
+
+// Module-level default shopper subscribe limiter (5 requests / hour per client key)
+let defaultSubscribeRateLimiter = createRateLimiter({ windowMs: 3600000, maxRequests: 5 });
+
+export function setDefaultSubscribeRateLimiter(limiter) {
+  defaultSubscribeRateLimiter = limiter;
+}
+
+export function getDefaultSubscribeRateLimiter() {
+  return defaultSubscribeRateLimiter;
 }
 
 /**
@@ -549,7 +587,99 @@ export async function handleAppProxyRequest(db, request, options = {}) {
     const csrfError = validateAppProxyCsrf(request);
     if (csrfError) return csrfError;
 
-    // 2. Authentication: mutating proxy routes require logged-in customer
+    // 2. M11: Shopper Opt-in Subscribe (guest access, token-scoped, no customer login required)
+    if (method === 'POST' && action === 'subscribe') {
+      const activeSubLimiter = options.subscribeRateLimiter !== undefined ? options.subscribeRateLimiter : defaultSubscribeRateLimiter;
+      if (activeSubLimiter) {
+        const clientIp = getClientIp(request?.headers);
+        const subKey = createRateLimitKey('subscribe', shop || 'storefront', clientIp);
+        let isLimited = false;
+        let retryAfterSeconds = 3600;
+
+        if (typeof activeSubLimiter.isRateLimited === 'function') {
+          const res = activeSubLimiter.isRateLimited(subKey);
+          isLimited = res.limited;
+          if (res.retryAfterSeconds) retryAfterSeconds = res.retryAfterSeconds;
+        } else if (typeof activeSubLimiter.isAllowed === 'function') {
+          isLimited = !activeSubLimiter.isAllowed(subKey);
+        } else if (typeof activeSubLimiter.check === 'function') {
+          const chk = activeSubLimiter.check(subKey);
+          if (typeof chk === 'boolean') isLimited = !chk;
+          else if (chk && typeof chk === 'object') {
+            isLimited = chk.limited === true;
+            if (chk.retryAfterSeconds) retryAfterSeconds = chk.retryAfterSeconds;
+          }
+        } else if (typeof activeSubLimiter === 'function') {
+          const res = await activeSubLimiter(subKey, request);
+          if (typeof res === 'boolean') isLimited = !res;
+          else if (res && typeof res === 'object') {
+            isLimited = res.limited === true || res.allowed === false;
+            if (res.retryAfterSeconds) retryAfterSeconds = res.retryAfterSeconds;
+          }
+        }
+
+        if (isLimited) {
+          return Response.json(
+            { error: 'Too many requests. Please try again later.' },
+            {
+              status: 429,
+              headers: {
+                'Content-Type': 'application/json',
+                'Retry-After': String(retryAfterSeconds)
+              }
+            }
+          );
+        }
+      }
+
+      try {
+        let body = {};
+        if (typeof request?.json === 'function') {
+          body = await request.json();
+        } else if (typeof request?.body === 'string') {
+          body = JSON.parse(request.body);
+        } else if (request?.body && typeof request.body === 'object') {
+          body = request.body;
+        }
+
+        const token = urlObj.searchParams.get('token') || body.token;
+        if (!token) {
+          return Response.json(
+            { error: 'Protocol token is required' },
+            { status: 400, headers: { 'Content-Type': 'application/json' } }
+          );
+        }
+
+        const res = await saveShopperContact(db, {
+          shop,
+          token,
+          email: body.email,
+          firstName: body.firstName,
+          consent: body.consent,
+          consentVersion: body.consentVersion,
+          honeypot: body.honeypot
+        });
+
+        return Response.json(res, {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' }
+        });
+      } catch (err) {
+        if (err instanceof ContactValidationError) {
+          const status = err.code === 'PROTOCOL_INACTIVE' ? 404 : 400;
+          return Response.json(
+            { error: err.message, code: err.code },
+            { status, headers: { 'Content-Type': 'application/json' } }
+          );
+        }
+        return Response.json(
+          { error: 'Unable to subscribe. Please try again.' },
+          { status: 400, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+    }
+
+    // 3. Authentication: mutating proxy routes require logged-in customer
     if (!customerGid) {
       return Response.json(
         { error: 'Unauthorized: login required' },
@@ -557,9 +687,9 @@ export async function handleAppProxyRequest(db, request, options = {}) {
       );
     }
 
-    // 3. Unknown POST/PUT actions -> 400, never fall through to create
+    // 4. Unknown POST/PUT actions -> 400, never fall through to create
     if (method === 'POST') {
-      if (!['enrol', 'create', 'update', 'archive', 'restore', 'duplicate'].includes(action)) {
+      if (!['enrol', 'create', 'update', 'archive', 'restore', 'duplicate', 'delete_contact'].includes(action)) {
         return Response.json(
           { error: 'Invalid or unknown action' },
           { status: 400, headers: { 'Content-Type': 'application/json' } }
@@ -699,6 +829,37 @@ export async function handleAppProxyRequest(db, request, options = {}) {
       }
     }
 
+    if (method === 'POST' && action === 'delete_contact') {
+      try {
+        let body = {};
+        if (typeof request?.json === 'function') {
+          body = await request.json();
+        } else if (typeof request?.body === 'string') {
+          body = JSON.parse(request.body);
+        } else if (request?.body && typeof request.body === 'object') {
+          body = request.body;
+        }
+
+        const contactId = body.contactId || urlObj.searchParams.get('contactId');
+        if (!contactId) {
+          return Response.json(
+            { error: 'Contact ID is required' },
+            { status: 400, headers: { 'Content-Type': 'application/json' } }
+          );
+        }
+
+        const success = await deletePractitionerContact(db, {
+          shop,
+          ownerId: customerGid,
+          contactId
+        });
+
+        return Response.json({ success }, { status: 200, headers: { 'Content-Type': 'application/json' } });
+      } catch (err) {
+        return handleErrorResponse(err);
+      }
+    }
+
     // Unknown POST/PUT actions -> 400, never fall through to create
     return Response.json(
       { error: 'Invalid or unknown action' },
@@ -708,6 +869,25 @@ export async function handleAppProxyRequest(db, request, options = {}) {
 
   // 4. If no token provided on App Proxy root (/apps/protocols), render Practitioner Portal (M3 / M9b-2)
   if (!token) {
+    if (method === 'GET' && action === 'contacts_csv') {
+      if (!customerGid) {
+        return Response.json(
+          { error: 'Unauthorized: login required' },
+          { status: 401, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+      const contacts = await listPractitionerContacts(db, { shop, ownerId: customerGid });
+      const csv = exportPractitionerContactsCsv(contacts);
+      return new Response(csv, {
+        status: 200,
+        headers: {
+          'Content-Type': 'text/csv; charset=utf-8',
+          'Content-Disposition': 'attachment; filename="my-contacts.csv"',
+          'X-Robots-Tag': 'noindex, nofollow'
+        }
+      });
+    }
+
     if (!customerGid) {
       const portalLiquid = renderPortalLiquid({ shop, isLoggedIn: false });
       return new Response(portalLiquid, {
@@ -769,7 +949,6 @@ export async function handleAppProxyRequest(db, request, options = {}) {
     }
 
     // Handle practitioner actions (product search)
-    const action = urlObj.searchParams.get('action');
     if (action === 'search') {
       const q = urlObj.searchParams.get('q') || '';
       return handleProductSearchRequest(shop, q, options);
@@ -863,6 +1042,15 @@ export async function handleAppProxyRequest(db, request, options = {}) {
       }
     }
 
+    let contacts = [];
+    if (db && typeof db.query === 'function') {
+      try {
+        contacts = await listPractitionerContacts(db, { shop, ownerId: customerGid });
+      } catch {
+        // Non-fatal fallback
+      }
+    }
+
     const portalLiquid = renderPortalLiquid({
       shop,
       isLoggedIn: true,
@@ -871,7 +1059,8 @@ export async function handleAppProxyRequest(db, request, options = {}) {
       practiceName,
       activeProtocols,
       starterProtocols,
-      archivedProtocols
+      archivedProtocols,
+      contacts
     });
 
     return new Response(portalLiquid, {
@@ -958,6 +1147,7 @@ export async function handleAppProxyRequest(db, request, options = {}) {
   const liquid = renderProtocolLiquid({
     protocol,
     practiceName: protocol?.practiceName || '',
+    shopName: shop,
     isLoggedInPractitioner: isHandout ? false : isLoggedInPractitioner,
     isHandout,
     handoutText,
@@ -1533,13 +1723,24 @@ export async function handleAdminDashboardRequest(db, request, options = {}) {
     let starters = options.demoData?.starters || [];
     let report = options.demoData?.report || null;
     let settings = options.demoData?.settings || null;
+    let contactsData = options.demoData?.contactsData || { practices: [], contacts: [], totalContacts: 0 };
+    let shopProfile = options.demoData?.shopProfile || null;
 
     if (db && !session.isDemo) {
+      let currentProfile = await getShopProfile(db, { shop });
+      const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+      if (!currentProfile || !currentProfile.updatedAt || new Date(currentProfile.updatedAt).getTime() < sevenDaysAgo) {
+        await syncShopProfile(db, { shop });
+        currentProfile = await getShopProfile(db, { shop });
+      }
+      shopProfile = currentProfile;
+
       const profilesRes = await listPractitionerProfiles(db, { shop });
       profiles = profilesRes.profiles;
       starters = await listStarterTemplates(db, { shop });
       report = await getAttributionReport(db, { shop, month });
       settings = await getSettings(db, { shop });
+      contactsData = await listMerchantContacts(db, { shop });
     }
 
     const html = renderAdminHtml({
@@ -1549,6 +1750,9 @@ export async function handleAdminDashboardRequest(db, request, options = {}) {
       starters,
       report,
       settings,
+      contactsData,
+      shopProfile,
+      adminEmail: session.email || '',
       activeTab
     });
 
@@ -1837,4 +2041,393 @@ export async function handleAdminAttributionCsvRequest(db, request, options = {}
     return handleErrorResponse(err);
   }
 }
+
+/**
+ * Handles GET /api/admin/contacts.csv export request.
+ *
+ * @param {any} db Database client
+ * @param {Request | any} request
+ * @param {Record<string, any>} [options]
+ * @returns {Promise<Response>}
+ */
+export async function handleAdminContactsCsvRequest(db, request, options = {}) {
+  try {
+    const session = extractAdminSession(request, options);
+    const shop = session.shop || options.expectedShop || '';
+    if (!shop) {
+      return Response.json({ error: 'Shop domain is required' }, { status: 400 });
+    }
+
+    let contacts = [];
+    if (db && !session.isDemo) {
+      const data = await listMerchantContacts(db, { shop });
+      contacts = data.contacts;
+    } else if (options.demoData?.contacts) {
+      contacts = options.demoData.contacts;
+    }
+
+    const csv = exportMerchantContactsCsv(contacts, shop);
+
+    return new Response(csv, {
+      status: 200,
+      headers: {
+        'Content-Type': 'text/csv; charset=utf-8',
+        'Content-Disposition': `attachment; filename="contacts-${shop}.csv"`
+      }
+    });
+  } catch (err) {
+    return handleErrorResponse(err);
+  }
+}
+
+/**
+ * Handles POST /api/admin/contacts/delete request.
+ *
+ * @param {any} db Database client
+ * @param {Request | any} request
+ * @param {Record<string, any>} [options]
+ * @returns {Promise<Response>}
+ */
+export async function handleAdminDeleteContactRequest(db, request, options = {}) {
+  try {
+    const session = extractAdminSession(request, options);
+    const shop = session.shop || options.expectedShop || '';
+    if (!shop) {
+      return Response.json({ error: 'Shop domain is required' }, { status: 400 });
+    }
+
+    let contactId = null;
+    const contentType = getHeader(request, 'content-type') || '';
+    if (contentType.includes('application/json')) {
+      let body = {};
+      if (typeof request?.json === 'function') body = await request.json();
+      else if (typeof request?.body === 'string') body = JSON.parse(request.body);
+      else if (request?.body && typeof request.body === 'object') body = request.body;
+      contactId = body.contactId;
+    } else {
+      let raw = '';
+      if (typeof request?.text === 'function') raw = await request.text();
+      else if (typeof request?.body === 'string') raw = request.body;
+      else if (request?.body && typeof request.body === 'object') raw = request.body;
+      if (raw && typeof raw === 'string') {
+        const params = new URLSearchParams(raw);
+        contactId = params.get('contactId');
+      } else if (raw && typeof raw === 'object') {
+        contactId = raw.contactId;
+      }
+    }
+
+    if (!contactId) {
+      return Response.json({ error: 'Contact ID is required' }, { status: 400 });
+    }
+
+    if (db && !session.isDemo) {
+      await deleteMerchantContact(db, { shop, contactId });
+    }
+
+    if (contentType.includes('application/x-www-form-urlencoded')) {
+      return new Response(null, {
+        status: 303,
+        headers: { Location: '/api/admin?tab=contacts' }
+      });
+    }
+
+    return Response.json({ success: true }, { status: 200 });
+  } catch (err) {
+    return handleErrorResponse(err);
+  }
+}
+
+/**
+ * Handles POST /api/admin/contacts/delete-practice request.
+ *
+ * @param {any} db Database client
+ * @param {Request | any} request
+ * @param {Record<string, any>} [options]
+ * @returns {Promise<Response>}
+ */
+export async function handleAdminDeletePracticeContactsRequest(db, request, options = {}) {
+  try {
+    const session = extractAdminSession(request, options);
+    const shop = session.shop || options.expectedShop || '';
+    if (!shop) {
+      return Response.json({ error: 'Shop domain is required' }, { status: 400 });
+    }
+
+    let ownerId = null;
+    const contentType = getHeader(request, 'content-type') || '';
+    if (contentType.includes('application/json')) {
+      let body = {};
+      if (typeof request?.json === 'function') body = await request.json();
+      else if (typeof request?.body === 'string') body = JSON.parse(request.body);
+      else if (request?.body && typeof request.body === 'object') body = request.body;
+      ownerId = body.ownerId;
+    } else {
+      let raw = '';
+      if (typeof request?.text === 'function') raw = await request.text();
+      else if (typeof request?.body === 'string') raw = request.body;
+      else if (request?.body && typeof request.body === 'object') raw = request.body;
+      if (raw && typeof raw === 'string') {
+        const params = new URLSearchParams(raw);
+        ownerId = params.get('ownerId');
+      } else if (raw && typeof raw === 'object') {
+        ownerId = raw.ownerId;
+      }
+    }
+
+    if (!ownerId) {
+      return Response.json({ error: 'Owner GID is required' }, { status: 400 });
+    }
+
+    let deleted = 0;
+    if (db && !session.isDemo) {
+      deleted = await deleteMerchantPracticeContacts(db, { shop, ownerId });
+    }
+
+    if (contentType.includes('application/x-www-form-urlencoded')) {
+      return new Response(null, {
+        status: 303,
+        headers: { Location: '/api/admin?tab=contacts' }
+      });
+    }
+
+    return Response.json({ success: true, deleted }, { status: 200 });
+  } catch (err) {
+    return handleErrorResponse(err);
+  }
+}
+
+/**
+ * Handles POST /api/admin/feedback/custom-request.
+ * Rate limited to 3 per hour per shop.
+ *
+ * @param {any} db Database client
+ * @param {Request | any} request
+ * @param {Record<string, any>} [options]
+ * @returns {Promise<Response>}
+ */
+export async function handleAdminCustomFeatureRequest(db, request, options = {}) {
+  try {
+    const session = extractAdminSession(request, options);
+    const shop = session.shop || options.expectedShop || '';
+    if (!shop) {
+      return Response.json({ error: 'Shop domain is required' }, { status: 400 });
+    }
+
+    // Rate limiting: 3 per hour per shop
+    const limiter = options.rateLimiter || defaultCustomRequestRateLimiter;
+    const clientKey = `admin_custom_req_${shop}`;
+    let isLimited = false;
+    let retryAfterSeconds = 3600;
+    if (typeof limiter?.isRateLimited === 'function') {
+      const res = limiter.isRateLimited(clientKey);
+      isLimited = res.limited;
+      if (res.retryAfterSeconds) retryAfterSeconds = res.retryAfterSeconds;
+    } else if (typeof limiter?.isAllowed === 'function') {
+      isLimited = !limiter.isAllowed(clientKey);
+    } else if (typeof limiter === 'function') {
+      const res = await limiter(clientKey, request);
+      if (typeof res === 'boolean') isLimited = !res;
+      else if (res && typeof res === 'object') {
+        isLimited = res.limited === true || res.allowed === false;
+        if (res.retryAfterSeconds) retryAfterSeconds = res.retryAfterSeconds;
+      }
+    }
+    if (isLimited) {
+      return Response.json(
+        { error: 'Too many requests. Please try again later.' },
+        { status: 429, headers: { 'Content-Type': 'application/json', 'Retry-After': String(retryAfterSeconds) } }
+      );
+    }
+
+    let body = {};
+    const contentType = getHeader(request, 'content-type') || '';
+    if (contentType.includes('application/json')) {
+      if (typeof request?.json === 'function') body = await request.json();
+      else if (typeof request?.body === 'string') body = JSON.parse(request.body);
+      else if (request?.body && typeof request.body === 'object') body = request.body;
+    } else {
+      let raw = '';
+      if (typeof request?.text === 'function') raw = await request.text();
+      else if (typeof request?.body === 'string') raw = request.body;
+      else if (request?.body && typeof request.body === 'object') raw = request.body;
+      if (raw && typeof raw === 'string') {
+        body = Object.fromEntries(new URLSearchParams(raw));
+      } else if (raw && typeof raw === 'object') {
+        body = raw;
+      }
+    }
+
+    const message = body.message;
+    const replyEmail = body.replyEmail || session.email || null;
+
+    if (db && !session.isDemo) {
+      await saveMerchantCustomRequest(db, {
+        shop,
+        shopName: body.shopName || session.shopName || null,
+        ownerName: body.ownerName || null,
+        replyEmail,
+        planName: body.planName || null,
+        country: body.country || null,
+        message,
+        kind: 'custom_request'
+      });
+    }
+
+    if (contentType.includes('application/x-www-form-urlencoded')) {
+      return new Response(null, {
+        status: 303,
+        headers: { Location: '/api/admin?tab=settings&request_sent=1' }
+      });
+    }
+
+    return Response.json(
+      { success: true, message: 'Thank you for your request. The developer will get back to you shortly.' },
+      { status: 200, headers: { 'Content-Type': 'application/json' } }
+    );
+  } catch (err) {
+    if (err instanceof ContactValidationError) {
+      return Response.json(
+        { error: err.message, code: err.code },
+        { status: 400, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+    return handleErrorResponse(err);
+  }
+}
+
+/**
+ * Handles POST /api/admin/feedback.
+ * Saves merchant rating (1-5), optional feedback message, and marketing opt-in preference.
+ *
+ * @param {any} db Database client
+ * @param {Request | any} request
+ * @param {Record<string, any>} [options]
+ * @returns {Promise<Response>}
+ */
+export async function handleAdminFeedbackRequest(db, request, options = {}) {
+  try {
+    const session = extractAdminSession(request, options);
+    const shop = session.shop || options.expectedShop || '';
+    if (!shop) {
+      return Response.json({ error: 'Shop domain is required' }, { status: 400 });
+    }
+
+    let body = {};
+    const contentType = getHeader(request, 'content-type') || '';
+    if (contentType.includes('application/json')) {
+      if (typeof request?.json === 'function') body = await request.json();
+      else if (typeof request?.body === 'string') body = JSON.parse(request.body);
+      else if (request?.body && typeof request.body === 'object') body = request.body;
+    } else {
+      let raw = '';
+      if (typeof request?.text === 'function') raw = await request.text();
+      else if (typeof request?.body === 'string') raw = request.body;
+      else if (request?.body && typeof request.body === 'object') body = request.body;
+      if (raw && typeof raw === 'string') {
+        body = Object.fromEntries(new URLSearchParams(raw));
+      } else if (raw && typeof raw === 'object') {
+        body = raw;
+      }
+    }
+
+    let marketingOptIn = null;
+    if ('marketingOptIn' in body) {
+      marketingOptIn = body.marketingOptIn === '1' || body.marketingOptIn === 'true' || body.marketingOptIn === true;
+    } else if (body._is_feedback_form) {
+      marketingOptIn = false;
+    }
+
+    const rating = body.rating !== undefined && body.rating !== '' ? body.rating : null;
+    const message = body.message !== undefined && body.message !== '' ? body.message : null;
+    const replyEmail = body.replyEmail || session.email || null;
+
+    if (db && !session.isDemo) {
+      await saveMerchantFeedback(db, {
+        shop,
+        rating,
+        message,
+        marketingOptIn,
+        replyEmail
+      });
+    }
+
+    if (contentType.includes('application/x-www-form-urlencoded')) {
+      return new Response(null, {
+        status: 303,
+        headers: { Location: '/api/admin?tab=settings&feedback_saved=1' }
+      });
+    }
+
+    return Response.json(
+      { success: true, message: 'Thank you for your feedback!' },
+      { status: 200, headers: { 'Content-Type': 'application/json' } }
+    );
+  } catch (err) {
+    if (err instanceof ContactValidationError) {
+      return Response.json(
+        { error: err.message, code: err.code },
+        { status: 400, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+    return handleErrorResponse(err);
+  }
+}
+
+/**
+ * Handles POST /api/admin/feedback/contact-optin.
+ * Dedicated endpoint for toggling marketing opt-in preference.
+ *
+ * @param {any} db Database client
+ * @param {Request | any} request
+ * @param {Record<string, any>} [options]
+ * @returns {Promise<Response>}
+ */
+export async function handleAdminMarketingOptInRequest(db, request, options = {}) {
+  try {
+    const session = extractAdminSession(request, options);
+    const shop = session.shop || options.expectedShop || '';
+    if (!shop) {
+      return Response.json({ error: 'Shop domain is required' }, { status: 400 });
+    }
+
+    let body = {};
+    const contentType = getHeader(request, 'content-type') || '';
+    if (contentType.includes('application/json')) {
+      if (typeof request?.json === 'function') body = await request.json();
+      else if (typeof request?.body === 'string') body = JSON.parse(request.body);
+      else if (request?.body && typeof request.body === 'object') body = request.body;
+    } else {
+      let raw = '';
+      if (typeof request?.text === 'function') raw = await request.text();
+      else if (typeof request?.body === 'string') raw = request.body;
+      else if (request?.body && typeof request.body === 'object') body = request.body;
+      if (raw && typeof raw === 'string') {
+        body = Object.fromEntries(new URLSearchParams(raw));
+      } else if (raw && typeof raw === 'object') {
+        body = raw;
+      }
+    }
+
+    const marketingOptIn = body.marketingOptIn === '1' || body.marketingOptIn === 'true' || body.marketingOptIn === true;
+
+    if (db && !session.isDemo) {
+      await updateShopMarketingOptIn(db, { shop, marketingOptIn });
+    }
+
+    return Response.json(
+      { success: true, marketingOptIn },
+      { status: 200, headers: { 'Content-Type': 'application/json' } }
+    );
+  } catch (err) {
+    if (err instanceof ContactValidationError) {
+      return Response.json(
+        { error: err.message, code: err.code },
+        { status: 400, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+    return handleErrorResponse(err);
+  }
+}
+
 

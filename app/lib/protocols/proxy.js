@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { getCanonicalConsentText } from './contacts.js';
 
 /**
  * Normalizes query parameters into a standard key-value map.
@@ -338,6 +339,7 @@ export function normalizeVariantId(idOrGid) {
 export function renderProtocolLiquid({
   protocol,
   practiceName = '',
+  shopName = '',
   isLoggedInPractitioner = false,
   isHandout = false,
   handoutText = '',
@@ -616,6 +618,69 @@ export function renderProtocolLiquid({
     font-style: italic;
     white-space: pre-line;
   }
+  .protocol-optin-card {
+    background: #f9fafb;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    padding: 1.5rem;
+    margin-top: 2rem;
+  }
+  .protocol-optin-title {
+    font-size: 1.25rem;
+    font-weight: 600;
+    color: #111827;
+    margin: 0 0 0.5rem 0;
+  }
+  .protocol-optin-field {
+    margin-bottom: 0.875rem;
+  }
+  .protocol-optin-label {
+    display: block;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: #374151;
+    margin-bottom: 0.25rem;
+  }
+  .protocol-optin-input {
+    width: 100%;
+    padding: 0.5rem 0.75rem;
+    font-size: 0.875rem;
+    border: 1px solid #d1d5db;
+    border-radius: 6px;
+    background: #ffffff;
+    box-sizing: border-box;
+  }
+  .protocol-optin-consent {
+    margin: 1rem 0;
+  }
+  .protocol-optin-checkbox-label {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.5rem;
+    font-size: 0.8125rem;
+    color: #4b5563;
+    cursor: pointer;
+  }
+  .protocol-optin-checkbox-label input[type="checkbox"] {
+    margin-top: 0.15rem;
+    flex-shrink: 0;
+  }
+  .protocol-optin-feedback {
+    margin-top: 0.75rem;
+    padding: 0.75rem;
+    border-radius: 6px;
+    font-size: 0.875rem;
+  }
+  .protocol-optin-feedback.protocol-optin-success {
+    background: #ecfdf5;
+    color: #065f46;
+    border: 1px solid #a7f3d0;
+  }
+  .protocol-optin-feedback.protocol-optin-error {
+    background: #fef2f2;
+    color: #991b1b;
+    border: 1px solid #fecaca;
+  }
   @media print {
     body {
       background: #ffffff !important;
@@ -624,6 +689,7 @@ export function renderProtocolLiquid({
     .no-print,
     .protocol-practitioner-banner,
     .protocol-line-actions,
+    .protocol-optin-card,
     header,
     footer,
     #shopify-section-header,
@@ -695,12 +761,17 @@ export function renderProtocolLiquid({
 
   // Active State: Render full protocol client page
   const displayPractice = escapeHtml(practiceName || protocol.displayName || '');
+  const displayShop = escapeHtml(shopName || protocol.shop || 'this store');
   const displayTitle = escapeHtml(protocol.name || 'Product Protocol');
   const displayIntro = escapeHtml(protocol.introNote || '');
   const rawToken = protocol.token || protocol.shareToken || '';
   const rawId = String(protocol.id || '');
   const protocolToken = escapeHtml(rawToken);
   const protocolId = escapeHtml(rawId);
+  const exactConsentText = getCanonicalConsentText(1, {
+    practiceName: displayPractice,
+    shopName: displayShop
+  });
 
   const lines = Array.isArray(protocol.lines) ? protocol.lines : [];
 
@@ -820,6 +891,32 @@ export function renderProtocolLiquid({
     </button>
   </div>`;
 
+  const optinMarkup = !isHandout ? `
+  <section class="protocol-optin-card" id="protocol-optin-card" aria-label="Stay in touch">
+    <h2 class="protocol-optin-title">Stay in touch with ${displayPractice || 'this practice'}</h2>
+    <form id="protocol-optin-form" novalidate>
+      <input type="text" name="hp_field" value="" tabindex="-1" autocomplete="off" style="display:none !important;" aria-hidden="true" />
+      <div class="protocol-optin-field">
+        <label for="protocol-optin-email" class="protocol-optin-label">Email address</label>
+        <input type="email" id="protocol-optin-email" name="email" maxlength="254" required class="protocol-optin-input" placeholder="you@example.com" />
+      </div>
+      <div class="protocol-optin-field">
+        <label for="protocol-optin-first-name" class="protocol-optin-label">First name (optional)</label>
+        <input type="text" id="protocol-optin-first-name" name="firstName" maxlength="60" class="protocol-optin-input" placeholder="Your first name" />
+      </div>
+      <div class="protocol-optin-consent">
+        <label class="protocol-optin-checkbox-label">
+          <input type="checkbox" id="protocol-optin-consent" name="consent" value="1" />
+          <span>${exactConsentText} <a href="/privacy" target="_blank" rel="noopener noreferrer">Privacy Policy</a></span>
+        </label>
+      </div>
+      <div class="protocol-optin-actions">
+        <button type="submit" class="protocol-btn protocol-btn-primary" id="protocol-optin-submit">Stay in touch</button>
+      </div>
+      <div id="protocol-optin-feedback" class="protocol-optin-feedback" style="display:none;" role="status"></div>
+    </form>
+  </section>` : '';
+
   return `${robotsMeta}${styles}
 <div class="protocol-container">
   ${practitionerBanner}
@@ -834,6 +931,8 @@ export function renderProtocolLiquid({
   <div class="protocol-lines-list" role="list">
     ${linesMarkup}
   </div>
+
+  ${optinMarkup}
 
   ${displayHandoutText ? `<div class="protocol-handout-text">${displayHandoutText}</div>` : ''}
   ${displayFooterDisclaimer ? `<div class="protocol-footer-disclaimer">${displayFooterDisclaimer}</div>` : ''}
@@ -1182,6 +1281,91 @@ ${protocolDataJson}
           addAllBtn.removeAttribute('aria-disabled');
         }
       }
+    });
+  }
+
+  // M11: Shopper Opt-In Form Submission Handler
+  var optinForm = document.getElementById('protocol-optin-form');
+  if (optinForm) {
+    optinForm.addEventListener('submit', function(e) {
+      e.preventDefault();
+      var feedbackEl = document.getElementById('protocol-optin-feedback');
+      var submitBtn = document.getElementById('protocol-optin-submit');
+      var emailInput = document.getElementById('protocol-optin-email');
+      var firstNameInput = document.getElementById('protocol-optin-first-name');
+      var consentCheckbox = document.getElementById('protocol-optin-consent');
+      var hpInput = optinForm.querySelector('input[name="hp_field"]');
+
+      if (!feedbackEl || !submitBtn || !emailInput || !consentCheckbox) return;
+
+      feedbackEl.style.display = 'none';
+      feedbackEl.textContent = '';
+      feedbackEl.className = 'protocol-optin-feedback';
+
+      if (!consentCheckbox.checked) {
+        feedbackEl.textContent = 'Please confirm your consent by checking the box.';
+        feedbackEl.className = 'protocol-optin-feedback protocol-optin-error';
+        feedbackEl.style.display = 'block';
+        return;
+      }
+
+      var emailVal = (emailInput.value || '').trim();
+      if (!emailVal || emailVal.indexOf('@') === -1) {
+        feedbackEl.textContent = 'Please enter a valid email address.';
+        feedbackEl.className = 'protocol-optin-feedback protocol-optin-error';
+        feedbackEl.style.display = 'block';
+        return;
+      }
+
+      var origBtnText = submitBtn.textContent;
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Subscribing...';
+
+      var consentText = ${JSON.stringify(exactConsentText)};
+
+      var body = {
+        email: emailVal,
+        firstName: (firstNameInput && firstNameInput.value) ? firstNameInput.value.trim() : '',
+        consent: true,
+        consentText: consentText,
+        consentVersion: 1,
+        honeypot: hpInput ? hpInput.value : ''
+      };
+
+      fetch('/apps/protocols?action=subscribe&token=' + encodeURIComponent(token), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
+        body: JSON.stringify(body)
+      })
+      .then(function(res) {
+        return res.json().catch(function() { return {}; }).then(function(data) {
+          if (!res.ok) {
+            throw new Error((data && data.error) || 'Unable to subscribe. Please try again.');
+          }
+          return data;
+        });
+      })
+      .then(function(data) {
+        submitBtn.textContent = 'Subscribed!';
+        feedbackEl.textContent = (data && data.message) || 'Thank you for staying in touch!';
+        feedbackEl.className = 'protocol-optin-feedback protocol-optin-success';
+        feedbackEl.style.display = 'block';
+        optinForm.reset();
+        setTimeout(function() {
+          submitBtn.disabled = false;
+          submitBtn.textContent = origBtnText;
+        }, 3000);
+      })
+      .catch(function(err) {
+        submitBtn.disabled = false;
+        submitBtn.textContent = origBtnText;
+        feedbackEl.textContent = (err && err.message) || 'Unable to subscribe. Please try again.';
+        feedbackEl.className = 'protocol-optin-feedback protocol-optin-error';
+        feedbackEl.style.display = 'block';
+      });
     });
   }
 })();

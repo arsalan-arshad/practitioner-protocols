@@ -1224,6 +1224,62 @@ describe('Practitioner Portal (app/lib/protocols/portal.js)', () => {
         });
         assertScriptsParse(requestAccessHtml, 'request-access state');
       });
+
+      it('renders My Contacts section with contact list, two-step inline delete, and export CSV link', () => {
+        const mockContacts = [
+          {
+            id: 'c_001',
+            email: 'patient1@example.com',
+            firstName: 'Sarah',
+            consentedAt: new Date('2026-11-05T14:30:00Z')
+          },
+          {
+            id: 'c_002',
+            email: 'patient2@example.com',
+            firstName: null,
+            consentedAt: '2026-11-04T10:15:00Z'
+          }
+        ];
+
+        const html = renderPortalLiquid({
+          isLoggedIn: true,
+          isApproved: true,
+          hasProfile: true,
+          practiceName: 'Downtown Wellness',
+          activeProtocols: [],
+          contacts: mockContacts
+        });
+
+        // Script parsing verification
+        assertScriptsParse(html, 'portal with contacts');
+
+        // Check contacts section rendering
+        assert.ok(html.includes('My Contacts (2)'), 'Must render contacts heading with count');
+        assert.ok(html.includes('/apps/protocols?action=contacts_csv'), 'Must render CSV export link');
+        assert.ok(html.includes('patient1@example.com'), 'Must render first contact email');
+        assert.ok(html.includes('Sarah'), 'Must render first contact name');
+        assert.ok(html.includes('patient2@example.com'), 'Must render second contact email');
+        assert.ok(html.includes('portal-delete-contact-btn'), 'Must render contact delete button');
+
+        // Verify zero window.confirm or alert calls
+        assert.ok(!html.includes('window.confirm'), 'Must not call window.confirm');
+        assert.ok(!html.includes('window.alert'), 'Must not call window.alert');
+        assert.ok(!html.includes('confirm('), 'Must not call confirm()');
+        assert.ok(!html.includes('alert('), 'Must not call alert()');
+      });
+
+      it('renders friendly empty state when practitioner has no contacts', () => {
+        const html = renderPortalLiquid({
+          isLoggedIn: true,
+          isApproved: true,
+          hasProfile: true,
+          activeProtocols: [],
+          contacts: []
+        });
+
+        assert.ok(html.includes('My Contacts (0)'), 'Must render zero count');
+        assert.ok(html.includes('No contacts yet'), 'Must render empty state message');
+      });
     });
   });
 });

@@ -143,3 +143,59 @@ model Session {
 
   @@index([shop])
 }
+
+/// Explicit opt-in contact for shoppers wishing to stay in touch with a practitioner / practice.
+/// Relaxed zero-PII rule strictly for explicit consent; stores NO protocolId, NO order ID, NO product data.
+model ShopperContact {
+  id             String   @id @default(cuid())
+  shop           String
+  ownerId        String   // Practitioner/practice GID: gid://shopify/Customer/... or gid://shopify/Company/...
+  email          String   // Lowercased, max 254
+  firstName      String?  // Optional, max 60
+  consentText    String   // Exact wording shown to the shopper
+  consentVersion Int      @default(1)
+  consentedAt    DateTime
+  source         String   @default("protocol_page")
+  createdAt      DateTime @default(now())
+
+  @@unique([shop, ownerId, email])
+  @@index([shop, email])
+  @@index([shop, ownerId])
+}
+
+/// Merchant feedback and custom feature requests submitted from admin Settings tab.
+model MerchantFeedback {
+  id         String   @id @default(cuid())
+  shop       String
+  shopName   String?
+  ownerName  String?
+  replyEmail String?
+  planName   String?
+  country    String?
+  message    String
+  rating     Int?     // 1-5 rating (for kind='feedback')
+  kind       String   @default("feedback") // 'feedback' | 'custom_request'
+  createdAt  DateTime @default(now())
+
+  @@index([shop])
+  @@index([kind])
+}
+
+/// Merchant store profile synchronized via Admin GraphQL shop query on OAuth and admin load.
+model ShopProfile {
+  id               String    @id @default(cuid())
+  shop             String    @unique
+  shopName         String?
+  ownerName        String?
+  email            String?
+  planName         String?
+  country          String?
+  installedAt      DateTime  @default(now())
+  uninstalledAt    DateTime?
+  marketingOptIn   Boolean   @default(false)
+  marketingOptInAt DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @default(now()) @updatedAt
+
+  @@index([shop])
+}

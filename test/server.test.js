@@ -745,7 +745,7 @@ describe('Server & Configuration Hardening (server.js, shopify.app.toml, README.
             ledgerRows.push({ id: params[0] });
             return { rows: [] };
           }
-          if (typeof sql === 'string' && (sql.includes('CREATE TABLE "Protocol"') || sql.includes('ProcessedWebhook') || sql.includes('allowSelfEnrol') || sql.includes('productHandle'))) {
+          if (typeof sql === 'string' && (sql.includes('CREATE TABLE "Protocol"') || sql.includes('ProcessedWebhook') || sql.includes('allowSelfEnrol') || sql.includes('productHandle') || sql.includes('ShopperContact') || sql.includes('ShopProfile'))) {
             executedMigrations.push(sql);
           }
           return { rows: [] };
@@ -792,6 +792,11 @@ describe('Server & Configuration Hardening (server.js, shopify.app.toml, README.
     it('verifies allowSelfEnrol migration is registered in MIGRATION_FILES and applies idempotently', () => {
       const found = MIGRATION_FILES.some(f => f.includes('20261103_add_allow_self_enrol'));
       assert.ok(found, '20261103_add_allow_self_enrol migration must be registered in MIGRATION_FILES');
+    });
+
+    it('verifies 20261105_add_shopper_contact_and_feedback migration is registered in MIGRATION_FILES', () => {
+      const found = MIGRATION_FILES.some(f => f.includes('20261105_add_shopper_contact_and_feedback'));
+      assert.ok(found, '20261105_add_shopper_contact_and_feedback migration must be registered in MIGRATION_FILES');
     });
   });
 

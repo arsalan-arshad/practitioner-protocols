@@ -188,18 +188,40 @@ export async function handleCustomersDataRequest(db, payload) {
   const protocolsRes = await db.query(protocolsSql, [shop, customerGid, numericId]);
   const protocols = protocolsRes.rows || [];
 
+  // 3. Query opted-in shopper contacts matching customer email if provided (M11)
+  const customerEmail = (payload.customer?.email || payload.email || '').trim().toLowerCase();
+  let shopperContacts = [];
+  if (customerEmail) {
+    try {
+      const contactsSql = `
+        SELECT "id", "shop", "ownerId", "email", "firstName",
+               "consentText", "consentVersion", "consentedAt", "source", "createdAt"
+        FROM "ShopperContact"
+        WHERE "shop" = $1 AND LOWER("email") = $2
+      `;
+      const contactsRes = await db.query(contactsSql, [shop, customerEmail]);
+      shopperContacts = contactsRes.rows || [];
+    } catch {
+      // Non-fatal if table not yet migrated
+    }
+  }
+
   return {
     success: true,
     shop,
     customer: {
       id: numericId,
-      gid: customerGid
+      gid: customerGid,
+      email: customerEmail || undefined
     },
     practitionerProfile,
     protocols,
+    shopperContacts,
     clientPii: null,
-    clientDataStored: false,
-    message: 'Zero client or patient PII is accepted or stored by Practitioner Protocols.'
+    clientDataStored: shopperContacts.length > 0,
+    message: shopperContacts.length > 0
+      ? 'Shopper opt-in contact data stored under explicit consent.'
+      : 'Zero client or patient PII is accepted or stored by Practitioner Protocols.'
   };
 }
 
@@ -256,6 +278,19 @@ export async function handleCustomersRedact(db, payload, options = {}) {
 
   const isCompanyMode = mode === 'company';
 
+  // Redact matching ShopperContact records by lowercased email if present (M11)
+  const customerEmail = (payload.customer?.email || payload.email || options.email || '').trim().toLowerCase();
+  let contactsDeleted = 0;
+  if (customerEmail) {
+    const redactContactsSql = `
+      DELETE FROM "ShopperContact"
+      WHERE "shop" = $1 AND LOWER("email") = $2
+      RETURNING "id"
+    `;
+    const redactRes = await db.query(redactContactsSql, [shop, customerEmail]);
+    contactsDeleted = redactRes.rowCount ?? redactRes.rows?.length ?? 0;
+  }
+
   if (isCompanyMode) {
     // --- COMPANY MODE ---
     // Preserves company protocols, clears creator/updater reference
@@ -310,6 +345,7 @@ export async function handleCustomersRedact(db, payload, options = {}) {
       protocolsDeleted: 0,
       protocolsArchived: 0,
       referencesCleared,
+      contactsDeleted,
       profileDeleted: (deleteProfileRes.rowCount ?? deleteProfileRes.rows?.length ?? 0) > 0
     };
   } else {
@@ -385,7 +421,8 @@ export async function handleCustomersRedact(db, payload, options = {}) {
       mode: 'tag',
       profileDeleted,
       protocolsDeleted,
-      protocolsArchived
+      protocolsArchived,
+      contactsDeleted
     };
   }
 }
@@ -466,6 +503,27 @@ export async function handleShopRedact(db, payload) {
     RETURNING "id"
   `, [shop]);
 
+  // 8. Delete ShopperContact records (M11)
+  const contactsRes = await db.query(`
+    DELETE FROM "ShopperContact"
+    WHERE "shop" = $1
+    RETURNING "id"
+  `, [shop]);
+
+  // 9. Delete MerchantFeedback records (M11)
+  const feedbackRes = await db.query(`
+    DELETE FROM "MerchantFeedback"
+    WHERE "shop" = $1
+    RETURNING "id"
+  `, [shop]);
+
+  // 10. Delete ShopProfile (M11)
+  const shopProfileRes = await db.query(`
+    DELETE FROM "ShopProfile"
+    WHERE "shop" = $1
+    RETURNING "id"
+  `, [shop]);
+
   return {
     success: true,
     shop,
@@ -476,7 +534,10 @@ export async function handleShopRedact(db, payload) {
       profiles: profilesRes.rowCount ?? profilesRes.rows?.length ?? 0,
       settings: settingsRes.rowCount ?? settingsRes.rows?.length ?? 0,
       sessions: sessionsRes.rowCount ?? sessionsRes.rows?.length ?? 0,
-      webhooks: webhooksRes.rowCount ?? webhooksRes.rows?.length ?? 0
+      webhooks: webhooksRes.rowCount ?? webhooksRes.rows?.length ?? 0,
+      contacts: contactsRes.rowCount ?? contactsRes.rows?.length ?? 0,
+      feedback: feedbackRes.rowCount ?? feedbackRes.rows?.length ?? 0,
+      shopProfile: shopProfileRes.rowCount ?? shopProfileRes.rows?.length ?? 0
     }
   };
 }
@@ -484,6 +545,14 @@ export async function handleShopRedact(db, payload) {
 /**
  * Handles app/uninstalled webhook (SPEC §10).
  * Revokes/cleans up active shop sessions and records uninstallation timestamp.
+ *
+ * Retention policy:
+ * - Session tokens are revoked immediately to terminate API access.
+ * - Under Shopify's data protection rules, protocols, contacts, and settings
+ *   are retained during the 48-hour uninstallation grace window in case the
+ *   merchant reinstalls.
+ * - After 48 hours, Shopify issues a mandatory shop/redact webhook, at which
+ *   point all protocols, shopper contacts, and settings are permanently wiped.
  *
  * @param {any} db - Database client with query(sql, params) interface
  * @param {any} payload - Shopify app/uninstalled webhook payload
@@ -526,6 +595,16 @@ export async function handleAppUninstalled(db, payload) {
     settingUpdated = (settingRes.rowCount ?? settingRes.rows?.length ?? 0) > 0;
   } catch {
     // Non-fatal if setting table or row does not exist
+  }
+
+  // Record uninstallation timestamp on ShopProfile (M11)
+  try {
+    await db.query(
+      'UPDATE "ShopProfile" SET "uninstalledAt" = NOW(), "updatedAt" = NOW() WHERE "shop" = $1 RETURNING "shop"',
+      [shop]
+    );
+  } catch {
+    // Non-fatal if ShopProfile table or row does not exist
   }
 
   return {

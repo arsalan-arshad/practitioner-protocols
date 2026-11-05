@@ -24,6 +24,14 @@ import {
   handleAdminUpdateSettingsRequest,
   handleAdminEmergencyDisableAllRequest,
   handleAdminAttributionCsvRequest,
+  handleAdminContactsCsvRequest,
+  handleAdminDeleteContactRequest,
+  handleAdminDeletePracticeContactsRequest,
+  handleAdminCustomFeatureRequest,
+  handleAdminFeedbackRequest,
+  handleAdminMarketingOptInRequest,
+  setDefaultCustomRequestRateLimiter,
+  getDefaultCustomRequestRateLimiter,
   createAdminSessionToken,
   validateAppProxyCsrf,
   handleEnrolRequest,
@@ -74,7 +82,9 @@ describe('HTTP Routes & Request Handlers (app/lib/protocols/routes.js)', () => {
       profiles: (initialState.profiles || []).map(pr => ({ ...pr })),
       settings: (initialState.settings || []).map(s => ({ ...s })),
       stats: (initialState.stats || []).map(st => ({ ...st })),
-      sessions: (initialState.sessions || []).map(ss => ({ ...ss }))
+      sessions: (initialState.sessions || []).map(ss => ({ ...ss })),
+      contacts: (initialState.contacts || []).map(c => ({ ...c })),
+      feedback: (initialState.feedback || []).map(f => ({ ...f }))
     };
 
     return {
@@ -88,7 +98,7 @@ describe('HTTP Routes & Request Handlers (app/lib/protocols/routes.js)', () => {
         }
 
         // 1. SELECT p.* ... FROM "Protocol" p WHERE p.shop = $1 AND p.token = $2 (getProtocolByToken)
-        if (sql.includes('FROM "Protocol" p') && sql.includes('p.token = $2')) {
+        if (sql.includes('FROM "Protocol"') && (sql.includes('token = $2') || sql.includes('"token" = $2'))) {
           const shop = params[0];
           const token = params[1];
           const proto = state.protocols.find(p => p.shop === shop && p.token === token);
@@ -390,6 +400,116 @@ describe('HTTP Routes & Request Handlers (app/lib/protocols/routes.js)', () => {
         }
         if (sql.includes('INSERT INTO "ProtocolOrderStat"')) {
           return { rowCount: 1, rows: [{ id: 'stat_1' }] };
+        }
+
+        // 14. M11 ShopperContact queries
+        if (sql.includes('INSERT INTO "ShopperContact"')) {
+          const [shop, ownerId, email, firstName, consentText, consentVersion, consentedAt] = params;
+          const existingIdx = state.contacts.findIndex(c =>
+            c.shop === shop && c.ownerId === ownerId && c.email.toLowerCase() === email.toLowerCase()
+          );
+          if (existingIdx >= 0) {
+            state.contacts[existingIdx] = {
+              ...state.contacts[existingIdx],
+              firstName: firstName || state.contacts[existingIdx].firstName,
+              consentText,
+              consentVersion,
+              consentedAt
+            };
+            return { rowCount: 1, rows: [{ id: state.contacts[existingIdx].id }] };
+          }
+          const newC = {
+            id: `c_${state.contacts.length + 1}`,
+            shop,
+            ownerId,
+            email,
+            firstName,
+            consentText,
+            consentVersion,
+            consentedAt,
+            source: 'protocol_page',
+            createdAt: new Date()
+          };
+          state.contacts.push(newC);
+          return { rowCount: 1, rows: [{ id: newC.id }] };
+        }
+
+        if (sql.includes('SELECT') && sql.includes('FROM "ShopperContact"')) {
+          // Merchant query (with LEFT JOIN PractitionerProfile)
+          if (sql.includes('LEFT JOIN "PractitionerProfile"')) {
+            const shop = params[0];
+            const matching = state.contacts.filter(c => c.shop === shop);
+            const rows = matching.map(c => {
+              const prof = state.profiles.find(p => p.shop === shop && p.ownerGid === c.ownerId);
+              return { ...c, practiceName: prof?.practiceName || 'Individual Practitioner' };
+            });
+            return { rows };
+          }
+          // Practitioner query (WHERE "shop" = $1 AND "ownerId" = $2)
+          const shop = params[0];
+          const ownerId = params[1];
+          const rows = state.contacts.filter(c => c.shop === shop && c.ownerId === ownerId);
+          return { rows };
+        }
+
+        if (sql.includes('DELETE FROM "ShopperContact"')) {
+          const shop = params[0];
+          if (sql.includes('"ownerId" = $2') && sql.includes('"id" = $3')) {
+            // Practitioner delete
+            const ownerId = params[1];
+            const id = params[2];
+            const idx = state.contacts.findIndex(c => c.shop === shop && c.ownerId === ownerId && c.id === id);
+            if (idx >= 0) {
+              state.contacts.splice(idx, 1);
+              return { rowCount: 1, rows: [{ id }] };
+            }
+            return { rowCount: 0, rows: [] };
+          }
+          if (sql.includes('"ownerId" = $2')) {
+            // Delete practice contacts
+            const ownerId = params[1];
+            const before = state.contacts.length;
+            state.contacts = state.contacts.filter(c => !(c.shop === shop && c.ownerId === ownerId));
+            const deletedCount = before - state.contacts.length;
+            return { rowCount: deletedCount, rows: [] };
+          }
+          if (sql.includes('"id" = $2')) {
+            // Single admin delete
+            const id = params[1];
+            const idx = state.contacts.findIndex(c => c.shop === shop && c.id === id);
+            if (idx >= 0) {
+              state.contacts.splice(idx, 1);
+              return { rowCount: 1, rows: [{ id }] };
+            }
+            return { rowCount: 0, rows: [] };
+          }
+          return { rowCount: 1, rows: [{ id: 'deleted' }] };
+        }
+
+        // 15. M11 MerchantFeedback queries
+        if (sql.includes('INSERT INTO "MerchantFeedback"')) {
+          const [shop, shopName, ownerName, replyEmail, planName, country, message, kind] = params;
+          const newF = {
+            id: `fb_${state.feedback.length + 1}`,
+            shop,
+            shopName,
+            ownerName,
+            replyEmail,
+            planName,
+            country,
+            message,
+            kind,
+            createdAt: new Date()
+          };
+          state.feedback.push(newF);
+          return { rowCount: 1, rows: [{ id: newF.id }] };
+        }
+
+        if (sql.includes('SELECT') && sql.includes('FROM "MerchantFeedback"')) {
+          const shop = params[0];
+          const kind = params[1];
+          const rows = state.feedback.filter(f => f.shop === shop && (!kind || f.kind === kind));
+          return { rows };
         }
 
         return { rows: [] };
@@ -3223,6 +3343,500 @@ describe('HTTP Routes & Request Handlers (app/lib/protocols/routes.js)', () => {
           const restoredHtml = await restoredClientRes.text();
           assert.ok(restoredHtml.includes('Hydration Protocol'));
           assert.ok(restoredHtml.includes('Add all to cart'));
+        });
+      });
+
+      describe('M11 Shopper Opt-In & Contact Management Routes', () => {
+        const optinProto = {
+          id: 'proto_optin_1',
+          shop: testShop,
+          token: 'tok_optin_123',
+          name: 'Gut Health Protocol',
+          ownerId: 'gid://shopify/Customer/' + testCustomerId,
+          createdBy: 'gid://shopify/Customer/' + testCustomerId,
+          status: 'active'
+        };
+
+        const inactiveOptinProto = {
+          id: 'proto_optin_inactive',
+          shop: testShop,
+          token: 'tok_optin_inactive',
+          name: 'Inactive Protocol',
+          ownerId: 'gid://shopify/Customer/' + testCustomerId,
+          createdBy: 'gid://shopify/Customer/' + testCustomerId,
+          status: 'archived'
+        };
+
+        let optinDb;
+
+        beforeEach(() => {
+          optinDb = createMockDb({
+            protocols: [optinProto, inactiveOptinProto],
+            profiles: [
+              {
+                id: 'prof_optin',
+                shop: testShop,
+                ownerGid: 'gid://shopify/Customer/' + testCustomerId,
+                practiceName: 'Elite Naturopathic Clinic',
+                isApproved: true
+              }
+            ],
+            contacts: [
+              {
+                id: 'contact_existing_1',
+                shop: testShop,
+                ownerId: 'gid://shopify/Customer/' + testCustomerId,
+                email: 'existing@shopper.com',
+                firstName: 'Eve',
+                consentText: 'I consent',
+                consentVersion: 1,
+                consentedAt: new Date('2026-11-04T10:00:00Z'),
+                source: 'protocol_page',
+                createdAt: new Date('2026-11-04T10:00:00Z')
+              },
+              {
+                id: 'contact_other_practitioner',
+                shop: testShop,
+                ownerId: 'gid://shopify/Customer/999999',
+                email: 'other@shopper.com',
+                firstName: 'Bob',
+                consentText: 'I consent',
+                consentVersion: 1,
+                consentedAt: new Date('2026-11-04T10:00:00Z'),
+                source: 'protocol_page',
+                createdAt: new Date('2026-11-04T10:00:00Z')
+              }
+            ]
+          });
+        });
+
+        it('Guest subscribe: rejects unticked consent checkbox with 400', async () => {
+          const url = makeSignedProxyUrl({ action: 'subscribe', token: optinProto.token });
+          const req = new Request(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              email: 'shopper@example.com',
+              consent: false,
+              consentText: 'I agree'
+            })
+          });
+
+          const res = await handleAppProxyRequest(optinDb, req, { apiSecret });
+          assert.equal(res.status, 400);
+          const data = await res.json();
+          assert.ok(data.error.includes('Explicit consent is required'));
+        });
+
+        it('Guest subscribe: silent discard when honeypot is filled (returns 200 without DB write)', async () => {
+          const initialContactsCount = optinDb.state.contacts.length;
+          const url = makeSignedProxyUrl({ action: 'subscribe', token: optinProto.token });
+          const req = new Request(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              email: 'bot@spam.com',
+              consent: true,
+              consentText: 'I agree',
+              honeypot: 'bot filled this'
+            })
+          });
+
+          const res = await handleAppProxyRequest(optinDb, req, { apiSecret });
+          assert.equal(res.status, 200);
+          const data = await res.json();
+          assert.equal(data.success, true);
+          assert.equal(optinDb.state.contacts.length, initialContactsCount, 'Honeypot must not write to DB');
+        });
+
+        it('Guest subscribe: CSRF rejects missing or invalid Content-Type with 415', async () => {
+          const url = makeSignedProxyUrl({ action: 'subscribe', token: optinProto.token });
+          const req = new Request(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'text/plain' },
+            body: 'plain text body'
+          });
+
+          const res = await handleAppProxyRequest(optinDb, req, { apiSecret });
+          assert.equal(res.status, 415);
+        });
+
+        it('Guest subscribe: CSRF rejects cross-site Sec-Fetch-Site with 403', async () => {
+          const url = makeSignedProxyUrl({ action: 'subscribe', token: optinProto.token });
+          const req = new Request(url, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Sec-Fetch-Site': 'cross-site'
+            },
+            body: JSON.stringify({
+              email: 'shopper@example.com',
+              consent: true,
+              consentText: 'I agree'
+            })
+          });
+
+          const res = await handleAppProxyRequest(optinDb, req, { apiSecret });
+          assert.equal(res.status, 403);
+        });
+
+        it('Guest subscribe: returns 404 when protocol is non-existent or inactive', async () => {
+          const url = makeSignedProxyUrl({ action: 'subscribe', token: 'tok_optin_inactive' });
+          const req = new Request(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              email: 'shopper@example.com',
+              consent: true,
+              consentText: 'I agree'
+            })
+          });
+
+          const res = await handleAppProxyRequest(optinDb, req, { apiSecret });
+          assert.equal(res.status, 404);
+        });
+
+        it('Guest subscribe: successful opt-in saves contact with zero PII leakage in errors', async () => {
+          const url = makeSignedProxyUrl({ action: 'subscribe', token: optinProto.token });
+          const req = new Request(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              email: 'New.Shopper@Clinic.org',
+              firstName: 'Alice',
+              consent: true,
+              consentText: 'I agree to stay in touch with Elite Naturopathic Clinic'
+            })
+          });
+
+          const res = await handleAppProxyRequest(optinDb, req, { apiSecret });
+          assert.equal(res.status, 200);
+          const data = await res.json();
+          assert.equal(data.success, true);
+
+          const saved = optinDb.state.contacts.find(c => c.email === 'new.shopper@clinic.org');
+          assert.ok(saved);
+          assert.equal(saved.firstName, 'Alice');
+          assert.equal(saved.ownerId, 'gid://shopify/Customer/' + testCustomerId);
+
+          // Test invalid email error message does not echo the submitted email
+          const badEmailReq = new Request(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              email: 'not-an-email-value',
+              consent: true,
+              consentText: 'I agree'
+            })
+          });
+          const badRes = await handleAppProxyRequest(optinDb, badEmailReq, { apiSecret });
+          assert.equal(badRes.status, 400);
+          const badData = await badRes.json();
+          assert.ok(!badData.error.includes('not-an-email-value'), 'Error message must not leak input email');
+        });
+
+        it('Guest subscribe: dedicated subscribe rate limiter enforces 5 per hour per client key (returns 429)', async () => {
+          const testLimiter = createRateLimiter({ windowMs: 3600000, maxRequests: 5 });
+          const url = makeSignedProxyUrl({ action: 'subscribe', token: optinProto.token });
+
+          for (let i = 0; i < 5; i++) {
+            const req = new Request(url, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'X-Forwarded-For': '198.51.100.42'
+              },
+              body: JSON.stringify({
+                email: `shopper${i}@example.com`,
+                consent: true
+              })
+            });
+            const res = await handleAppProxyRequest(optinDb, req, {
+              apiSecret,
+              subscribeRateLimiter: testLimiter
+            });
+            assert.equal(res.status, 200, `Request ${i + 1} should succeed`);
+          }
+
+          // 6th request from the same IP exceeds limit
+          const limitedReq = new Request(url, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Forwarded-For': '198.51.100.42'
+            },
+            body: JSON.stringify({
+              email: 'shopper6@example.com',
+              consent: true
+            })
+          });
+          const limitedRes = await handleAppProxyRequest(optinDb, limitedReq, {
+            apiSecret,
+            subscribeRateLimiter: testLimiter
+          });
+          assert.equal(limitedRes.status, 429);
+          const data = await limitedRes.json();
+          assert.equal(data.error, 'Too many requests. Please try again later.');
+          assert.ok(limitedRes.headers.get('Retry-After'));
+        });
+
+        it('Practitioner contacts: POST action=delete_contact deletes own contact and blocks cross-owner deletion', async () => {
+          // 1. Attempt to delete other practitioner's contact (contact_other_practitioner) -> fails / returns success: false
+          const crossDeleteUrl = makeSignedProxyUrl({
+            action: 'delete_contact',
+            logged_in_customer_id: testCustomerId
+          });
+          const crossReq = new Request(crossDeleteUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ contactId: 'contact_other_practitioner' })
+          });
+
+          const crossRes = await handleAppProxyRequest(optinDb, crossReq, { apiSecret });
+          assert.equal(crossRes.status, 200);
+          const crossData = await crossRes.json();
+          assert.equal(crossData.success, false, 'Cannot delete contact owned by another practitioner');
+          assert.ok(optinDb.state.contacts.some(c => c.id === 'contact_other_practitioner'));
+
+          // 2. Delete own contact (contact_existing_1) -> succeeds
+          const ownReq = new Request(crossDeleteUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ contactId: 'contact_existing_1' })
+          });
+
+          const ownRes = await handleAppProxyRequest(optinDb, ownReq, { apiSecret });
+          assert.equal(ownRes.status, 200);
+          const ownData = await ownRes.json();
+          assert.equal(ownData.success, true);
+          assert.ok(!optinDb.state.contacts.some(c => c.id === 'contact_existing_1'));
+        });
+
+        it('Practitioner contacts: GET action=contacts_csv exports RFC 4180 CSV of own contacts only', async () => {
+          // 1. Unauthorized when logged_in_customer_id is missing
+          const unauthUrl = makeSignedProxyUrl({ action: 'contacts_csv' });
+          const unauthRes = await handleAppProxyRequest(optinDb, new Request(unauthUrl), { apiSecret });
+          assert.equal(unauthRes.status, 401);
+
+          // 2. Authorized returns text/csv with attachment header
+          const authUrl = makeSignedProxyUrl({ action: 'contacts_csv', logged_in_customer_id: testCustomerId });
+          const authRes = await handleAppProxyRequest(optinDb, new Request(authUrl), { apiSecret });
+          assert.equal(authRes.status, 200);
+          assert.equal(authRes.headers.get('Content-Type'), 'text/csv; charset=utf-8');
+          assert.ok(authRes.headers.get('Content-Disposition').includes('attachment; filename="my-contacts.csv"'));
+
+          const csvBody = await authRes.text();
+          assert.ok(csvBody.includes('Email,First Name,Consented At'));
+          assert.ok(csvBody.includes('existing@shopper.com'));
+          assert.ok(!csvBody.includes('other@shopper.com'), 'Must not include contacts belonging to other practitioners');
+        });
+
+        it('Merchant Admin Contacts: GET /api/admin/contacts.csv exports all shop contacts', async () => {
+          const token = createAdminSessionToken({ shop: testShop }, apiSecret);
+          const req = new Request(`https://${testShop}/api/admin/contacts.csv`, {
+            headers: { Authorization: `Bearer ${token}` }
+          });
+
+          const res = await handleAdminContactsCsvRequest(optinDb, req, { apiSecret });
+          assert.equal(res.status, 200);
+          assert.equal(res.headers.get('Content-Type'), 'text/csv; charset=utf-8');
+          assert.ok(res.headers.get('Content-Disposition').includes(`attachment; filename="contacts-${testShop}.csv"`));
+
+          const csvBody = await res.text();
+          assert.ok(csvBody.includes('Shop,Practice Name,Owner GID,Email,First Name,Consent Text,Consent Version,Consented At,Created At'));
+          assert.ok(csvBody.includes('existing@shopper.com'));
+          assert.ok(csvBody.includes('other@shopper.com'));
+        });
+
+        it('Merchant Admin Contacts: POST /api/admin/contacts/delete deletes single contact with admin authority', async () => {
+          const token = createAdminSessionToken({ shop: testShop }, apiSecret);
+          const req = new Request(`https://${testShop}/api/admin/contacts/delete`, {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${token}`,
+              'Content-Type': 'application/x-www-form-urlencoded'
+            },
+            body: 'contactId=contact_existing_1'
+          });
+
+          const res = await handleAdminDeleteContactRequest(optinDb, req, { apiSecret });
+          assert.equal(res.status, 303);
+          assert.ok(res.headers.get('Location').includes('tab=contacts'));
+          assert.ok(!optinDb.state.contacts.some(c => c.id === 'contact_existing_1'));
+        });
+
+        it('Merchant Admin Contacts: POST /api/admin/contacts/delete-practice deletes all contacts for a practice', async () => {
+          const token = createAdminSessionToken({ shop: testShop }, apiSecret);
+          const req = new Request(`https://${testShop}/api/admin/contacts/delete-practice`, {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${token}`,
+              'Content-Type': 'application/x-www-form-urlencoded'
+            },
+            body: `ownerId=gid://shopify/Customer/${testCustomerId}`
+          });
+
+          const res = await handleAdminDeletePracticeContactsRequest(optinDb, req, { apiSecret });
+          assert.equal(res.status, 303);
+          assert.ok(res.headers.get('Location').includes('tab=contacts'));
+          assert.ok(!optinDb.state.contacts.some(c => c.ownerId === `gid://shopify/Customer/${testCustomerId}`));
+          assert.ok(optinDb.state.contacts.some(c => c.id === 'contact_other_practitioner'), 'Other practice contacts preserved');
+        });
+
+        it('Merchant Custom Request: POST /api/admin/feedback/custom-request enforces validation, rate limit (3/hr), and saves feedback', async () => {
+          const token = createAdminSessionToken({ shop: testShop }, apiSecret);
+          const customLimiter = createRateLimiter({ windowMs: 3600000, maxRequests: 3 });
+
+          // 1. Missing message returns 400
+          const emptyReq = new Request(`https://${testShop}/api/admin/feedback/custom-request`, {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${token}`,
+              'Content-Type': 'application/json',
+              Accept: 'application/json'
+            },
+            body: JSON.stringify({ message: '' })
+          });
+          const emptyRes = await handleAdminCustomFeatureRequest(optinDb, emptyReq, { apiSecret, rateLimiter: customLimiter });
+          assert.equal(emptyRes.status, 400);
+
+          // 2. Valid request saves feedback (JSON mode returns 200, form mode returns 303)
+          const validJsonReq = (msg) => new Request(`https://${testShop}/api/admin/feedback/custom-request`, {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${token}`,
+              'Content-Type': 'application/json',
+              Accept: 'application/json'
+            },
+            body: JSON.stringify({ message: msg, replyEmail: 'merchant@example.com' })
+          });
+
+          // Custom limiter already consumed 1 on emptyReq, so next 2 are allowed (total 3)
+          const res1 = await handleAdminCustomFeatureRequest(optinDb, validJsonReq('Request 1'), { apiSecret, rateLimiter: customLimiter });
+          assert.equal(res1.status, 200);
+          const res2 = await handleAdminCustomFeatureRequest(optinDb, validJsonReq('Request 2'), { apiSecret, rateLimiter: customLimiter });
+          assert.equal(res2.status, 200);
+
+          // Form mode redirect check with separate shop to verify cross-shop isolation
+          const otherShop = 'other-merchant.myshopify.com';
+          const otherToken = createAdminSessionToken({ shop: otherShop }, apiSecret);
+          const formReq = new Request(`https://${otherShop}/api/admin/feedback/custom-request`, {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${otherToken}`,
+              'Content-Type': 'application/x-www-form-urlencoded'
+            },
+            body: 'message=Need+CSV+export&replyEmail=merchant%40example.com'
+          });
+          const formRes = await handleAdminCustomFeatureRequest(optinDb, formReq, { apiSecret });
+          assert.equal(formRes.status, 303);
+          assert.ok(formRes.headers.get('Location').includes('request_sent=1'));
+
+          // 3. 4th request in same hour on customLimiter is rate-limited (HTTP 429)
+          const res4 = await handleAdminCustomFeatureRequest(optinDb, validJsonReq('Request 4'), { apiSecret, rateLimiter: customLimiter });
+          assert.equal(res4.status, 429);
+          const rateData = await res4.json();
+          assert.ok(rateData.error.includes('Too many requests'));
+          assert.ok(res4.headers.get('Retry-After'));
+        });
+
+        it('Merchant Feedback: POST /api/admin/feedback saves rating, message, and marketing opt-in', async () => {
+          const token = createAdminSessionToken({ shop: testShop }, apiSecret);
+          const feedbackDb = {
+            feedback: [],
+            profiles: [{ shop: testShop, marketingOptIn: false }],
+            async query(sql, params) {
+              if (sql.includes('INSERT INTO "MerchantFeedback"')) {
+                const [shop, shopName, ownerName, replyEmail, planName, country, message, rating] = params;
+                const row = { id: 'fb_' + Date.now(), shop, shopName, ownerName, replyEmail, planName, country, message, rating };
+                feedbackDb.feedback.push(row);
+                return { rowCount: 1, rows: [{ id: row.id }] };
+              }
+              if (sql.includes('UPDATE "ShopProfile"')) {
+                const [shop, optIn] = params;
+                const p = feedbackDb.profiles.find(x => x.shop === shop);
+                if (p) p.marketingOptIn = optIn;
+                return { rows: [p] };
+              }
+              if (sql.includes('SELECT * FROM "ShopProfile"')) {
+                const [shop] = params;
+                return { rows: feedbackDb.profiles.filter(x => x.shop === shop) };
+              }
+              return { rows: [] };
+            }
+          };
+
+          // Valid submission with rating 5, message, and marketingOptIn: true
+          const req = new Request(`https://${testShop}/api/admin/feedback`, {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${token}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              rating: 5,
+              message: 'Great app experience!',
+              marketingOptIn: true
+            })
+          });
+
+          const res = await handleAdminFeedbackRequest(feedbackDb, req, { apiSecret });
+          assert.equal(res.status, 200);
+          const data = await res.json();
+          assert.equal(data.success, true);
+          assert.equal(feedbackDb.feedback.length, 1);
+          assert.equal(feedbackDb.feedback[0].rating, 5);
+          assert.equal(feedbackDb.feedback[0].message, 'Great app experience!');
+          assert.equal(feedbackDb.profiles[0].marketingOptIn, true);
+
+          // Invalid rating returns 400
+          const badRatingReq = new Request(`https://${testShop}/api/admin/feedback`, {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${token}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ rating: 10 })
+          });
+          const badRes = await handleAdminFeedbackRequest(feedbackDb, badRatingReq, { apiSecret });
+          assert.equal(badRes.status, 400);
+
+          // Dedicated contact-optin endpoint
+          const optinReq = new Request(`https://${testShop}/api/admin/feedback/contact-optin`, {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${token}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ marketingOptIn: false })
+          });
+          const optinRes = await handleAdminMarketingOptInRequest(feedbackDb, optinReq, { apiSecret });
+          assert.equal(optinRes.status, 200);
+          assert.equal(feedbackDb.profiles[0].marketingOptIn, false);
+
+          // Cross-shop denial: token for otherShop attempting testShop returns 403
+          const otherShopToken = createAdminSessionToken({ shop: 'intruder.myshopify.com' }, apiSecret);
+          const crossReq = new Request(`https://${testShop}/api/admin/feedback`, {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${otherShopToken}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ rating: 5 })
+          });
+          const crossRes = await handleAdminFeedbackRequest(feedbackDb, crossReq, { apiSecret, expectedShop: testShop });
+          assert.equal(crossRes.status, 403);
+
+          // Direct API missing authorization header returns 401
+          const unauthReq = new Request(`https://${testShop}/api/admin/feedback`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ rating: 5 })
+          });
+          const unauthRes = await handleAdminFeedbackRequest(feedbackDb, unauthReq, { apiSecret, expectedShop: testShop });
+          assert.equal(unauthRes.status, 401);
         });
       });
     });

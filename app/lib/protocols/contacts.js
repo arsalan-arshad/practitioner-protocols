@@ -605,12 +605,16 @@ export async function syncShopProfile(db, { shop, accessToken = null, fetchFn = 
     let token = accessToken;
     if (!token) {
       const sessionRes = await db.query(
-        'SELECT "accessToken" FROM "Session" WHERE "shop" = $1 AND "isOnline" = false',
+        'SELECT "accessToken", "expires" FROM "Session" WHERE "shop" = $1 AND "isOnline" = false LIMIT 1',
         [shop]
       );
-      const stored = sessionRes?.rows?.[0]?.accessToken;
-      if (stored) {
-        token = decryptAccessToken(stored);
+      const row = sessionRes?.rows?.[0];
+      if (row && row.accessToken && row.expires) {
+        const expiresAt = new Date(row.expires).getTime();
+        const fiveMinutesFromNow = Date.now() + 5 * 60 * 1000;
+        if (expiresAt > fiveMinutesFromNow) {
+          token = decryptAccessToken(row.accessToken);
+        }
       }
     }
 
@@ -651,7 +655,16 @@ export async function syncShopProfile(db, { shop, accessToken = null, fetchFn = 
     }
 
     if (!res.ok) {
-      console.warn(`[ShopProfile] Failed to fetch shop profile for ${shop}: HTTP ${res.status}`);
+      let snippet = '';
+      if (typeof res.text === 'function') {
+        try {
+          const text = await res.text();
+          if (text) {
+            snippet = ` - ${text.trim().slice(0, 200)}`;
+          }
+        } catch (_) {}
+      }
+      console.warn(`[ShopProfile] Failed to fetch shop profile for ${shop}: HTTP ${res.status}${snippet}`);
       return null;
     }
 

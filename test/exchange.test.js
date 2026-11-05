@@ -71,11 +71,11 @@ describe('Shopify Token Exchange & Managed Install Hardening (app/lib/protocols/
 
         // INSERT / UPSERT Session
         if (sql.includes('INSERT INTO "Session"')) {
-          const [id, shop, stateVal, isOnline, scope, accessToken] = [
-            params[0], params[1], params[2], false, params[3], params[4]
+          const [id, shop, stateVal, isOnline, scope, accessToken, expires, refreshToken, refreshTokenExpires] = [
+            params[0], params[1], params[2], false, params[3], params[4], params[5] ?? null, params[6] ?? null, params[7] ?? null
           ];
           const idx = state.sessions.findIndex(s => s.id === id);
-          const row = { id, shop, state: stateVal, isOnline, scope, accessToken };
+          const row = { id, shop, state: stateVal, isOnline, scope, accessToken, expires, refreshToken, refreshTokenExpires };
           if (idx >= 0) {
             state.sessions[idx] = row;
           } else {
@@ -160,7 +160,10 @@ describe('Shopify Token Exchange & Managed Install Hardening (app/lib/protocols/
           async json() {
             return {
               access_token: 'mock_shpat_offline_token_test_123',
-              scope: 'read_orders'
+              scope: 'read_orders',
+              expires_in: 3600,
+              refresh_token: 'mock_shprt_refresh_token_test',
+              refresh_token_expires_in: 7776000
             };
           }
         };
@@ -177,6 +180,9 @@ describe('Shopify Token Exchange & Managed Install Hardening (app/lib/protocols/
       assert.ok(result);
       assert.equal(result.accessToken, 'mock_shpat_offline_token_test_123');
       assert.equal(result.scope, 'read_orders');
+      assert.equal(result.expiresIn, 3600);
+      assert.equal(result.refreshToken, 'mock_shprt_refresh_token_test');
+      assert.equal(result.refreshTokenExpiresIn, 7776000);
 
       // Verify endpoint and method
       assert.equal(capturedUrl, `https://${testShop}/admin/oauth/access_token`);
@@ -192,12 +198,12 @@ describe('Shopify Token Exchange & Managed Install Hardening (app/lib/protocols/
       assert.equal(bodyParams.subject_token, validIdToken);
       assert.equal(bodyParams.subject_token_type, TOKEN_TYPE_ID_TOKEN);
       assert.equal(bodyParams.requested_token_type, TOKEN_TYPE_OFFLINE_ACCESS);
-      assert.equal(bodyParams.expiring, 0);
+      assert.equal(bodyParams.expiring, 1);
     });
   });
 
   describe('2. Session Persistence, Encryption & Profile Sync', () => {
-    it('exchange success writes an encrypted Session row and synchronizes ShopProfile', async () => {
+    it('exchange success writes an encrypted Session row with expires ~now+3600s and NULL refresh token', async () => {
       const db = createTestDb();
       let exchangeCalls = 0;
       let graphqlCalls = 0;
@@ -210,7 +216,13 @@ describe('Shopify Token Exchange & Managed Install Hardening (app/lib/protocols/
             ok: true,
             status: 200,
             async json() {
-              return { access_token: 'mock_offline_raw_token_xyz', scope: 'read_orders' };
+              return {
+                access_token: 'mock_offline_raw_token_xyz',
+                scope: 'read_orders',
+                expires_in: 3600,
+                refresh_token: 'mock_shprt_refresh_token_xyz',
+                refresh_token_expires_in: 7776000
+              };
             }
           };
         }
@@ -257,6 +269,13 @@ describe('Shopify Token Exchange & Managed Install Hardening (app/lib/protocols/
       assert.equal(savedSession.isOnline, false);
       assert.equal(savedSession.state, 'authenticated');
       assert.equal(savedSession.scope, 'read_orders');
+      assert.ok(savedSession.expires, 'Session expires must be set');
+      const expiresTime = new Date(savedSession.expires).getTime();
+      const expectedMin = Date.now() + 3550 * 1000;
+      const expectedMax = Date.now() + 3650 * 1000;
+      assert.ok(expiresTime >= expectedMin && expiresTime <= expectedMax, 'Session expires must be ~now + 3600s');
+      assert.equal(savedSession.refreshToken, null, 'Refresh token must NOT be stored');
+      assert.equal(savedSession.refreshTokenExpires, null, 'Refresh token expires must be NULL');
 
       // Verify token encryption format enc:v1:<iv>:<tag>:<ciphertext>
       assert.match(savedSession.accessToken, /^enc:v1:[0-9a-f]{24}:[0-9a-f]{32}:[0-9a-f]+$/);
@@ -273,7 +292,7 @@ describe('Shopify Token Exchange & Managed Install Hardening (app/lib/protocols/
       assert.equal(savedProfile.country, 'CA');
     });
 
-    it('second request does not exchange again when Session already exists', async () => {
+    it('a Session valid for >5 minutes does NOT trigger an exchange', async () => {
       const db = createTestDb({
         sessions: [
           {
@@ -281,7 +300,8 @@ describe('Shopify Token Exchange & Managed Install Hardening (app/lib/protocols/
             shop: testShop,
             isOnline: false,
             scope: 'read_orders',
-            accessToken: 'enc:mock_existing_token'
+            accessToken: 'enc:mock_existing_token',
+            expires: new Date(Date.now() + 30 * 60 * 1000).toISOString()
           }
         ]
       });
@@ -289,7 +309,7 @@ describe('Shopify Token Exchange & Managed Install Hardening (app/lib/protocols/
       let fetchCalled = false;
       const fakeFetch = async () => {
         fetchCalled = true;
-        throw new Error('Should not call fetch when session exists');
+        throw new Error('Should not call fetch when valid session exists');
       };
 
       const res = await ensureOfflineSession(db, {
@@ -302,7 +322,97 @@ describe('Shopify Token Exchange & Managed Install Hardening (app/lib/protocols/
 
       assert.ok(res);
       assert.equal(res.existing, true);
-      assert.equal(fetchCalled, false, 'Must not call fetch when offline session is present');
+      assert.equal(fetchCalled, false, 'Must not call fetch when valid session is present');
+    });
+
+    it('a Session with expires NULL triggers a re-exchange', async () => {
+      const db = createTestDb({
+        sessions: [
+          {
+            id: `offline_${testShop}`,
+            shop: testShop,
+            isOnline: false,
+            scope: 'read_orders',
+            accessToken: 'enc:mock_existing_token',
+            expires: null
+          }
+        ]
+      });
+
+      let exchangeCalled = false;
+      const fakeFetch = async (url) => {
+        const urlStr = String(url);
+        if (urlStr.includes('/admin/oauth/access_token')) {
+          exchangeCalled = true;
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              access_token: 'mock_re_exchanged_token',
+              scope: 'read_orders',
+              expires_in: 3600
+            })
+          };
+        }
+        return { ok: true, json: async () => ({ data: { shop: { name: 'Test' } } }) };
+      };
+
+      const res = await ensureOfflineSession(db, {
+        shop: testShop,
+        idToken: validIdToken,
+        apiKey,
+        apiSecret,
+        fetchFn: fakeFetch
+      });
+
+      assert.ok(res);
+      assert.equal(res.success, true);
+      assert.equal(exchangeCalled, true, 'Must trigger re-exchange when expires is NULL');
+    });
+
+    it('a Session expiring within 5 minutes triggers a re-exchange', async () => {
+      const db = createTestDb({
+        sessions: [
+          {
+            id: `offline_${testShop}`,
+            shop: testShop,
+            isOnline: false,
+            scope: 'read_orders',
+            accessToken: 'enc:mock_existing_token',
+            expires: new Date(Date.now() + 4 * 60 * 1000).toISOString() // 4 minutes remaining (< 5m)
+          }
+        ]
+      });
+
+      let exchangeCalled = false;
+      const fakeFetch = async (url) => {
+        const urlStr = String(url);
+        if (urlStr.includes('/admin/oauth/access_token')) {
+          exchangeCalled = true;
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              access_token: 'mock_refreshed_token',
+              scope: 'read_orders',
+              expires_in: 3600
+            })
+          };
+        }
+        return { ok: true, json: async () => ({ data: { shop: { name: 'Test' } } }) };
+      };
+
+      const res = await ensureOfflineSession(db, {
+        shop: testShop,
+        idToken: validIdToken,
+        apiKey,
+        apiSecret,
+        fetchFn: fakeFetch
+      });
+
+      assert.ok(res);
+      assert.equal(res.success, true);
+      assert.equal(exchangeCalled, true, 'Must trigger re-exchange when expiring within 5 minutes');
     });
   });
 

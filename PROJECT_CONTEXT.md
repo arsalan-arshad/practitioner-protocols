@@ -1117,5 +1117,28 @@ Run the five spikes in a day or two on a dev store; write the answers into secti
    - Added test verifying truncated single-line logging on GraphQL `errors`.
    - 578 unit tests passing across 132 suites (`npm test`).
 
+### 2026-11-06: Expiring Offline Access Tokens for Shopify Managed Installation (Branch fix/expiring-offline-token)
+1. **Root Cause Resolution (Admin GraphQL HTTP 403 on Non-Expiring Offline Tokens):**
+   - Live testing showed token exchange succeeded, but subsequent Admin GraphQL calls failed with HTTP 403 ("Non-expiring access tokens are no longer accepted for the Admin API").
+   - Shopify requires all public apps calling the Admin API to use expiring offline access tokens (1-hour lifespan, `expires_in: 3600`) by setting `expiring: 1` during token exchange.
+2. **RFC 8693 Token Exchange (`expiring: 1`):**
+   - `performTokenExchange` in `app/lib/protocols/exchange.js` updated to pass `expiring: 1` in the JSON request body.
+   - Parses and returns `{ accessToken, scope, expiresIn, refreshToken, refreshTokenExpiresIn }`.
+3. **Session Usability & Automatic Re-Exchange on Admin Request:**
+   - In `ensureOfflineSession`, a Session row is treated as USABLE only if `expires` is NOT NULL and `expires > now + 5 minutes`.
+   - If missing, NULL `expires` (legacy non-expiring token), or expiring within 5 minutes, automatically performs an RFC 8693 token exchange using the fresh `id_token` present on every admin request.
+   - Does NOT store the `refreshToken` (leaving `Session.refreshToken` and `Session.refreshTokenExpires` NULL for fewer secrets at rest).
+   - Does NOT build a separate background refresh flow: Practitioner Protocols executes Admin API calls strictly in response to embedded-admin requests, so re-exchange via the incoming `id_token` on admin load is sufficient.
+4. **Immediate & Fallback Profile Sync:**
+   - On successful token exchange, immediately invokes `syncShopProfile` with the newly minted access token in the same request.
+   - In `syncShopProfile` fallback lookup, checks that the stored session has non-null `expires > now + 5 minutes` before attempting Admin GraphQL queries.
+   - On non-OK HTTP response from Admin GraphQL, logs the HTTP status and first 200 characters of response text (`[ShopProfile] Failed to fetch shop profile for <shop>: HTTP <status> - <snippet>`) without leaking tokens or request details.
+5. **Documentation & Privacy Alignment:**
+   - Updated README, `docs/SPEC.md`, and the `/privacy` page in `server.js` to state that the app holds a short-lived (1 hour) offline access token, encrypted at rest, re-acquired on admin load, deleted on uninstall, with zero refresh tokens stored.
+6. **Automated Test Coverage:**
+   - 580 unit tests passing across 132 suites (`npm test`). Zero failures.
+   - 591 tests across 133 suites in `npm run test:all` (580 passing, 11 skipped live DB integration tests).
+
+
 
 

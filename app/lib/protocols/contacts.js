@@ -632,14 +632,23 @@ export async function syncShopProfile(db, { shop, accessToken = null, fetchFn = 
   }
 }`;
 
-    const res = await fetchFn(`https://${shop}/admin/api/2026-10/graphql.json`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Shopify-Access-Token': token
-      },
-      body: JSON.stringify({ query })
-    });
+    const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    const timeoutId = controller ? setTimeout(() => controller.abort(), 5000) : null;
+
+    let res;
+    try {
+      res = await fetchFn(`https://${shop}/admin/api/2026-10/graphql.json`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Shopify-Access-Token': token
+        },
+        body: JSON.stringify({ query }),
+        signal: controller?.signal
+      });
+    } finally {
+      if (timeoutId) clearTimeout(timeoutId);
+    }
 
     if (!res.ok) {
       console.warn(`[ShopProfile] Failed to fetch shop profile for ${shop}: HTTP ${res.status}`);

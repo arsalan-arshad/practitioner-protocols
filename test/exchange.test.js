@@ -181,18 +181,18 @@ describe('Shopify Token Exchange & Managed Install Hardening (app/lib/protocols/
       // Verify endpoint and method
       assert.equal(capturedUrl, `https://${testShop}/admin/oauth/access_token`);
       assert.equal(capturedOptions.method, 'POST');
-      assert.equal(capturedOptions.headers['Content-Type'], 'application/x-www-form-urlencoded');
+      assert.equal(capturedOptions.headers['Content-Type'], 'application/json');
       assert.equal(capturedOptions.headers['Accept'], 'application/json');
 
-      // Verify exact URL-encoded body parameters matching Shopify token exchange docs
-      const bodyParams = new URLSearchParams(capturedOptions.body);
-      assert.equal(bodyParams.get('client_id'), apiKey);
-      assert.equal(bodyParams.get('client_secret'), apiSecret);
-      assert.equal(bodyParams.get('grant_type'), GRANT_TYPE_TOKEN_EXCHANGE);
-      assert.equal(bodyParams.get('subject_token'), validIdToken);
-      assert.equal(bodyParams.get('subject_token_type'), TOKEN_TYPE_ID_TOKEN);
-      assert.equal(bodyParams.get('requested_token_type'), TOKEN_TYPE_OFFLINE_ACCESS);
-      assert.equal(bodyParams.get('expiring'), '0');
+      // Verify exact JSON body parameters matching Shopify token exchange docs
+      const bodyParams = JSON.parse(capturedOptions.body);
+      assert.equal(bodyParams.client_id, apiKey);
+      assert.equal(bodyParams.client_secret, apiSecret);
+      assert.equal(bodyParams.grant_type, GRANT_TYPE_TOKEN_EXCHANGE);
+      assert.equal(bodyParams.subject_token, validIdToken);
+      assert.equal(bodyParams.subject_token_type, TOKEN_TYPE_ID_TOKEN);
+      assert.equal(bodyParams.requested_token_type, TOKEN_TYPE_OFFLINE_ACCESS);
+      assert.equal(bodyParams.expiring, 0);
     });
   });
 

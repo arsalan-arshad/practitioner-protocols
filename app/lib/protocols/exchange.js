@@ -58,15 +58,15 @@ export async function performTokenExchange({
   }
 
   const endpoint = `https://${shop}/admin/oauth/access_token`;
-  const bodyParams = new URLSearchParams({
+  const payload = {
     client_id: apiKey,
     client_secret: apiSecret,
     grant_type: GRANT_TYPE_TOKEN_EXCHANGE,
     subject_token: idToken,
     subject_token_type: TOKEN_TYPE_ID_TOKEN,
     requested_token_type: TOKEN_TYPE_OFFLINE_ACCESS,
-    expiring: '0'
-  });
+    expiring: 0
+  };
 
   try {
     const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
@@ -75,10 +75,10 @@ export async function performTokenExchange({
     const res = await fetchFn(endpoint, {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
+        'Content-Type': 'application/json',
         'Accept': 'application/json'
       },
-      body: bodyParams.toString(),
+      body: JSON.stringify(payload),
       signal: controller?.signal
     });
 

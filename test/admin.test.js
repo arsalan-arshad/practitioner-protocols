@@ -1731,6 +1731,63 @@ describe('Merchant Admin Layer (app/lib/protocols/admin.js)', () => {
       assert.ok(html.includes('name="replyEmail"'), 'Must render custom request reply email input');
       assert.ok(html.includes('custom_owner@test.myshopify.com'), 'Must pre-fill admin reply email from shopProfile');
     });
+
+    it('renders allow-listed notice banners in Settings tab and ignores unknown notice keys', () => {
+      // 1. feedback_saved notice
+      const htmlFeedback = renderAdminHtml({
+        shop: testShop,
+        activeTab: 'settings',
+        notice: 'feedback_saved'
+      });
+      assert.ok(htmlFeedback.includes('id="settings-notice-banner"'), 'Must render settings notice banner container');
+      assert.ok(htmlFeedback.includes('Polaris-Banner--statusSuccess'), 'Must have success status class');
+      assert.ok(htmlFeedback.includes('Thanks, your feedback was saved.'), 'Must display feedback saved message');
+
+      // 2. request_sent notice
+      const htmlRequest = renderAdminHtml({
+        shop: testShop,
+        activeTab: 'settings',
+        notice: 'request_sent'
+      });
+      assert.ok(htmlRequest.includes('id="settings-notice-banner"'));
+      assert.ok(htmlRequest.includes('Thanks, your request was sent. The developer will reply to the email you gave.'));
+
+      // 3. settings_saved notice
+      const htmlSettings = renderAdminHtml({
+        shop: testShop,
+        activeTab: 'settings',
+        notice: 'settings_saved'
+      });
+      assert.ok(htmlSettings.includes('id="settings-notice-banner"'));
+      assert.ok(htmlSettings.includes('Settings saved successfully.'));
+
+      // 4. unknown notice value renders nothing
+      const htmlUnknown = renderAdminHtml({
+        shop: testShop,
+        activeTab: 'settings',
+        notice: 'unknown_notice_key'
+      });
+      assert.ok(!htmlUnknown.includes('id="settings-notice-banner"'), 'Unknown notice must not render banner');
+      assert.ok(!htmlUnknown.includes('unknown_notice_key'), 'Unknown notice value must not be rendered');
+
+      // 5. malicious notice attempt renders nothing and does not inject XSS
+      const htmlMalicious = renderAdminHtml({
+        shop: testShop,
+        activeTab: 'settings',
+        notice: '<script>alert("xss")</script>'
+      });
+      assert.ok(!htmlMalicious.includes('id="settings-notice-banner"'));
+      assert.ok(!htmlMalicious.includes('<script>alert("xss")</script>'));
+
+      // Script syntax verification
+      const matches = [...htmlFeedback.matchAll(/<script(?![^>]*type=["']application\/json["'])>([\s\S]*?)<\/script>/gi)];
+      for (let i = 0; i < matches.length; i++) {
+        assert.doesNotThrow(
+          () => new vm.Script(matches[i][1]),
+          `Admin script index ${i} with notice banner must parse without SyntaxError`
+        );
+      }
+    });
   });
 
   describe('Admin Session Token Verification', () => {

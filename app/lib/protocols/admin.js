@@ -1400,7 +1400,8 @@ export function renderAdminHtml(options = {}) {
     contactsData = null,
     shopProfile = null,
     adminEmail = '',
-    activeTab = 'practitioners'
+    activeTab = 'practitioners',
+    notice = ''
   } = options;
 
   // Enforce zero PII barrier on all inputs
@@ -1556,6 +1557,40 @@ export function renderAdminHtml(options = {}) {
     font-size: 0.8125rem;
     color: var(--p-color-text-subdued);
     margin-top: 0.25rem;
+  }
+  .Polaris-Banner {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    padding: 0.75rem 1rem;
+    border-radius: 8px;
+    margin-bottom: 1.5rem;
+    font-size: 0.875rem;
+    line-height: 1.4;
+  }
+  .Polaris-Banner--statusSuccess {
+    background: #f1f8f5;
+    border: 1px solid #95c9b4;
+    color: #0d593c;
+  }
+  .Polaris-Banner--statusCritical {
+    background: #fff4f4;
+    border: 1px solid #fec8c8;
+    color: #8c1b09;
+  }
+  .Polaris-Banner__Dismiss {
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 1.25rem;
+    line-height: 1;
+    color: inherit;
+    opacity: 0.7;
+    margin-left: 0.75rem;
+    padding: 0 0.25rem;
+  }
+  .Polaris-Banner__Dismiss:hover {
+    opacity: 1;
   }
 </style>`;
 
@@ -1856,7 +1891,20 @@ export function renderAdminHtml(options = {}) {
     const disclaimer = escapeAdminText(settings?.disclaimer || settings?.footerDisclaimer || '');
     const handout = escapeAdminText(settings?.handoutText || '');
 
+    const ALLOWED_NOTICES = {
+      feedback_saved: 'Thanks, your feedback was saved.',
+      request_sent: 'Thanks, your request was sent. The developer will reply to the email you gave.',
+      settings_saved: 'Settings saved successfully.'
+    };
+    const noticeText = ALLOWED_NOTICES[notice] || '';
+    const bannerHtml = noticeText ? `
+    <div class="Polaris-Banner Polaris-Banner--statusSuccess" id="settings-notice-banner" role="status">
+      <div>${escapeAdminText(noticeText)}</div>
+      <button type="button" class="Polaris-Banner__Dismiss" aria-label="Dismiss banner" onclick="var el = document.getElementById('settings-notice-banner'); if (el) el.remove();">&times;</button>
+    </div>` : '';
+
     return `
+    ${bannerHtml}
     <div class="Polaris-Card">
       <h2 class="Polaris-Card-Title">App Settings</h2>
       <form method="POST" action="/api/admin/settings">
@@ -2191,15 +2239,44 @@ ${appBridgeHead}  <title>Practitioner Protocols &mdash; Admin</title>
               });
 
               if (res.ok) {
+                const data = await res.json().catch(function() { return {}; });
                 const freshToken = await getToken();
                 const nextUrl = new URL(window.location.href);
                 if (freshToken) {
                   nextUrl.searchParams.set('id_token', freshToken);
                 }
+                if (action.includes('/settings') || action.includes('/feedback') || action.includes('/emergency/')) {
+                  nextUrl.searchParams.set('tab', 'settings');
+                } else if (action.includes('/contacts')) {
+                  nextUrl.searchParams.set('tab', 'contacts');
+                } else if (action.includes('/practitioners')) {
+                  nextUrl.searchParams.set('tab', 'practitioners');
+                } else if (action.includes('/starters')) {
+                  nextUrl.searchParams.set('tab', 'starters');
+                }
+                nextUrl.searchParams.delete('notice');
+                var allowedNotices = ['feedback_saved', 'request_sent', 'settings_saved'];
+                if (data && data.notice && allowedNotices.indexOf(data.notice) !== -1) {
+                  nextUrl.searchParams.set('notice', data.notice);
+                }
                 window.location.href = nextUrl.toString();
               } else {
                 const err = await res.json().catch(function() { return {}; });
-                alert(err.error || 'Action failed');
+                var errorMsg = err.error || err.message;
+                if (res.status === 429) {
+                  errorMsg = errorMsg || 'Too many requests. Please try again later.';
+                }
+                if (!errorMsg) {
+                  errorMsg = 'Action failed';
+                }
+                var prevBanner = form.querySelector('.Polaris-Banner--statusCritical');
+                if (prevBanner) prevBanner.remove();
+                var banner = document.createElement('div');
+                banner.className = 'Polaris-Banner Polaris-Banner--statusCritical';
+                banner.setAttribute('role', 'alert');
+                banner.textContent = errorMsg;
+                form.insertBefore(banner, form.firstChild);
+                alert(errorMsg);
                 if (submitBtn) submitBtn.disabled = false;
               }
             } catch (err) {

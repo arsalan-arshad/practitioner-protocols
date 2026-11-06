@@ -1732,6 +1732,7 @@ export async function handleAdminDashboardRequest(db, request, options = {}) {
 
     const activeTab = urlObj?.searchParams?.get('tab') || request?.query?.tab || 'practitioners';
     const month = urlObj?.searchParams?.get('month') || request?.query?.month || new Date().toISOString().slice(0, 7);
+    const notice = urlObj?.searchParams?.get('notice') || request?.query?.notice || '';
 
     let profiles = options.demoData?.profiles || [];
     let starters = options.demoData?.starters || [];
@@ -1777,7 +1778,8 @@ export async function handleAdminDashboardRequest(db, request, options = {}) {
       contactsData,
       shopProfile,
       adminEmail: session.email || '',
-      activeTab
+      activeTab,
+      notice
     });
 
     const frameAncestors = shop && SHOPIFY_DOMAIN_REGEX.test(shop)
@@ -1855,7 +1857,7 @@ export async function handleAdminPractitionerStatusRequest(db, request, options 
     // Handle form redirect vs JSON response
     const acceptHeader = getHeader(request, 'accept') || '';
     const contentType = getHeader(request, 'content-type') || '';
-    if (contentType.includes('application/x-www-form-urlencoded') || acceptHeader.includes('text/html')) {
+    if (!acceptHeader.includes('application/json') && (contentType.includes('application/x-www-form-urlencoded') || acceptHeader.includes('text/html'))) {
       return new Response(null, {
         status: 302,
         headers: { Location: '/admin?tab=practitioners' }
@@ -1893,7 +1895,7 @@ export async function handleAdminPracticeNameRequest(db, request, options = {}) 
 
     const acceptHeader = getHeader(request, 'accept') || '';
     const contentType = getHeader(request, 'content-type') || '';
-    if (contentType.includes('application/x-www-form-urlencoded') || acceptHeader.includes('text/html')) {
+    if (!acceptHeader.includes('application/json') && (contentType.includes('application/x-www-form-urlencoded') || acceptHeader.includes('text/html'))) {
       return new Response(null, {
         status: 302,
         headers: { Location: '/admin?tab=practitioners' }
@@ -1949,7 +1951,7 @@ export async function handleAdminCreateStarterRequest(db, request, options = {})
 
     const acceptHeader = getHeader(request, 'accept') || '';
     const contentType = getHeader(request, 'content-type') || '';
-    if (contentType.includes('application/x-www-form-urlencoded') || acceptHeader.includes('text/html')) {
+    if (!acceptHeader.includes('application/json') && (contentType.includes('application/x-www-form-urlencoded') || acceptHeader.includes('text/html'))) {
       return new Response(null, {
         status: 302,
         headers: { Location: '/admin?tab=starters' }
@@ -1986,14 +1988,14 @@ export async function handleAdminUpdateSettingsRequest(db, request, options = {}
 
     const acceptHeader = getHeader(request, 'accept') || '';
     const contentType = getHeader(request, 'content-type') || '';
-    if (contentType.includes('application/x-www-form-urlencoded') || acceptHeader.includes('text/html')) {
+    if (!acceptHeader.includes('application/json') && (contentType.includes('application/x-www-form-urlencoded') || acceptHeader.includes('text/html'))) {
       return new Response(null, {
         status: 302,
-        headers: { Location: '/admin?tab=settings' }
+        headers: { Location: '/admin?tab=settings&notice=settings_saved' }
       });
     }
 
-    return Response.json({ ok: true, settings }, { status: 200 });
+    return Response.json({ ok: true, notice: 'settings_saved', settings }, { status: 200 });
   } catch (err) {
     return handleErrorResponse(err);
   }
@@ -2019,7 +2021,7 @@ export async function handleAdminEmergencyDisableAllRequest(db, request, options
 
     const acceptHeader = getHeader(request, 'accept') || '';
     const contentType = getHeader(request, 'content-type') || '';
-    if (contentType.includes('application/x-www-form-urlencoded') || acceptHeader.includes('text/html')) {
+    if (!acceptHeader.includes('application/json') && (contentType.includes('application/x-www-form-urlencoded') || acceptHeader.includes('text/html'))) {
       return new Response(null, {
         status: 302,
         headers: { Location: '/admin?tab=settings' }
@@ -2149,10 +2151,11 @@ export async function handleAdminDeleteContactRequest(db, request, options = {})
       await deleteMerchantContact(db, { shop, contactId });
     }
 
-    if (contentType.includes('application/x-www-form-urlencoded')) {
+    const acceptHeader = getHeader(request, 'accept') || '';
+    if (!acceptHeader.includes('application/json') && (contentType.includes('application/x-www-form-urlencoded') || acceptHeader.includes('text/html'))) {
       return new Response(null, {
         status: 303,
-        headers: { Location: '/api/admin?tab=contacts' }
+        headers: { Location: '/admin?tab=contacts' }
       });
     }
 
@@ -2208,10 +2211,11 @@ export async function handleAdminDeletePracticeContactsRequest(db, request, opti
       deleted = await deleteMerchantPracticeContacts(db, { shop, ownerId });
     }
 
-    if (contentType.includes('application/x-www-form-urlencoded')) {
+    const acceptHeader = getHeader(request, 'accept') || '';
+    if (!acceptHeader.includes('application/json') && (contentType.includes('application/x-www-form-urlencoded') || acceptHeader.includes('text/html'))) {
       return new Response(null, {
         status: 303,
-        headers: { Location: '/api/admin?tab=contacts' }
+        headers: { Location: '/admin?tab=contacts' }
       });
     }
 
@@ -2298,15 +2302,20 @@ export async function handleAdminCustomFeatureRequest(db, request, options = {})
       });
     }
 
-    if (contentType.includes('application/x-www-form-urlencoded')) {
+    const acceptHeader = getHeader(request, 'accept') || '';
+    if (!acceptHeader.includes('application/json') && (contentType.includes('application/x-www-form-urlencoded') || acceptHeader.includes('text/html'))) {
       return new Response(null, {
         status: 303,
-        headers: { Location: '/api/admin?tab=settings&request_sent=1' }
+        headers: { Location: '/admin?tab=settings&notice=request_sent' }
       });
     }
 
     return Response.json(
-      { success: true, message: 'Thank you for your request. The developer will get back to you shortly.' },
+      {
+        success: true,
+        notice: 'request_sent',
+        message: 'Thanks, your request was sent. The developer will reply to the email you gave.'
+      },
       { status: 200, headers: { 'Content-Type': 'application/json' } }
     );
   } catch (err) {
@@ -2376,15 +2385,20 @@ export async function handleAdminFeedbackRequest(db, request, options = {}) {
       });
     }
 
-    if (contentType.includes('application/x-www-form-urlencoded')) {
+    const acceptHeader = getHeader(request, 'accept') || '';
+    if (!acceptHeader.includes('application/json') && (contentType.includes('application/x-www-form-urlencoded') || acceptHeader.includes('text/html'))) {
       return new Response(null, {
         status: 303,
-        headers: { Location: '/api/admin?tab=settings&feedback_saved=1' }
+        headers: { Location: '/admin?tab=settings&notice=feedback_saved' }
       });
     }
 
     return Response.json(
-      { success: true, message: 'Thank you for your feedback!' },
+      {
+        success: true,
+        notice: 'feedback_saved',
+        message: 'Thanks, your feedback was saved.'
+      },
       { status: 200, headers: { 'Content-Type': 'application/json' } }
     );
   } catch (err) {
@@ -2437,6 +2451,14 @@ export async function handleAdminMarketingOptInRequest(db, request, options = {}
 
     if (db && !session.isDemo) {
       await updateShopMarketingOptIn(db, { shop, marketingOptIn });
+    }
+
+    const acceptHeader = getHeader(request, 'accept') || '';
+    if (!acceptHeader.includes('application/json') && (contentType.includes('application/x-www-form-urlencoded') || acceptHeader.includes('text/html'))) {
+      return new Response(null, {
+        status: 303,
+        headers: { Location: '/admin?tab=settings' }
+      });
     }
 
     return Response.json(

@@ -3740,7 +3740,25 @@ describe('HTTP Routes & Request Handlers (app/lib/protocols/routes.js)', () => {
           });
           const formRes = await handleAdminCustomFeatureRequest(optinDb, formReq, { apiSecret });
           assert.equal(formRes.status, 303);
-          assert.ok(formRes.headers.get('Location').includes('request_sent=1'));
+          assert.equal(formRes.headers.get('Location'), '/admin?tab=settings&notice=request_sent');
+
+          // URL-encoded with Accept: application/json returns 200 JSON with notice and no redirect
+          const ajaxFormReq = new Request(`https://${otherShop}/api/admin/feedback/custom-request`, {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${otherToken}`,
+              'Content-Type': 'application/x-www-form-urlencoded',
+              Accept: 'application/json'
+            },
+            body: 'message=Need+JSON+response&replyEmail=merchant%40example.com'
+          });
+          const ajaxFormRes = await handleAdminCustomFeatureRequest(optinDb, ajaxFormReq, { apiSecret });
+          assert.equal(ajaxFormRes.status, 200);
+          assert.equal(ajaxFormRes.headers.get('Location'), null);
+          const ajaxFormData = await ajaxFormRes.json();
+          assert.equal(ajaxFormData.success, true);
+          assert.equal(ajaxFormData.notice, 'request_sent');
+          assert.ok(ajaxFormData.message.includes('Thanks'));
 
           // 3. 4th request in same hour on customLimiter is rate-limited (HTTP 429)
           const res4 = await handleAdminCustomFeatureRequest(optinDb, validJsonReq('Request 4'), { apiSecret, rateLimiter: customLimiter });
@@ -3794,10 +3812,42 @@ describe('HTTP Routes & Request Handlers (app/lib/protocols/routes.js)', () => {
           assert.equal(res.status, 200);
           const data = await res.json();
           assert.equal(data.success, true);
+          assert.equal(data.notice, 'feedback_saved');
           assert.equal(feedbackDb.feedback.length, 1);
           assert.equal(feedbackDb.feedback[0].rating, 5);
           assert.equal(feedbackDb.feedback[0].message, 'Great app experience!');
           assert.equal(feedbackDb.profiles[0].marketingOptIn, true);
+
+          // URL-encoded with Accept: application/json returns 200 JSON with notice and no redirect
+          const urlencodedJsonReq = new Request(`https://${testShop}/api/admin/feedback`, {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${token}`,
+              'Content-Type': 'application/x-www-form-urlencoded',
+              Accept: 'application/json'
+            },
+            body: '_is_feedback_form=1&rating=4&message=Solid+workflow&marketingOptIn=1'
+          });
+          const urlencodedJsonRes = await handleAdminFeedbackRequest(feedbackDb, urlencodedJsonReq, { apiSecret });
+          assert.equal(urlencodedJsonRes.status, 200);
+          assert.equal(urlencodedJsonRes.headers.get('Location'), null);
+          const urlencodedJsonData = await urlencodedJsonRes.json();
+          assert.equal(urlencodedJsonData.success, true);
+          assert.equal(urlencodedJsonData.notice, 'feedback_saved');
+          assert.ok(urlencodedJsonData.message.includes('Thanks'));
+
+          // URL-encoded without Accept: application/json returns 303 redirect to /admin?tab=settings&notice=feedback_saved
+          const plainFormReq = new Request(`https://${testShop}/api/admin/feedback`, {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${token}`,
+              'Content-Type': 'application/x-www-form-urlencoded'
+            },
+            body: '_is_feedback_form=1&rating=5&message=Great'
+          });
+          const plainFormRes = await handleAdminFeedbackRequest(feedbackDb, plainFormReq, { apiSecret });
+          assert.equal(plainFormRes.status, 303);
+          assert.equal(plainFormRes.headers.get('Location'), '/admin?tab=settings&notice=feedback_saved');
 
           // Invalid rating returns 400
           const badRatingReq = new Request(`https://${testShop}/api/admin/feedback`, {

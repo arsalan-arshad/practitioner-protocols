@@ -122,7 +122,7 @@
   - Lifecycle: `app/uninstalled` deletes the `Session` row while keeping `ShopProfile` with `uninstalledAt` timestamp; `shop/redact` purges all shop records.
   - UI: Settings opt-in card displays a disabled checkbox with `"Your store contact email is still being loaded. Reload this page."` when `ShopProfile.email` is absent (never displays `"this email"`), and custom request cards prefill `replyEmail` when present. Shopper consent text uses `ShopProfile.shopName` when available.
   - Friendly root landing page: `GET /` (or `/admin`, `/app`) outside admin iframe with no session serves status 200 HTML with `"Practitioner Protocols runs inside your Shopify admin. Open it from your Shopify admin's Apps list."`, link to `/privacy`, and zero login or shop domain input fields.
-  - Automated unit test coverage: 580 passing tests across 132 suites (`npm test`).
+  - Automated unit test coverage: 581 passing tests across 132 suites (`npm test`).
 
 ## Later
 Practitioner application form · aggregate "client orders" count on protocol cards · protocol version history · Salesforce rollup via Bridge Recipes.

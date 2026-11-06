@@ -1139,6 +1139,32 @@ Run the five spikes in a day or two on a dev store; write the answers into secti
    - 580 unit tests passing across 132 suites (`npm test`). Zero failures.
    - 591 tests across 133 suites in `npm run test:all` (580 passing, 11 skipped live DB integration tests).
 
+### 2026-11-06: Confirmation Notices and JSON Responses for Embedded Admin Forms (Branch fix/feedback-confirmation)
+1. **Root Cause Analysis (Action failed alert on successful Settings form submits):**
+   - Live testing on the dev store revealed that submitting "Save Preferences & Send Feedback" and "Send Request" in the embedded admin Settings tab saved the underlying rows into `MerchantFeedback` and `ShopProfile`, but the merchant was greeted with an alert `Action failed`.
+   - Investigation identified that admin POST endpoints (`handleAdminFeedbackRequest`, `handleAdminCustomFeatureRequest`, `handleAdminDeleteContactRequest`, `handleAdminDeletePracticeContactsRequest`, etc.) in `app/lib/protocols/routes.js` evaluated `if (contentType.includes('application/x-www-form-urlencoded'))` before checking `Accept: application/json`.
+   - The embedded admin form interception script in `app/lib/protocols/admin.js` sends forms via `fetch()` as `application/x-www-form-urlencoded` with `Accept: application/json` and `Authorization: Bearer <id_token>`.
+   - The endpoints returned HTTP `303 Location: /api/admin?tab=settings&feedback_saved=1` / `request_sent=1`. `fetch()` automatically followed the 303 redirect to `/api/admin`, which is not a valid GET route (valid admin routes are `GET /`, `GET /admin`, `GET /app`), resulting in a 404/non-2xx response and triggering the catch block's `alert('Action failed')`.
+   - Furthermore, `feedback_saved` and `request_sent` parameters were never rendered in the UI.
+2. **Endpoint Fixes Across All Admin POST Handlers:**
+   - Updated all 10 admin POST handlers in `app/lib/protocols/routes.js` (`handleAdminFeedbackRequest`, `handleAdminCustomFeatureRequest`, `handleAdminMarketingOptInRequest`, `handleAdminDeleteContactRequest`, `handleAdminDeletePracticeContactsRequest`, `handleAdminPractitionerStatusRequest`, `handleAdminPracticeNameRequest`, `handleAdminCreateStarterRequest`, `handleAdminUpdateSettingsRequest`, and `handleAdminEmergencyDisableAllRequest`).
+   - When `Accept: application/json` is present (or any request not explicitly requesting a non-JSON redirect), endpoints return HTTP 200 JSON with `{ success: true, notice: ..., message: ... }` and NO redirect.
+   - If non-JSON plain form submissions are received (without `Accept: application/json`), 303/302 redirects point to legitimate routes (`/admin?tab=settings&notice=feedback_saved`, `/admin?tab=settings&notice=request_sent`, `/admin?tab=settings&notice=settings_saved`, `/admin?tab=contacts`), NEVER `/api/admin`.
+3. **Admin UI Confirmation Banners & Error Feedback (`admin.js`):**
+   - On `res.ok`, the client script extracts `data.notice` (e.g. `feedback_saved`, `request_sent`, `settings_saved`), clears any existing notice, sets the allow-listed notice query parameter on the current URL, re-acquires a fresh session `id_token`, and reloads the page on the appropriate tab.
+   - `renderSettingsTab` renders a small dismissible Polaris success banner (`Polaris-Banner Polaris-Banner--statusSuccess`) for allow-listed notices:
+     - `feedback_saved`: "Thanks, your feedback was saved."
+     - `request_sent`: "Thanks, your request was sent. The developer will reply to the email you gave."
+     - `settings_saved`: "Settings saved successfully."
+   - Unknown notice query parameters render nothing; user text and emails are never placed in the URL query string, preventing XSS and keeping the URL clean. All text is escaped via `escapeAdminText`.
+   - On error responses (HTTP 400 or 429), the client script renders an inline `.Polaris-Banner--statusCritical` and displays the server's error message (`err.error || err.message` or "Too many requests. Please try again later." for 429) via alert and inline banner instead of the generic "Action failed".
+4. **Automated Test Coverage:**
+   - Added unit tests in `test/routes.test.js` asserting urlencoded POST with `Accept: application/json` returns 200 JSON with `{ success: true, notice: ... }` and no 303 redirect for both `handleAdminCustomFeatureRequest` and `handleAdminFeedbackRequest`.
+   - Added unit tests in `test/admin.test.js` verifying `renderAdminHtml` displays allow-listed notice banners for `feedback_saved`, `request_sent`, `settings_saved`, ignores unknown notice keys, and parses scripts cleanly with `vm.Script`.
+   - 581 unit tests passing across 132 suites (`npm test`). Zero failures.
+   - 592 tests across 133 suites in `npm run test:all` (581 passing, 11 skipped live DB integration tests).
+
+
 
 
 

@@ -666,6 +666,7 @@ export function createRequestListener(options = {}) {
   const apiKey = options.shopifyApiKey || (process.env.SHOPIFY_API_KEY || '');
   const pool = options.pool || null;
   const tokenExchanger = options.tokenExchanger || null;
+  const fetchFn = options.fetchFn || globalThis.fetch;
 
   return async (req, res) => {
     try {
@@ -795,19 +796,22 @@ export function createRequestListener(options = {}) {
         if (databaseUrl && pool) {
           let accessToken = '';
           let scope = 'read_orders';
+          let expiresIn = 3600;
 
           if (typeof tokenExchanger === 'function') {
             const tokenData = await tokenExchanger({ shop, code, apiKey, apiSecret });
             accessToken = tokenData.accessToken;
             scope = tokenData.scope || scope;
+            expiresIn = typeof tokenData.expiresIn === 'number' ? tokenData.expiresIn : (tokenData.expires_in || 3600);
           } else {
-            const tokenRes = await fetch(`https://${shop}/admin/oauth/access_token`, {
+            const tokenRes = await fetchFn(`https://${shop}/admin/oauth/access_token`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
               body: JSON.stringify({
                 client_id: apiKey,
                 client_secret: apiSecret,
                 code,
+                expiring: 1,
               }),
             });
             if (!tokenRes.ok) {
@@ -818,26 +822,33 @@ export function createRequestListener(options = {}) {
             const tokenData = await tokenRes.json();
             accessToken = tokenData.access_token;
             scope = tokenData.scope || scope;
+            expiresIn = typeof tokenData.expires_in === 'number' ? tokenData.expires_in : 3600;
           }
 
           const encryptedToken = encryptAccessToken(accessToken);
+          const expiresDate = new Date(Date.now() + expiresIn * 1000);
 
           // Do not store the state in Session.state; store "authenticated".
           // Store encrypted access token at rest using AES-256-GCM.
+          // Store expiry date for expiring offline tokens (Option 1 in Shopify Migration Guide).
+          // Refresh tokens are intentionally NOT stored (fewer secrets at rest).
           await pool.query(
-            `INSERT INTO "Session" ("id", "shop", "state", "isOnline", "scope", "accessToken")
-             VALUES ($1, $2, $3, false, $4, $5)
+            `INSERT INTO "Session" ("id", "shop", "state", "isOnline", "scope", "accessToken", "expires", "refreshToken", "refreshTokenExpires")
+             VALUES ($1, $2, $3, false, $4, $5, $6, NULL, NULL)
              ON CONFLICT ("id") DO UPDATE SET
                "shop" = EXCLUDED."shop",
                "state" = EXCLUDED."state",
                "scope" = EXCLUDED."scope",
-               "accessToken" = EXCLUDED."accessToken"`,
-            [`offline_${shop}`, shop, 'authenticated', scope, encryptedToken]
+               "accessToken" = EXCLUDED."accessToken",
+               "expires" = EXCLUDED."expires",
+               "refreshToken" = NULL,
+               "refreshTokenExpires" = NULL`,
+            [`offline_${shop}`, shop, 'authenticated', scope, encryptedToken, expiresDate]
           );
 
           // Synchronize ShopProfile via Admin GraphQL shop query (non-blocking, never fails install)
           try {
-            await syncShopProfile(pool, { shop, accessToken });
+            await syncShopProfile(pool, { shop, accessToken, fetchFn });
           } catch (syncErr) {
             console.warn(`[ShopProfile] Failed to sync profile for ${shop} on install: ${syncErr.message}`);
           }

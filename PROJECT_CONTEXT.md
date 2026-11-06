@@ -1164,6 +1164,21 @@ Run the five spikes in a day or two on a dev store; write the answers into secti
    - 581 unit tests passing across 132 suites (`npm test`). Zero failures.
    - 592 tests across 133 suites in `npm run test:all` (581 passing, 11 skipped live DB integration tests).
 
+### 2026-11-06: Expiring Offline Access Tokens on OAuth Code Grant (`server.js`) (Branch fix/oauth-expiring-token)
+1. **Root Cause Analysis (Partner Dashboard "Deprecated offline tokens" Alert):**
+   - Shopify Partner Dashboard displayed a "Deprecated offline tokens" warning banner because prior installs and fallback OAuth authorization code grants in `server.js` requested non-expiring offline tokens (`expiring: 0` / omitted).
+   - While token exchange in `exchange.js` had been updated to send `expiring: 1`, the manual OAuth authorization code callback in `server.js` (`POST /admin/oauth/access_token`) did not send `expiring: 1` and omitted expiry tracking on the `Session` record.
+2. **Implementation:**
+   - Updated `server.js` OAuth authorization code grant exchange body to explicitly include `expiring: 1` per Shopify's migration guide for authorization code grant.
+   - Parsed `expires_in` (defaulting to 3600 seconds) and computed `expiresDate = new Date(Date.now() + expiresIn * 1000)`.
+   - Updated the `Session` insert query in `server.js` to persist `expires: expiresDate` with `refreshToken: NULL` and `refreshTokenExpires: NULL` (matching the minimal-secrets-at-rest pattern in `exchange.js`).
+   - Allowed optional `fetchFn` in `createRequestListener(options)` for deterministic testing.
+3. **Automated Test Coverage:**
+   - Added unit test in `test/server.test.js` verifying `GET /api/auth/callback` sends `expiring: 1` to `https://${shop}/admin/oauth/access_token` and persists the computed `expires` Date in the `Session` table.
+   - 582 unit tests passing across 132 suites (`npm test`). Zero failures.
+   - 593 tests across 133 suites in `npm run test:all` (582 passing, 11 skipped live DB integration tests).
+
+
 
 
 

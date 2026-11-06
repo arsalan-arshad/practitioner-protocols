@@ -456,9 +456,97 @@ describe('Server & Configuration Hardening (server.js, shopify.app.toml, README.
       // Do not store the state in Session.state; store "authenticated"
       assert.equal(queriedRows[0].params[2], 'authenticated');
       assert.equal(queriedRows[0].params[4], 'shpca_token_xyz_999');
+      assert.ok(queriedRows[0].params[5] instanceof Date, 'Must persist expires timestamp as Date');
 
       const setCookie = res.headers['Set-Cookie'] || res.headers['set-cookie'];
       assert.ok(setCookie.includes('Max-Age=0'));
+    });
+
+    it('GET /api/auth/callback sends expiring: 1 when requesting access token from Shopify', async () => {
+      let tokenRequestUrl = '';
+      let tokenRequestBody = null;
+
+      const mockFetch = async (url, init) => {
+        const urlStr = String(url);
+        if (urlStr.includes('/admin/oauth/access_token')) {
+          tokenRequestUrl = urlStr;
+          if (init?.body) {
+            tokenRequestBody = JSON.parse(init.body);
+          }
+          return new Response(JSON.stringify({
+            access_token: 'shpca_expiring_token_abc',
+            scope: 'read_orders',
+            expires_in: 3600,
+            refresh_token: 'shprt_test_refresh_token',
+            refresh_token_expires_in: 7776000
+          }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' }
+          });
+        }
+        return new Response(JSON.stringify({
+          data: {
+            shop: {
+              name: 'Expiring Store',
+              email: 'store@example.com',
+              shopOwnerName: 'Owner',
+              plan: { publicDisplayName: 'Basic' },
+              shopAddress: { countryCodeV2: 'US' }
+            }
+          }
+        }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' }
+        });
+      };
+
+      const queriedRows = [];
+      const mockPool = {
+        async query(sql, params) {
+          queriedRows.push({ sql, params });
+          return { rows: [] };
+        },
+      };
+
+      const prodListener = createRequestListener({
+        databaseUrl: 'postgres://production.host:5432/db',
+        shopifyApiSecret: apiSecret,
+        shopifyApiKey: apiKey,
+        pool: mockPool,
+        fetchFn: mockFetch,
+      });
+
+      const state = 'nonce_expiring_state';
+      const signedCookie = signOAuthState(state, apiSecret);
+      const params = {
+        code: 'valid_auth_code_expiring',
+        shop: 'expiring-store.myshopify.com',
+        state,
+        timestamp: '1729500000',
+      };
+      const hmac = calculateOAuthSignature(params, apiSecret);
+      const queryString = new URLSearchParams({ ...params, hmac }).toString();
+
+      const req = createMockReq({
+        method: 'GET',
+        url: `/api/auth/callback?${queryString}`,
+        headers: { cookie: `shopify_oauth_state=${signedCookie}` },
+      });
+      const res = createMockRes();
+      await prodListener(req, res);
+
+      assert.equal(res.statusCode, 302);
+      assert.ok(tokenRequestUrl.includes('/admin/oauth/access_token'));
+      assert.equal(tokenRequestBody.client_id, apiKey);
+      assert.equal(tokenRequestBody.client_secret, apiSecret);
+      assert.equal(tokenRequestBody.code, 'valid_auth_code_expiring');
+      assert.equal(tokenRequestBody.expiring, 1, 'Must send expiring: 1 per Shopify migration requirement');
+
+      assert.ok(queriedRows.length >= 1);
+      const sessionRow = queriedRows.find(q => q.sql.includes('INSERT INTO "Session"'));
+      assert.ok(sessionRow, 'Must insert into Session table');
+      assert.equal(sessionRow.params[0], 'offline_expiring-store.myshopify.com');
+      assert.ok(sessionRow.params[5] instanceof Date, 'Must persist computed expires Date in Session');
     });
   });
 

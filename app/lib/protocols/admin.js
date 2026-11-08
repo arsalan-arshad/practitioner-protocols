@@ -1411,7 +1411,9 @@ export function renderAdminHtml(options = {}) {
   if (settings) assertNoPii(settings);
 
   const safeShop = escapeAdminText(shop);
-  const currentTab = ['practitioners', 'starters', 'attribution', 'contacts', 'settings'].includes(activeTab)
+  const portalUrl = safeShop ? `https://${safeShop}/apps/protocols` : '/apps/protocols';
+  const navUrl = safeShop ? `https://${safeShop}/admin/menus` : '#';
+  const currentTab = ['practitioners', 'starters', 'attribution', 'contacts', 'settings', 'guide'].includes(activeTab)
     ? activeTab
     : 'practitioners';
 
@@ -1592,6 +1594,65 @@ export function renderAdminHtml(options = {}) {
   .Polaris-Banner__Dismiss:hover {
     opacity: 1;
   }
+  .Polaris-Step-Number {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    background: var(--p-color-primary);
+    color: #ffffff;
+    font-weight: 700;
+    font-size: 0.8125rem;
+    margin-right: 0.75rem;
+    flex-shrink: 0;
+  }
+  .Polaris-Step-Row {
+    display: flex;
+    align-items: flex-start;
+    margin-bottom: 1.15rem;
+  }
+  .Polaris-Step-Content {
+    flex: 1;
+  }
+  .Polaris-Step-Title {
+    font-weight: 600;
+    font-size: 0.9375rem;
+    margin: 0 0 0.25rem 0;
+  }
+  .Polaris-Step-Desc {
+    font-size: 0.875rem;
+    color: var(--p-color-text-subdued);
+    margin: 0;
+    line-height: 1.45;
+  }
+  .Polaris-Role-Card {
+    background: #f9fafb;
+    border: 1px solid var(--p-color-border);
+    border-radius: 6px;
+    padding: 1.25rem;
+  }
+  .Polaris-Role-Title {
+    font-size: 1rem;
+    font-weight: 600;
+    margin: 0 0 0.5rem 0;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+  .Polaris-Faq-Question {
+    font-weight: 600;
+    font-size: 0.9375rem;
+    margin: 0 0 0.25rem 0;
+    color: var(--p-color-text);
+  }
+  .Polaris-Faq-Answer {
+    font-size: 0.875rem;
+    color: var(--p-color-text-subdued);
+    margin: 0 0 1.25rem 0;
+    line-height: 1.5;
+  }
 </style>`;
 
   // Tab 1: Practitioners List
@@ -1647,6 +1708,21 @@ export function renderAdminHtml(options = {}) {
     }).join('');
 
     return `
+    <div class="Polaris-Card" style="border-left: 4px solid var(--p-color-primary); background: #fbfdfc;">
+      <h2 class="Polaris-Card-Title" style="margin-bottom: 0.5rem;">Storefront Practitioner Portal</h2>
+      <p style="margin: 0 0 0.5rem 0; color: var(--p-color-text-subdued); font-size: 0.875rem;">
+        Practitioners sign in, build client protocols, and manage regimens on your storefront at:
+      </p>
+      <div style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.5rem;">
+        <code style="background: #ffffff; border: 1px solid var(--p-color-border); padding: 0.35rem 0.65rem; border-radius: 4px; font-size: 0.875rem; font-weight: 600; color: #202223;">${escapeAdminText(portalUrl)}</code>
+        <button type="button" class="Polaris-Button copy-portal-btn" data-url="${escapeAdminText(portalUrl)}" style="font-size: 0.8125rem; padding: 0.35rem 0.65rem;">Copy URL</button>
+        <a href="${escapeAdminText(portalUrl)}" target="_blank" rel="noopener noreferrer" class="Polaris-Button" style="font-size: 0.8125rem; padding: 0.35rem 0.65rem;">Open Portal &rarr;</a>
+      </div>
+      <p style="margin: 0; font-size: 0.8125rem; color: var(--p-color-text-subdued);">
+        Need help adding this link to your storefront menu or learning the 3 user workflows?
+        <a href="?tab=guide" class="Polaris-Tab-Link" style="color: var(--p-color-primary); font-weight: 600; text-decoration: underline;">Read the How to Use Guide &rarr;</a>
+      </p>
+    </div>
     <div class="Polaris-Card">
       <h2 class="Polaris-Card-Title">Practitioner Directory &amp; Approvals</h2>
       <p style="color: var(--p-color-text-subdued); margin-bottom: 1rem;">Manage approved practitioners and configure practice display names.</p>
@@ -2116,11 +2192,231 @@ export function renderAdminHtml(options = {}) {
     </div>`;
   };
 
+  // Tab 6: How to Use Guide
+  const renderGuideTab = () => {
+    return `
+    <!-- Card 1: Storefront Portal Link -->
+    <div class="Polaris-Card" style="border-left: 4px solid var(--p-color-primary); background: #fbfdfc;">
+      <h2 class="Polaris-Card-Title" style="margin-bottom: 0.5rem;">Storefront Practitioner Portal</h2>
+      <p style="color: var(--p-color-text-subdued); font-size: 0.875rem; margin: 0 0 1rem 0;">
+        Both practitioners and clients interact with your store through this single App Proxy storefront URL. Practitioners sign in via passwordless email verification, while clients access their personalized protocol regimens.
+      </p>
+      <div style="display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; margin-bottom: 0.75rem;">
+        <code style="background: #ffffff; border: 1px solid var(--p-color-border); padding: 0.5rem 0.85rem; border-radius: 4px; font-size: 0.9375rem; font-weight: 600; color: #202223;">${escapeAdminText(portalUrl)}</code>
+        <button type="button" class="Polaris-Button copy-portal-btn" data-url="${escapeAdminText(portalUrl)}" style="font-weight: 600;">Copy Portal URL</button>
+        <a href="${escapeAdminText(portalUrl)}" target="_blank" rel="noopener noreferrer" class="Polaris-Button Polaris-Button--primary">Open Portal &rarr;</a>
+      </div>
+      <div style="font-size: 0.8125rem; color: var(--p-color-text-subdued);">
+        <strong>Tip:</strong> You don't need any special backend URL &mdash; Shopify securely routes requests from <code>/apps/protocols</code> on your storefront to the app proxy automatically.
+      </div>
+    </div>
+
+    <!-- Card 2: Merchant Storefront Menu Setup -->
+    <div class="Polaris-Card">
+      <h2 class="Polaris-Card-Title">1. Storefront Menu Setup (How Users Find the App)</h2>
+      <p style="color: var(--p-color-text-subdued); font-size: 0.875rem; margin-bottom: 1.25rem;">
+        When you install Practitioner Protocols, Shopify creates the secure <code>/apps/protocols</code> proxy route, but does <em>not</em> modify your storefront theme header or footer menu automatically. Follow these steps to add a link to your navigation menu:
+      </p>
+
+      <div class="Polaris-Step-Row">
+        <div class="Polaris-Step-Number">1</div>
+        <div class="Polaris-Step-Content">
+          <div class="Polaris-Step-Title">Open Shopify Navigation</div>
+          <p class="Polaris-Step-Desc">In your Shopify Admin left navigation, click <strong>Online Store</strong> &rarr; <strong>Navigation</strong> (or click the button below).</p>
+        </div>
+      </div>
+
+      <div class="Polaris-Step-Row">
+        <div class="Polaris-Step-Number">2</div>
+        <div class="Polaris-Step-Content">
+          <div class="Polaris-Step-Title">Choose Your Menu</div>
+          <p class="Polaris-Step-Desc">Click on <strong>Main menu</strong> (for header navigation) or <strong>Footer menu</strong> (for footer links).</p>
+        </div>
+      </div>
+
+      <div class="Polaris-Step-Row">
+        <div class="Polaris-Step-Number">3</div>
+        <div class="Polaris-Step-Content">
+          <div class="Polaris-Step-Title">Add Menu Item</div>
+          <p class="Polaris-Step-Desc">Click <strong>Add menu item</strong> at the bottom of the items list.</p>
+        </div>
+      </div>
+
+      <div class="Polaris-Step-Row">
+        <div class="Polaris-Step-Number">4</div>
+        <div class="Polaris-Step-Content">
+          <div class="Polaris-Step-Title">Configure Name and Link</div>
+          <p class="Polaris-Step-Desc">
+            Enter <strong>Name:</strong> <code>Practitioner Portal</code> (or <code>Client Protocols</code>).<br>
+            Enter <strong>Link:</strong> <code>/apps/protocols</code> (or the full URL: <code>${escapeAdminText(portalUrl)}</code>).
+          </p>
+        </div>
+      </div>
+
+      <div class="Polaris-Step-Row" style="margin-bottom: 1rem;">
+        <div class="Polaris-Step-Number">5</div>
+        <div class="Polaris-Step-Content">
+          <div class="Polaris-Step-Title">Save Menu</div>
+          <p class="Polaris-Step-Desc">Click <strong>Add</strong>, then click <strong>Save menu</strong>. Practitioners and returning clients will now see the portal link in your store navigation!</p>
+        </div>
+      </div>
+
+      <div style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--p-color-border);">
+        <a href="${escapeAdminText(navUrl)}" target="_blank" rel="noopener noreferrer" class="Polaris-Button">
+          Open Online Store Navigation in Admin &rarr;
+        </a>
+      </div>
+    </div>
+
+    <!-- Card 3: The Three User Roles & End-to-End Workflow -->
+    <div class="Polaris-Card">
+      <h2 class="Polaris-Card-Title">2. How the App Works: Three User Roles</h2>
+      <p style="color: var(--p-color-text-subdued); font-size: 0.875rem; margin-bottom: 1.25rem;">
+        Practitioner Protocols connects your store with healthcare providers, coaches, and their clients:
+      </p>
+
+      <div class="Polaris-Metrics-Grid" style="grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1.25rem;">
+        <!-- Role 1 -->
+        <div class="Polaris-Role-Card">
+          <div class="Polaris-Role-Title">
+            <span class="Polaris-Badge Polaris-Badge--attention">Role 1</span>
+            <strong>Merchant (Store Owner)</strong>
+          </div>
+          <p style="font-size: 0.8125rem; color: var(--p-color-text-subdued); margin: 0 0 0.75rem 0;">Controls the app from this Admin Dashboard:</p>
+          <ul style="font-size: 0.8125rem; margin: 0; padding-left: 1.25rem; color: var(--p-color-text); line-height: 1.6;">
+            <li><strong>Approve Practitioners:</strong> Review registrations in the <em>Practitioners</em> tab and assign professional practice names.</li>
+            <li><strong>Starter Templates:</strong> Publish brand-approved protocol templates in <em>Starter Templates</em> that practitioners can clone.</li>
+            <li><strong>Attribution &amp; Commission:</strong> Track protocol sales, calculate commissions, and download RFC 4180 CSV reports in <em>Attribution &amp; Reports</em>.</li>
+            <li><strong>Compliance &amp; Settings:</strong> Set disclaimer footers, choose Tag or Company identity mode, and manage store policies in <em>Settings</em>.</li>
+          </ul>
+        </div>
+
+        <!-- Role 2 -->
+        <div class="Polaris-Role-Card">
+          <div class="Polaris-Role-Title">
+            <span class="Polaris-Badge Polaris-Badge--success">Role 2</span>
+            <strong>Practitioner (Provider)</strong>
+          </div>
+          <p style="font-size: 0.8125rem; color: var(--p-color-text-subdued); margin: 0 0 0.75rem 0;">Builds protocols on your storefront portal:</p>
+          <ul style="font-size: 0.8125rem; margin: 0; padding-left: 1.25rem; color: var(--p-color-text); line-height: 1.6;">
+            <li><strong>Passwordless Login:</strong> Enters their email on <code>/apps/protocols</code> to receive a 6-digit one-time code (OTP). No passwords to remember.</li>
+            <li><strong>Search Catalog:</strong> Searches all active products directly from your store catalog.</li>
+            <li><strong>Personalize Regimen:</strong> Sets product dosages, instructions, notes, and optional protocol discounts.</li>
+            <li><strong>Share with Clients:</strong> Copies a private protocol link, prints a branded PDF handout, or shares a scannable QR code.</li>
+          </ul>
+        </div>
+
+        <!-- Role 3 -->
+        <div class="Polaris-Role-Card">
+          <div class="Polaris-Role-Title">
+            <span class="Polaris-Badge" style="background: #e4e7eb; color: #202223;">Role 3</span>
+            <strong>Client / Shopper</strong>
+          </div>
+          <p style="font-size: 0.8125rem; color: var(--p-color-text-subdued); margin: 0 0 0.75rem 0;">Purchases recommended products:</p>
+          <ul style="font-size: 0.8125rem; margin: 0; padding-left: 1.25rem; color: var(--p-color-text); line-height: 1.6;">
+            <li><strong>Dedicated Landing Page:</strong> Opens the protocol link to see prescribed items, schedules, and personalized notes under your store branding.</li>
+            <li><strong>1-Click Add All to Cart:</strong> Adds all recommended products and specified quantities with a single tap.</li>
+            <li><strong>Native Shopify Checkout:</strong> Checks out securely via Shopify Checkout with any protocol bundle discount pre-applied.</li>
+            <li><strong>Automated Attribution:</strong> Cart line-item properties attribute the completed order to the prescribing practitioner.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <!-- Card 4: 5-Minute End-to-End Testing Walkthrough -->
+    <div class="Polaris-Card">
+      <h2 class="Polaris-Card-Title">3. 5-Minute End-to-End Testing Checklist</h2>
+      <p style="color: var(--p-color-text-subdued); font-size: 0.875rem; margin-bottom: 1.25rem;">
+        Follow these exact steps to experience the complete workflow on your store right now:
+      </p>
+
+      <div class="Polaris-Step-Row">
+        <div class="Polaris-Step-Number">1</div>
+        <div class="Polaris-Step-Content">
+          <div class="Polaris-Step-Title">Open the Portal in an Incognito / Private Window</div>
+          <p class="Polaris-Step-Desc">Go to <code>${escapeAdminText(portalUrl)}</code> in an incognito window so you are not logged in as a Shopify admin.</p>
+        </div>
+      </div>
+
+      <div class="Polaris-Step-Row">
+        <div class="Polaris-Step-Number">2</div>
+        <div class="Polaris-Step-Content">
+          <div class="Polaris-Step-Title">Sign in as a Test Practitioner</div>
+          <p class="Polaris-Step-Desc">Enter a test email address and click <strong>Send Login Code</strong>. Check your email (or test console), enter the 6-digit OTP code, and enter a test practice name.</p>
+        </div>
+      </div>
+
+      <div class="Polaris-Step-Row">
+        <div class="Polaris-Step-Number">3</div>
+        <div class="Polaris-Step-Content">
+          <div class="Polaris-Step-Title">Approve the Practitioner (if Self-Enrollment requires approval)</div>
+          <p class="Polaris-Step-Desc">In this Admin app &rarr; <strong>Practitioners</strong> tab, locate your test practitioner and click <strong>Approve</strong>.</p>
+        </div>
+      </div>
+
+      <div class="Polaris-Step-Row">
+        <div class="Polaris-Step-Number">4</div>
+        <div class="Polaris-Step-Content">
+          <div class="Polaris-Step-Title">Create a Test Protocol</div>
+          <p class="Polaris-Step-Desc">In the practitioner portal, click <strong>Create Protocol</strong>. Select 1 or 2 products from your catalog, set dosage instructions (e.g. <em>Take 1 capsule morning and evening</em>), and click <strong>Publish Protocol</strong>.</p>
+        </div>
+      </div>
+
+      <div class="Polaris-Step-Row">
+        <div class="Polaris-Step-Number">5</div>
+        <div class="Polaris-Step-Content">
+          <div class="Polaris-Step-Title">Test the Client Experience &amp; Checkout</div>
+          <p class="Polaris-Step-Desc">Copy the generated protocol link, open it in another private browser tab, and click <strong>Add All to Cart</strong>. Complete a test checkout using Shopify's test gateway (Bogus gateway).</p>
+        </div>
+      </div>
+
+      <div class="Polaris-Step-Row" style="margin-bottom: 0.5rem;">
+        <div class="Polaris-Step-Number">6</div>
+        <div class="Polaris-Step-Content">
+          <div class="Polaris-Step-Title">Verify Attribution &amp; Reporting</div>
+          <p class="Polaris-Step-Desc">Switch back to this Admin app &rarr; <strong>Attribution &amp; Reports</strong> tab. You will see the new attributed order, gross revenue, and commission automatically tallied!</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Card 5: Frequently Asked Questions -->
+    <div class="Polaris-Card">
+      <h2 class="Polaris-Card-Title">4. Frequently Asked Questions</h2>
+
+      <div class="Polaris-Faq-Question">Do practitioners need a Shopify customer or staff account?</div>
+      <div class="Polaris-Faq-Answer">
+        No! Practitioners authenticate through the storefront portal using passwordless 6-digit email OTPs. They do not require a Shopify staff account, nor do they ever have access to your Shopify admin or backend settings.
+      </div>
+
+      <div class="Polaris-Faq-Question">How are commissions tracked and paid?</div>
+      <div class="Polaris-Faq-Answer">
+        When a client adds items to their cart through a protocol link, hidden cart line-item properties tag the products. When Shopify processes payment, the app webhook attributes the order to the practitioner. You can review commission totals in the <em>Attribution &amp; Reports</em> tab and export an RFC 4180 CSV file to process payouts via PayPal, direct deposit, or your preferred payment method.
+      </div>
+
+      <div class="Polaris-Faq-Question">Can I create brand templates for practitioners to use?</div>
+      <div class="Polaris-Faq-Answer">
+        Yes! Go to the <em>Starter Templates</em> tab to create standard product combinations. Any approved practitioner can clone your starter templates with one click to quickly build regimens for their clients.
+      </div>
+
+      <div class="Polaris-Faq-Question">What happens if a product in a protocol is out of stock?</div>
+      <div class="Polaris-Faq-Answer">
+        The protocol page automatically displays an out-of-stock badge on unavailable items and disables their add-to-cart checkbox, while allowing clients to easily purchase all other in-stock items in the regimen.
+      </div>
+
+      <div class="Polaris-Faq-Question">What is the difference between Tag and Company identity modes?</div>
+      <div class="Polaris-Faq-Answer">
+        In <strong>Tag Mode</strong> (default), protocols are owned by individual practitioners. In <strong>Company Mode</strong>, protocols are owned centrally by your store/clinic, ensuring protocols remain accessible even if individual practitioners leave. You can switch this in the <em>Settings &amp; Emergency</em> tab.
+      </div>
+    </div>
+    `;
+  };
+
   let tabContent = '';
   if (currentTab === 'starters') tabContent = renderStartersTab();
   else if (currentTab === 'attribution') tabContent = renderAttributionTab();
   else if (currentTab === 'contacts') tabContent = renderContactsTab();
   else if (currentTab === 'settings') tabContent = renderSettingsTab();
+  else if (currentTab === 'guide') tabContent = renderGuideTab();
   else tabContent = renderPractitionersTab();
 
   const appBridgeHead = apiKey
@@ -2148,6 +2444,7 @@ ${appBridgeHead}  <title>Practitioner Protocols &mdash; Admin</title>
       <a href="?tab=attribution" class="Polaris-Tab ${currentTab === 'attribution' ? 'Polaris-Tab--selected' : ''}">Attribution &amp; Reports</a>
       <a href="?tab=contacts" class="Polaris-Tab ${currentTab === 'contacts' ? 'Polaris-Tab--selected' : ''}">Contacts</a>
       <a href="?tab=settings" class="Polaris-Tab ${currentTab === 'settings' ? 'Polaris-Tab--selected' : ''}">Settings &amp; Emergency</a>
+      <a href="?tab=guide" class="Polaris-Tab ${currentTab === 'guide' ? 'Polaris-Tab--selected' : ''}">How to Use</a>
     </nav>
 
     <main>
@@ -2169,8 +2466,8 @@ ${appBridgeHead}  <title>Practitioner Protocols &mdash; Admin</title>
         return params.get('id_token') || '';
       }
 
-      // Preserve query params and session token across Polaris tabs
-      document.querySelectorAll('a.Polaris-Tab').forEach(function(link) {
+      // Preserve query params and session token across Polaris tabs and in-page guide links
+      document.querySelectorAll('a.Polaris-Tab, a.Polaris-Tab-Link').forEach(function(link) {
         link.addEventListener('click', async function(e) {
           e.preventDefault();
           const currentUrl = new URL(window.location.href);
@@ -2186,6 +2483,39 @@ ${appBridgeHead}  <title>Practitioner Protocols &mdash; Admin</title>
             targetUrl.searchParams.set('id_token', token);
           }
           window.location.href = targetUrl.toString();
+        });
+      });
+
+      // Copy portal URL button handling
+      function fallbackCopy(text, btn) {
+        try {
+          const tempInput = document.createElement('input');
+          tempInput.value = text;
+          document.body.appendChild(tempInput);
+          tempInput.select();
+          document.execCommand('copy');
+          document.body.removeChild(tempInput);
+          const prev = btn.textContent;
+          btn.textContent = 'Copied!';
+          setTimeout(function() { btn.textContent = prev; }, 2000);
+        } catch (e) {}
+      }
+
+      document.querySelectorAll('.copy-portal-btn').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+          const url = btn.getAttribute('data-url') || '';
+          if (!url) return;
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(url).then(function() {
+              const prev = btn.textContent;
+              btn.textContent = 'Copied!';
+              setTimeout(function() { btn.textContent = prev; }, 2000);
+            }).catch(function() {
+              fallbackCopy(url, btn);
+            });
+          } else {
+            fallbackCopy(url, btn);
+          }
         });
       });
 

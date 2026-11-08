@@ -1175,8 +1175,26 @@ Run the five spikes in a day or two on a dev store; write the answers into secti
    - Allowed optional `fetchFn` in `createRequestListener(options)` for deterministic testing.
 3. **Automated Test Coverage:**
    - Added unit test in `test/server.test.js` verifying `GET /api/auth/callback` sends `expiring: 1` to `https://${shop}/admin/oauth/access_token` and persists the computed `expires` Date in the `Session` table.
-   - 582 unit tests passing across 132 suites (`npm test`). Zero failures.
-   - 593 tests across 133 suites in `npm run test:all` (582 passing, 11 skipped live DB integration tests).
+   - Added unit tests in `test/admin.test.js` verifying the "How to Use" guide tab (`?tab=guide`), storefront menu setup guidance, 3-role breakdown, 5-minute testing checklist, FAQ, and the storefront portal onboarding card on the Practitioners tab.
+   - 584 unit tests passing across 132 suites (`npm test`). Zero failures.
+   - 595 tests across 133 suites in `npm run test:all` (584 passing, 11 skipped live DB integration tests).
+
+---
+
+### In-App Usage Guide Tab (`feat/admin-usage-guide-tab`)
+1. **Storefront Navigation & Onboarding:**
+   - Added dedicated "How to Use" tab (`?tab=guide`) to embedded Polaris Admin.
+   - Direct Storefront Portal Link: `https://${safeShop}/apps/protocols` with one-click clipboard copy (`.copy-portal-btn`) and fallback support.
+   - Step-by-step merchant setup guide on linking `/apps/protocols` under Shopify Admin &rarr; **Online Store &rarr; Navigation** (`/admin/menus`).
+2. **Three Roles & Complete Workflow Architecture:**
+   - **Role 1 (Merchant / Store Admin):** Practitioner approvals, practice display names, starter templates, commission & attribution reports, compliance/emergency controls.
+   - **Role 2 (Practitioner / Provider):** Passwordless 6-digit email OTP login, catalog search, protocol builder (dosages, notes, discounts), client sharing (link, PDF handout, QR code).
+   - **Role 3 (Client / Shopper):** Personalized protocol landing page, 1-click Add All to Cart, native Shopify Checkout, automated order attribution.
+3. **Interactive & Practical Utilities:**
+   - 5-Minute End-to-End Walkthrough checklist for testing with test gateway.
+   - Practitioner onboarding callout card on default `Practitioners` tab linking to the guide.
+   - Comprehensive FAQ answering staff permissions, stock handling, commission payouts, and identity modes.
+   - Zero-PII barrier preserved, App Bridge token/query preservation on tab links.
 
 
 

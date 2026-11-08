@@ -1819,11 +1819,16 @@ describe('Merchant Admin Layer (app/lib/protocols/admin.js)', () => {
       assert.ok(html.includes('Role 3'));
       assert.ok(html.includes('Client / Shopper'));
 
-      // Card 4: 5-Minute Testing Checklist
-      assert.ok(html.includes('3. 5-Minute End-to-End Testing Checklist'));
-      assert.ok(html.includes('Open the Portal in an Incognito / Private Window'));
-      assert.ok(html.includes('Sign in as a Test Practitioner'));
-      assert.ok(html.includes('Test the Client Experience &amp; Checkout'));
+      // Card 4: End-to-End Walkthrough across 4 Acts
+      assert.ok(html.includes('3. Complete Step-by-Step App Walkthrough (All 3 Roles across 4 Acts)'));
+      assert.ok(html.includes('Act 1'));
+      assert.ok(html.includes('The Store Owner (Shopify Admin Setup)'));
+      assert.ok(html.includes('Act 2'));
+      assert.ok(html.includes('The Practitioner (Storefront Portal)'));
+      assert.ok(html.includes('Act 3'));
+      assert.ok(html.includes('The Shopper / Client (Seamless 1-Click Purchase)'));
+      assert.ok(html.includes('Act 4'));
+      assert.ok(html.includes('Sales Attribution &amp; Reports (Back to Merchant Admin)'));
 
       // Card 5: FAQ
       assert.ok(html.includes('4. Frequently Asked Questions'));

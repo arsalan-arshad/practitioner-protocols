@@ -2323,59 +2323,65 @@ export function renderAdminHtml(options = {}) {
       </div>
     </div>
 
-    <!-- Card 4: 5-Minute End-to-End Testing Walkthrough -->
+    <!-- Card 4: End-to-End Walkthrough (4 Acts) -->
     <div class="Polaris-Card">
-      <h2 class="Polaris-Card-Title">3. 5-Minute End-to-End Testing Checklist</h2>
+      <h2 class="Polaris-Card-Title">3. Complete Step-by-Step App Walkthrough (All 3 Roles across 4 Acts)</h2>
       <p style="color: var(--p-color-text-subdued); font-size: 0.875rem; margin-bottom: 1.25rem;">
-        Follow these exact steps to experience the complete workflow on your store right now:
+        Follow this 4-act journey to test and experience the entire app lifecycle on your store:
       </p>
 
-      <div class="Polaris-Step-Row">
-        <div class="Polaris-Step-Number">1</div>
-        <div class="Polaris-Step-Content">
-          <div class="Polaris-Step-Title">Open the Portal in an Incognito / Private Window</div>
-          <p class="Polaris-Step-Desc">Go to <code>${escapeAdminText(portalUrl)}</code> in an incognito window so you are not logged in as a Shopify admin.</p>
+      <!-- Act 1 -->
+      <div style="background: #fafbfb; border: 1px solid var(--p-color-border); border-radius: 6px; padding: 1rem; margin-bottom: 1rem;">
+        <div style="font-weight: 700; font-size: 0.9375rem; margin-bottom: 0.5rem; color: #202223; display: flex; align-items: center; gap: 0.5rem;">
+          <span class="Polaris-Badge Polaris-Badge--attention">Act 1</span>
+          <span>The Store Owner (Shopify Admin Setup)</span>
         </div>
+        <ol style="margin: 0; padding-left: 1.25rem; font-size: 0.875rem; line-height: 1.6; color: var(--p-color-text);">
+          <li><strong>Enable Self-Enrolment:</strong> Open the <strong>Settings</strong> tab in this app, ensure <em>"Allow Practitioner Self-Enrolment"</em> is checked, and save settings.</li>
+          <li><strong>(Optional) Curate Starter Templates:</strong> In the <strong>Starter Templates</strong> tab, click <em>Create Starter Template</em> (e.g. "Daily Essentials Stack"). Add products and default directions so practitioners can clone them with one tap.</li>
+        </ol>
       </div>
 
-      <div class="Polaris-Step-Row">
-        <div class="Polaris-Step-Number">2</div>
-        <div class="Polaris-Step-Content">
-          <div class="Polaris-Step-Title">Sign in as a Test Practitioner</div>
-          <p class="Polaris-Step-Desc">Enter a test email address and click <strong>Send Login Code</strong>. Check your email (or test console), enter the 6-digit OTP code, and enter a test practice name.</p>
+      <!-- Act 2 -->
+      <div style="background: #fafbfb; border: 1px solid var(--p-color-border); border-radius: 6px; padding: 1rem; margin-bottom: 1rem;">
+        <div style="font-weight: 700; font-size: 0.9375rem; margin-bottom: 0.5rem; color: #202223; display: flex; align-items: center; gap: 0.5rem;">
+          <span class="Polaris-Badge Polaris-Badge--success">Act 2</span>
+          <span>The Practitioner (Storefront Portal)</span>
         </div>
+        <ol style="margin: 0; padding-left: 1.25rem; font-size: 0.875rem; line-height: 1.6; color: var(--p-color-text);">
+          <li><strong>Access Portal:</strong> In an incognito / private browser window, navigate to <code>${escapeAdminText(portalUrl)}</code>.</li>
+          <li><strong>Sign In &amp; Request Access:</strong> Enter an email to receive a 6-digit one-time code (OTP). Enter your practice name (e.g. <em>"Holistic Care Clinic"</em>) and submit your registration.</li>
+          <li><strong>Merchant Approval:</strong> Switch back to this Admin app &rarr; <strong>Practitioners</strong> tab, find the pending registration, and click <strong>Approve</strong>.</li>
+          <li><strong>Build Protocol:</strong> Refresh the portal in your incognito tab to view the active Practitioner Dashboard. Click <strong>+ Create New Protocol</strong>, search products from your store catalog, specify dosages (e.g. <em>"Take 1 capsule twice daily after meals"</em>), and click <strong>Save Protocol</strong>.</li>
+          <li><strong>Share with Clients:</strong> Click <strong>Copy Link</strong> to get the client URL, or click <strong>Print Handout</strong> to generate a clean, printable PDF regimen with an automated QR code!</li>
+        </ol>
       </div>
 
-      <div class="Polaris-Step-Row">
-        <div class="Polaris-Step-Number">3</div>
-        <div class="Polaris-Step-Content">
-          <div class="Polaris-Step-Title">Approve the Practitioner (if Self-Enrollment requires approval)</div>
-          <p class="Polaris-Step-Desc">In this Admin app &rarr; <strong>Practitioners</strong> tab, locate your test practitioner and click <strong>Approve</strong>.</p>
+      <!-- Act 3 -->
+      <div style="background: #fafbfb; border: 1px solid var(--p-color-border); border-radius: 6px; padding: 1rem; margin-bottom: 1rem;">
+        <div style="font-weight: 700; font-size: 0.9375rem; margin-bottom: 0.5rem; color: #202223; display: flex; align-items: center; gap: 0.5rem;">
+          <span class="Polaris-Badge" style="background: #e4e7eb; color: #202223;">Act 3</span>
+          <span>The Shopper / Client (Seamless 1-Click Purchase)</span>
         </div>
+        <ol style="margin: 0; padding-left: 1.25rem; font-size: 0.875rem; line-height: 1.6; color: var(--p-color-text);">
+          <li><strong>Open Protocol Link:</strong> In a new tab, open the client protocol link. Notice the practitioner's practice header (<em>"Recommended by Holistic Care Clinic"</em>) alongside products, pricing, and directions.</li>
+          <li><strong>1-Click Add All to Cart:</strong> Click <strong>Add All to Cart</strong>. All recommended products are added directly into the Shopify cart in a single batch, tagged with hidden attribution properties (<code>_protocol_token</code>).</li>
+          <li><strong>(Optional) Opt-In:</strong> Test the <em>"Stay in touch"</em> box at the bottom of the protocol page by entering an email to opt into updates.</li>
+          <li><strong>Checkout:</strong> Complete checkout using Shopify's test gateway (Bogus gateway).</li>
+        </ol>
       </div>
 
-      <div class="Polaris-Step-Row">
-        <div class="Polaris-Step-Number">4</div>
-        <div class="Polaris-Step-Content">
-          <div class="Polaris-Step-Title">Create a Test Protocol</div>
-          <p class="Polaris-Step-Desc">In the practitioner portal, click <strong>Create Protocol</strong>. Select 1 or 2 products from your catalog, set dosage instructions (e.g. <em>Take 1 capsule morning and evening</em>), and click <strong>Publish Protocol</strong>.</p>
+      <!-- Act 4 -->
+      <div style="background: #fafbfb; border: 1px solid var(--p-color-border); border-radius: 6px; padding: 1rem; margin-bottom: 0.5rem;">
+        <div style="font-weight: 700; font-size: 0.9375rem; margin-bottom: 0.5rem; color: #202223; display: flex; align-items: center; gap: 0.5rem;">
+          <span class="Polaris-Badge" style="background: #d4e5f9; color: #1a4d7c;">Act 4</span>
+          <span>Sales Attribution &amp; Reports (Back to Merchant Admin)</span>
         </div>
-      </div>
-
-      <div class="Polaris-Step-Row">
-        <div class="Polaris-Step-Number">5</div>
-        <div class="Polaris-Step-Content">
-          <div class="Polaris-Step-Title">Test the Client Experience &amp; Checkout</div>
-          <p class="Polaris-Step-Desc">Copy the generated protocol link, open it in another private browser tab, and click <strong>Add All to Cart</strong>. Complete a test checkout using Shopify's test gateway (Bogus gateway).</p>
-        </div>
-      </div>
-
-      <div class="Polaris-Step-Row" style="margin-bottom: 0.5rem;">
-        <div class="Polaris-Step-Number">6</div>
-        <div class="Polaris-Step-Content">
-          <div class="Polaris-Step-Title">Verify Attribution &amp; Reporting</div>
-          <p class="Polaris-Step-Desc">Switch back to this Admin app &rarr; <strong>Attribution &amp; Reports</strong> tab. You will see the new attributed order, gross revenue, and commission automatically tallied!</p>
-        </div>
+        <ol style="margin: 0; padding-left: 1.25rem; font-size: 0.875rem; line-height: 1.6; color: var(--p-color-text);">
+          <li><strong>View Attribution:</strong> In this Admin app, open the <strong>Attribution &amp; Reports</strong> tab. The order count, units sold, and revenue are immediately attributed to the practitioner and protocol!</li>
+          <li><strong>Export CSV:</strong> Click <strong>Export CSV (RFC 4180)</strong> to download a clean financial accounting spreadsheet for commission payouts.</li>
+          <li><strong>Review Contacts:</strong> Open the <strong>Contacts</strong> tab to view shoppers who opted in to stay in touch with their prescribing practitioner.</li>
+        </ol>
       </div>
     </div>
 

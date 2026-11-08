@@ -1788,6 +1788,75 @@ describe('Merchant Admin Layer (app/lib/protocols/admin.js)', () => {
         );
       }
     });
+
+    it('renders How to Use guide tab with 3 roles, menu instructions, test walkthrough, and FAQ', () => {
+      const html = renderAdminHtml({
+        shop: testShop,
+        activeTab: 'guide'
+      });
+
+      // Navigation tab check
+      assert.ok(html.includes('href="?tab=guide"'), 'Must render guide navigation tab');
+      assert.ok(html.includes('Polaris-Tab--selected">How to Use</a>'), 'Must mark guide tab as selected');
+
+      // Card 1: Storefront Portal Link
+      assert.ok(html.includes('Storefront Practitioner Portal'));
+      assert.ok(html.includes(`https://${testShop}/apps/protocols`));
+      assert.ok(html.includes('copy-portal-btn'));
+      assert.ok(html.includes('Open Portal &rarr;'));
+
+      // Card 2: Storefront Menu Setup
+      assert.ok(html.includes('1. Storefront Menu Setup (How Users Find the App)'));
+      assert.ok(html.includes('<strong>Online Store</strong> &rarr; <strong>Navigation</strong>'));
+      assert.ok(html.includes(`https://${testShop}/admin/menus`));
+
+      // Card 3: 3 User Roles
+      assert.ok(html.includes('2. How the App Works: Three User Roles'));
+      assert.ok(html.includes('Role 1'));
+      assert.ok(html.includes('Merchant (Store Owner)'));
+      assert.ok(html.includes('Role 2'));
+      assert.ok(html.includes('Practitioner (Provider)'));
+      assert.ok(html.includes('Role 3'));
+      assert.ok(html.includes('Client / Shopper'));
+
+      // Card 4: End-to-End Walkthrough across 4 Acts
+      assert.ok(html.includes('3. Complete Step-by-Step App Walkthrough (All 3 Roles across 4 Acts)'));
+      assert.ok(html.includes('Act 1'));
+      assert.ok(html.includes('The Store Owner (Shopify Admin Setup)'));
+      assert.ok(html.includes('Act 2'));
+      assert.ok(html.includes('The Practitioner (Storefront Portal)'));
+      assert.ok(html.includes('Act 3'));
+      assert.ok(html.includes('The Shopper / Client (Seamless 1-Click Purchase)'));
+      assert.ok(html.includes('Act 4'));
+      assert.ok(html.includes('Sales Attribution &amp; Reports (Back to Merchant Admin)'));
+
+      // Card 5: FAQ
+      assert.ok(html.includes('4. Frequently Asked Questions'));
+      assert.ok(html.includes('Do practitioners need a Shopify customer or staff account?'));
+      assert.ok(html.includes('How are commissions tracked and paid?'));
+
+      // Script syntax verification
+      const matches = [...html.matchAll(/<script(?![^>]*type=["']application\/json["'])>([\s\S]*?)<\/script>/gi)];
+      for (let i = 0; i < matches.length; i++) {
+        assert.doesNotThrow(
+          () => new vm.Script(matches[i][1]),
+          `Admin guide script index ${i} must parse without SyntaxError`
+        );
+      }
+    });
+
+    it('renders storefront portal onboarding card on the Practitioners tab with quick copy button and link to guide', () => {
+      const html = renderAdminHtml({
+        shop: testShop,
+        activeTab: 'practitioners'
+      });
+
+      assert.ok(html.includes('Storefront Practitioner Portal'));
+      assert.ok(html.includes(`https://${testShop}/apps/protocols`));
+      assert.ok(html.includes('copy-portal-btn'));
+      assert.ok(html.includes('href="?tab=guide"'));
+      assert.ok(html.includes('Read the How to Use Guide &rarr;'));
+    });
   });
 
   describe('Admin Session Token Verification', () => {

@@ -2732,17 +2732,43 @@ ${appBridgeHead}  <title>Practitioner Protocols &mdash; Admin</title>
         });
       }
 
+      function showStarterMessage(msg, isError, asHtml) {
+        const msgEl = document.getElementById('admin-starter-search-message');
+        if (!msgEl) return;
+        msgEl.style.display = 'block';
+        msgEl.setAttribute('role', isError ? 'alert' : 'status');
+        if (isError) {
+          msgEl.style.background = '#fee2e2';
+          msgEl.style.border = '1px solid #fca5a5';
+          msgEl.style.color = '#991b1b';
+        } else {
+          msgEl.style.background = '#fef3c7';
+          msgEl.style.border = '1px solid #fcd34d';
+          msgEl.style.color = '#92400e';
+        }
+        if (asHtml) {
+          msgEl.innerHTML = msg;
+        } else {
+          msgEl.textContent = msg;
+        }
+      }
+
+      function clearStarterMessage() {
+        const msgEl = document.getElementById('admin-starter-search-message');
+        if (msgEl) {
+          msgEl.style.display = 'none';
+          msgEl.innerHTML = '';
+          msgEl.removeAttribute('role');
+        }
+      }
+
       function resetStarterModalState() {
         if (starterSearchInput) starterSearchInput.value = '';
         if (starterSearchDropdown) {
           starterSearchDropdown.style.display = 'none';
           starterSearchDropdown.innerHTML = '';
         }
-        const msgEl = document.getElementById('admin-starter-search-message');
-        if (msgEl) {
-          msgEl.style.display = 'none';
-          msgEl.innerHTML = '';
-        }
+        clearStarterMessage();
       }
 
       function closeStarterModal() {
@@ -2757,11 +2783,7 @@ ${appBridgeHead}  <title>Practitioner Protocols &mdash; Admin</title>
 
       function performStarterSearch() {
         const q = (starterSearchInput ? starterSearchInput.value : '').trim();
-        const msgEl = document.getElementById('admin-starter-search-message');
-        if (msgEl) {
-          msgEl.style.display = 'none';
-          msgEl.innerHTML = '';
-        }
+        clearStarterMessage();
 
         if (q.length < 2 || !starterSearchDropdown) return;
         starterSearchDropdown.style.display = 'block';
@@ -2801,7 +2823,7 @@ ${appBridgeHead}  <title>Practitioner Protocols &mdash; Admin</title>
                     if (p.variants && p.variants.length > 0) {
                       addVariantToStarter(p, p.variants[0], handle);
                     } else {
-                      alert('Could not load product variants');
+                      showStarterMessage('Could not load product variants', true, false);
                     }
                   });
               });
@@ -2813,13 +2835,7 @@ ${appBridgeHead}  <title>Practitioner Protocols &mdash; Admin</title>
               starterSearchDropdown.style.display = 'none';
               starterSearchDropdown.innerHTML = '';
             }
-            if (msgEl) {
-              msgEl.style.display = 'block';
-              msgEl.style.background = '#fef3c7';
-              msgEl.style.border = '1px solid #fcd34d';
-              msgEl.style.color = '#92400e';
-              msgEl.innerHTML = 'Storefront catalog search is unavailable from the embedded admin iframe without storefront CORS. Please click <strong>Browse Products</strong> above to open the native Shopify picker, or use the <strong>Advanced: Enter Variant GID directly</strong> section below (now opened).';
-            }
+            showStarterMessage('Storefront catalog search is unavailable from the embedded admin iframe without storefront CORS. Please click <strong>Browse Products</strong> above to open the native Shopify picker, or use the <strong>Advanced: Enter Variant GID directly</strong> section below (now opened).', false, true);
             const advDetails = document.getElementById('admin-starter-advanced-details');
             if (advDetails) {
               advDetails.open = true;
@@ -2829,16 +2845,16 @@ ${appBridgeHead}  <title>Practitioner Protocols &mdash; Admin</title>
 
       function addVariantToStarter(prod, variant, handle) {
         if (starterItems.length >= 20) {
-          alert('Maximum 20 lines allowed per starter template.');
+          showStarterMessage('Maximum 20 lines allowed per starter template.', true, false);
           return;
         }
         const vGid = variant.id ? (String(variant.id).startsWith('gid://') ? String(variant.id) : 'gid://shopify/ProductVariant/' + variant.id) : '';
         if (!vGid || !vGid.startsWith('gid://shopify/ProductVariant/')) {
-          alert('Invalid variant: must be a product variant GID');
+          showStarterMessage('Invalid variant: must be a product variant GID', true, false);
           return;
         }
         if (starterItems.some(function(i) { return i.variantGid === vGid; })) {
-          alert('This product variant is already in the starter template.');
+          showStarterMessage('This product variant is already in the starter template.', true, false);
           return;
         }
         const title = variant.title && variant.title !== 'Default Title' ? (prod.title + ' - ' + variant.title) : (prod.title || 'Product');
@@ -2883,14 +2899,7 @@ ${appBridgeHead}  <title>Practitioner Protocols &mdash; Admin</title>
                     addVariantToStarter(prod, v, prod.handle);
                   });
                 } else {
-                  const msgEl = document.getElementById('admin-starter-search-message');
-                  if (msgEl) {
-                    msgEl.style.display = 'block';
-                    msgEl.style.background = '#fef3c7';
-                    msgEl.style.border = '1px solid #fcd34d';
-                    msgEl.style.color = '#92400e';
-                    msgEl.textContent = 'This product has no selectable variants';
-                  }
+                  showStarterMessage('This product has no selectable variants', false, false);
                 }
               });
             }).catch(function(err) {
@@ -2899,14 +2908,7 @@ ${appBridgeHead}  <title>Practitioner Protocols &mdash; Admin</title>
           } else {
             const adv = document.getElementById('admin-starter-advanced-details');
             if (adv) adv.open = true;
-            const msgEl = document.getElementById('admin-starter-search-message');
-            if (msgEl) {
-              msgEl.style.display = 'block';
-              msgEl.style.background = '#fef3c7';
-              msgEl.style.border = '1px solid #fcd34d';
-              msgEl.style.color = '#92400e';
-              msgEl.innerHTML = 'Shopify Resource Picker is active when viewed inside Shopify Admin. Please use the <strong>Advanced: Enter Variant GID directly</strong> section below to add variants.';
-            }
+            showStarterMessage('Shopify Resource Picker is active when viewed inside Shopify Admin. Please use the <strong>Advanced: Enter Variant GID directly</strong> section below to add variants.', false, true);
           }
         });
       }
@@ -2920,23 +2922,23 @@ ${appBridgeHead}  <title>Practitioner Protocols &mdash; Admin</title>
         manualAddBtn.addEventListener('click', function() {
           let gid = (manualGidInput ? manualGidInput.value : '').trim();
           if (!gid) {
-            alert('Please enter a variant GID.');
+            showStarterMessage('Please enter a variant GID.', true, false);
             return;
           }
           if (!gid.startsWith('gid://shopify/ProductVariant/')) {
             if (/^\d+$/.test(gid)) {
               gid = 'gid://shopify/ProductVariant/' + gid;
             } else {
-              alert('Variant ID must be numeric or gid://shopify/ProductVariant/<id>');
+              showStarterMessage('Variant ID must be numeric or gid://shopify/ProductVariant/<id>', true, false);
               return;
             }
           }
           if (starterItems.some(function(i) { return i.variantGid === gid; })) {
-            alert('This product variant is already in the starter template.');
+            showStarterMessage('This product variant is already in the starter template.', true, false);
             return;
           }
           if (starterItems.length >= 20) {
-            alert('Maximum 20 lines allowed per starter template.');
+            showStarterMessage('Maximum 20 lines allowed per starter template.', true, false);
             return;
           }
           const handle = (manualHandleInput ? manualHandleInput.value : '').trim().toLowerCase();
@@ -2954,9 +2956,18 @@ ${appBridgeHead}  <title>Practitioner Protocols &mdash; Admin</title>
           if (manualHandleInput) manualHandleInput.value = '';
           if (manualTitleInput) manualTitleInput.value = '';
 
+          clearStarterMessage();
           updateStarterRows();
         });
       }
+
+      [manualGidInput, manualHandleInput, manualTitleInput].forEach(function(inp) {
+        if (inp) {
+          inp.addEventListener('input', function() {
+            clearStarterMessage();
+          });
+        }
+      });
 
       if (starterSearchBtn) {
         starterSearchBtn.addEventListener('click', performStarterSearch);
@@ -2966,11 +2977,7 @@ ${appBridgeHead}  <title>Practitioner Protocols &mdash; Admin</title>
         starterSearchInput.addEventListener('input', function() {
           clearTimeout(debounceTimer);
           if (!starterSearchInput.value.trim()) {
-            const msgEl = document.getElementById('admin-starter-search-message');
-            if (msgEl) {
-              msgEl.style.display = 'none';
-              msgEl.innerHTML = '';
-            }
+            clearStarterMessage();
             if (starterSearchDropdown) {
               starterSearchDropdown.style.display = 'none';
               starterSearchDropdown.innerHTML = '';
@@ -2984,7 +2991,7 @@ ${appBridgeHead}  <title>Practitioner Protocols &mdash; Admin</title>
         starterForm.addEventListener('submit', function(e) {
           if (starterItems.length === 0) {
             e.preventDefault();
-            alert('Please add at least one product line item to the starter template.');
+            showStarterMessage('Please add at least one product line item to the starter template.', true, false);
           }
         });
       }

@@ -1,6 +1,6 @@
 # Practitioner Protocols — Project Context (for Claude)
 
-_Snapshot: 2026-11-09 · Live Railway deployment active (`practitioner-protocols-production.up.railway.app`) with internal Postgres & ledger migrations · Production app record "Practitioner Protocols" released (v2, Public distribution) · Production hardening complete · Milestones M9a, M9b-1, M9b-2, M9b-3a & M9b-3b VERIFIED LIVE on dev store · Milestone M11 (Shopper Opt-In & Merchant Contact Hardening) implemented · Pre-submission hardening complete · Spikes S2, S3, S4, S5, S6 resolved; S1 resolved on the Plus dev store only · Brand assets v2 & v3 produced and verified · Demo gaps and accuracy fixes branch (`feat/demo-gaps-and-accuracy-fixes`) implemented with Liquid injection defense and App Bridge resource picker · 588 tests passing across 132 suites._
+_Snapshot: 2026-11-09 · Live Railway deployment active (`practitioner-protocols-production.up.railway.app`) with internal Postgres & ledger migrations · Production app record "Practitioner Protocols" released (v2, Public distribution) · Production hardening complete · Milestones M9a, M9b-1, M9b-2, M9b-3a & M9b-3b VERIFIED LIVE on dev store · Milestone M11 (Shopper Opt-In & Merchant Contact Hardening) implemented · Pre-submission hardening complete · Spikes S2, S3, S4, S5, S6 resolved; S1 resolved on the Plus dev store only · Brand assets v2 & v3 produced and verified · Demo gaps and accuracy fixes merged (PR #28) · Issue #29 resolved (modal in-page error messaging) · 591 tests passing across 132 suites._
 _Contains NO secrets. Never paste `.env` values or tokens into chat or docs._
 
 ## 1. What this is
@@ -1245,6 +1245,31 @@ Following a full live dev store demo recording, 7 discrepancies between document
    - **Liquid Injection Neutralization (Blocker 1):** Handout HTML rendered under `Content-Type: application/liquid; charset=utf-8` now escapes `{`, `}`, and `%` as `&#123;`, `&#125;`, `&#37;` using shared `escapeHtml` imported from `proxy.js`. Neutralizes all practitioner and merchant dynamic fields (`protocol.name`, `introNote`, line `usageNote`, `practiceName`, `handoutText`, `footerDisclaimer`, `shareUrl`) to prevent template injection through Shopify's Liquid compiler.
    - **Standards Mode DOCTYPE Order (Blocker 2):** Removed `<meta name="robots">` prepended before `<!DOCTYPE html>` in `routes.js`. Injected `<meta name="robots" content="noindex, nofollow">` inside `<head>` in `renderHandoutHtml`, ensuring `{% layout none %}` is followed immediately by standards-mode `<!DOCTYPE html>`.
    - Comprehensive regression tests in `test/handout.test.js`, `test/routes.test.js`, `test/portal.test.js`, and `test/admin.test.js` bringing total passing unit tests to 588 across 132 suites with zero failures.
+
+---
+
+## 47. Replace alert() in Starter Modal with Accessible In-Page Messages (Issue #29, 2026-11-09)
+
+In modern Shopify embedded admin apps running inside an iframe on `admin.shopify.com`, native browser `alert()` dialogs are frequently suppressed, blocked, or cause poor UX. Issue #29 addressed this in branch `fix/starter-modal-alerts`:
+
+1. **Elimination of all `alert()` calls in the starter modal:**
+   - Invalid variant GID (`must be a product variant GID`)
+   - Duplicate variant warning (`This product variant is already in the starter template.`)
+   - Maximum 20-item cap (`Maximum 20 lines allowed per starter template.`)
+   - Empty variant input on manual add (`Please enter a variant GID.`)
+   - Malformed variant ID on manual add (`Variant ID must be numeric or gid://shopify/ProductVariant/<id>`)
+   - Empty line items on template submission (`Please add at least one product line item to the starter template.`)
+   - Variant fetch failures on search suggestion click (`Could not load product variants`)
+
+2. **Unified In-Page Message & Alert Banner:**
+   - Introduced `showStarterMessage(msg, isError, asHtml)` and `clearStarterMessage()`.
+   - Utilizes `#admin-starter-search-message` rendered in normal document flow with appropriate semantic styles (critical red for errors, amber for notices/warnings) and dynamic `role="alert"` / `role="status"` accessibility attributes.
+   - Clears automatically when the user selects a product, resets the modal, enters text in manual inputs, or clears the search field.
+
+3. **Verification:**
+   - Added unit test in `test/admin.test.js` verifying zero `alert()` calls in the starter modal script and asserting in-page error message rendering.
+   - 591 unit tests passing across 132 suites (`npm test`). Zero failures.
+
 
 
 

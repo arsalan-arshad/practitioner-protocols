@@ -1597,6 +1597,30 @@ describe('Merchant Admin Layer (app/lib/protocols/admin.js)', () => {
       assert.ok(!html.includes('placeholder="gid://shopify/ProductVariant/...'));
     });
 
+    it('uses in-page messages and zero alert() calls in the starter template modal (Issue #29)', () => {
+      const html = renderAdminHtml({
+        shop: testShop,
+        starters: mockStarters,
+        activeTab: 'starters'
+      });
+
+      // Extract the starter modal script portion
+      const starterScriptStart = html.indexOf('// Admin Starter Product Search & Selection');
+      assert.ok(starterScriptStart !== -1, 'Starter script must be present');
+      const starterScript = html.slice(starterScriptStart);
+
+      // Verify zero alert() calls exist in the starter modal logic
+      assert.ok(!starterScript.includes('alert('), 'Starter modal script must contain zero alert() calls');
+
+      // Verify helper functions and in-page message handling exist
+      assert.ok(starterScript.includes('function showStarterMessage'), 'Must define showStarterMessage');
+      assert.ok(starterScript.includes('function clearStarterMessage'), 'Must define clearStarterMessage');
+      assert.ok(starterScript.includes('Maximum 20 lines allowed per starter template.'), 'Must have 20-line cap message');
+      assert.ok(starterScript.includes('Invalid variant: must be a product variant GID'), 'Must have invalid variant message');
+      assert.ok(starterScript.includes('This product variant is already in the starter template.'), 'Must have duplicate variant message');
+      assert.ok(starterScript.includes('Please add at least one product line item to the starter template.'), 'Must have empty template validation message');
+    });
+
     it('formats currency minor units with ISO currency code (Item 6)', () => {
       const formattedUsd = formatCurrencyMinor(125360, 'USD', 'en-US');
       assert.ok(formattedUsd.includes('1,253.60'));

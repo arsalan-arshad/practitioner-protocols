@@ -1104,12 +1104,12 @@ describe('Merchant Admin Layer (app/lib/protocols/admin.js)', () => {
       assert.equal(report.summary.totalOrders, 17);
       assert.equal(report.summary.totalUnits, 34);
       assert.equal(report.summary.totalRevenueMinor, 35550);
-      assert.equal(report.summary.totalRevenueFormatted, '$355.50');
+      assert.ok(report.summary.totalRevenueFormatted.includes('355.50') && report.summary.totalRevenueFormatted.includes('USD'));
 
       assert.equal(report.byPractice.length, 2);
       const drSmith = report.byPractice.find(p => p.ownerId === 'gid://shopify/Customer/101');
       assert.equal(drSmith.orders, 12);
-      assert.equal(drSmith.revenueFormatted, '$245.50');
+      assert.ok(drSmith.revenueFormatted.includes('245.50') && drSmith.revenueFormatted.includes('USD'));
 
       assert.equal(report.byProtocol.length, 2);
       const starterProto = report.byProtocol.find(p => p.protocolId === 'proto_2');
@@ -1312,7 +1312,7 @@ describe('Merchant Admin Layer (app/lib/protocols/admin.js)', () => {
       const dashHtml = await dashRes.text();
 
       // Assert real numbers in HTML
-      assert.ok(dashHtml.includes('$1,921.35'), 'HTML must render formatted revenue $1,921.35');
+      assert.ok(dashHtml.includes('1,921.35') && dashHtml.includes('USD'), 'HTML must render formatted revenue 1,921.35 with currency code USD');
       assert.ok(dashHtml.includes('Apex Integrative Wellness'), 'HTML must include practice name');
       assert.ok(dashHtml.includes('Cellular Restoration Protocol'), 'HTML must include protocol name');
       assert.ok(dashHtml.includes('>1<'), 'HTML must show 1 attributed order');
@@ -1478,6 +1478,8 @@ describe('Merchant Admin Layer (app/lib/protocols/admin.js)', () => {
       assert.ok(html.includes('14')); // total orders
       assert.ok(html.includes('38')); // total units
       assert.ok(html.includes('/api/admin/attribution.csv'));
+      assert.ok(html.includes('<div class="Polaris-Metric-Label">Attributed Revenue</div>'), 'KPI card label must not have duplicate currency');
+      assert.ok(!html.includes('<div class="Polaris-Metric-Label">Attributed Revenue (USD)</div>'), 'Duplicate currency code removed from KPI label');
     });
 
     it('renders emergency storewide disable button with warning styling in settings tab', () => {
@@ -1586,9 +1588,23 @@ describe('Merchant Admin Layer (app/lib/protocols/admin.js)', () => {
       assert.ok(html.includes('id="admin-starter-search-input"'));
       assert.ok(html.includes('id="admin-starter-search-btn"'));
       assert.ok(html.includes('id="admin-starter-search-dropdown"'));
+      assert.ok(html.includes('id="admin-starter-search-message"'), 'Must have normal-flow search message container');
+      assert.ok(html.includes('id="admin-starter-advanced-details"'), 'Must have id on advanced details element');
+      assert.ok(html.includes('admin-starter-modal-close'), 'Must have modal close handler class');
+      assert.ok(html.includes('id="admin-starter-picker-btn"'), 'Must have product picker button');
       assert.ok(html.includes('id="starter-lines-container"'));
       assert.ok(!html.includes('name="lines[0][variantGid]"'));
       assert.ok(!html.includes('placeholder="gid://shopify/ProductVariant/...'));
+    });
+
+    it('formats currency minor units with ISO currency code (Item 6)', () => {
+      const formattedUsd = formatCurrencyMinor(125360, 'USD', 'en-US');
+      assert.ok(formattedUsd.includes('1,253.60'));
+      assert.ok(formattedUsd.includes('USD'));
+
+      const formattedCad = formatCurrencyMinor(177000, 'CAD', 'en-US');
+      assert.ok(formattedCad.includes('1,770.00'));
+      assert.ok(formattedCad.includes('CAD'));
     });
 
     it('renders Individual Mode (Customer Account) option label in settings tab', () => {
@@ -1807,15 +1823,16 @@ describe('Merchant Admin Layer (app/lib/protocols/admin.js)', () => {
 
       // Card 2: Storefront Menu Setup
       assert.ok(html.includes('1. Storefront Menu Setup (How Users Find the App)'));
-      assert.ok(html.includes('<strong>Online Store</strong> &rarr; <strong>Navigation</strong>'));
-      assert.ok(html.includes(`https://${testShop}/admin/menus`));
+      assert.ok(html.includes('<strong>Content</strong> &rarr; <strong>Menus</strong>'));
+      assert.ok(html.includes('https://admin.shopify.com/store/brand-store/content/menus'));
+      assert.ok(html.includes('target="_top"'));
 
       // Card 3: 3 User Roles
       assert.ok(html.includes('2. How the App Works: Three User Roles'));
       assert.ok(html.includes('Role 1'));
       assert.ok(html.includes('Merchant (Store Owner)'));
       assert.ok(html.includes('Role 2'));
-      assert.ok(html.includes('Practitioner (Provider)'));
+      assert.ok(html.includes('Practitioner (Specialist)'));
       assert.ok(html.includes('Role 3'));
       assert.ok(html.includes('Client / Shopper'));
 
@@ -1833,7 +1850,7 @@ describe('Merchant Admin Layer (app/lib/protocols/admin.js)', () => {
       // Card 5: FAQ
       assert.ok(html.includes('4. Frequently Asked Questions'));
       assert.ok(html.includes('Do practitioners need a Shopify customer or staff account?'));
-      assert.ok(html.includes('How are commissions tracked and paid?'));
+      assert.ok(html.includes('How is protocol attribution tracked and reported?'));
 
       // Script syntax verification
       const matches = [...html.matchAll(/<script(?![^>]*type=["']application\/json["'])>([\s\S]*?)<\/script>/gi)];

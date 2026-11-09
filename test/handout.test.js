@@ -86,6 +86,23 @@ describe('Print Handout & QR Generator (app/lib/protocols/handout.js)', () => {
       assert.ok(html.includes('<svg xmlns="http://www.w3.org/2000/svg"'));
     });
 
+    it('renders on-screen Print Handout button, handoutText instructions, and footer disclaimer', () => {
+      const shareUrl = 'https://my-brand.myshopify.com/apps/protocols/ghreset2026';
+      const html = renderHandoutHtml({
+        protocol: mockProtocol,
+        practiceName: 'Elite Functional Health',
+        shareUrl,
+        handoutText: 'Please keep this sheet on your refrigerator.',
+        footerDisclaimer: 'Custom practitioner guidelines only.'
+      });
+
+      assert.ok(html.includes('window.print()'), 'Must contain user-initiated window.print()');
+      assert.ok(html.includes('no-print'), 'Must have .no-print utility class');
+      assert.ok(html.includes('Please keep this sheet on your refrigerator.'), 'Must render handoutText');
+      assert.ok(html.includes('Custom practitioner guidelines only.'), 'Must render footerDisclaimer');
+      assert.ok(html.includes('<svg xmlns="http://www.w3.org/2000/svg"'), 'Must render inline SVG QR');
+    });
+
     it('escapes untrusted content in protocol and practice name', () => {
       const maliciousProtocol = {
         name: 'Protocol <img src=x onerror=alert(1)>',
@@ -110,6 +127,53 @@ describe('Print Handout & QR Generator (app/lib/protocols/handout.js)', () => {
       assert.ok(!html.includes('<marquee>'));
       assert.ok(html.includes('&lt;img src=x onerror=alert(1)&gt;'));
       assert.ok(html.includes('&lt;script&gt;evil()&lt;/script&gt;'));
+    });
+
+    it('strictly neutralizes Liquid delimiters {{, }}, {% and %} in every dynamic field (Blocker 1 & 2)', () => {
+      const liquidInjectionProtocol = {
+        name: 'Protocol {{ shop.name }} {% assign x = 1 %}',
+        introNote: 'Intro {{ customer.email }} {% for i in (1..3) %}',
+        lines: [
+          {
+            title: 'Line Title {{ shop.email }}',
+            variantTitle: 'Variant {% if true %}',
+            quantity: 2,
+            usageNote: 'Usage {% assign p = 2 %} {{ shop.currency }}'
+          }
+        ]
+      };
+
+      const html = renderHandoutHtml({
+        protocol: liquidInjectionProtocol,
+        practiceName: 'Clinic {{ shop.domain }} {% endraw %}',
+        shareUrl: 'https://example.com/apps/protocols/tok?q={{shop.id}}&tag={%print%}',
+        handoutText: 'Handout note {{ shop.name }} {% assign a = 1 %}',
+        footerDisclaimer: 'Disclaimer {{ customer.id }} {% comment %}'
+      });
+
+      // Blocker 2: starts with <!DOCTYPE html>
+      assert.ok(html.startsWith('<!DOCTYPE html>'));
+      assert.ok(html.includes('<meta name="robots" content="noindex, nofollow">'));
+
+      // Blocker 1: Strip <style> block and assert zero unescaped Liquid tags
+      const bodyWithoutStyle = html.replace(/<style[\s\S]*?<\/style>/gi, '');
+      assert.ok(!bodyWithoutStyle.includes('{{'), 'Handout must contain zero {{ outside style block');
+      assert.ok(!bodyWithoutStyle.includes('}}'), 'Handout must contain zero }} outside style block');
+      assert.ok(!bodyWithoutStyle.includes('{%'), 'Handout must contain zero {% outside style block');
+      assert.ok(!bodyWithoutStyle.includes('%}'), 'Handout must contain zero %} outside style block');
+
+      // Assert literal characters appear as escaped entities
+      assert.ok(html.includes('&#123;&#123; shop.name &#125;&#125;'));
+      assert.ok(html.includes('&#123;&#37; assign x = 1 &#37;&#125;'));
+      assert.ok(html.includes('&#123;&#123; customer.email &#125;&#125;'));
+      assert.ok(html.includes('&#123;&#37; for i in (1..3) &#37;&#125;'));
+      assert.ok(html.includes('&#123;&#123; shop.email &#125;&#125;'));
+      assert.ok(html.includes('&#123;&#37; assign p = 2 &#37;&#125;'));
+      assert.ok(html.includes('&#123;&#123; shop.domain &#125;&#125;'));
+      assert.ok(html.includes('&#123;&#37; endraw &#37;&#125;'));
+      assert.ok(html.includes('&#123;&#123;shop.id&#125;&#125;'));
+      assert.ok(html.includes('&#123;&#37;print&#37;&#125;'));
+      assert.ok(html.includes('&#123;&#123; customer.id &#125;&#125;'));
     });
 
     it('throws if protocol is missing', () => {

@@ -1067,6 +1067,40 @@ describe('Practitioner Portal (app/lib/protocols/portal.js)', () => {
         assert.ok(html.includes('portal-global-error'), 'Must have #portal-global-error element');
       });
 
+      it('renders "Copy Link" buttons with data-share-url attribute containing absolute share URL', () => {
+        const testShop = 'brand-store.myshopify.com';
+        const html = renderPortalLiquid({
+          shop: testShop,
+          isLoggedIn: true,
+          isApproved: true,
+          hasProfile: true,
+          activeProtocols: [
+            { id: 'proto_act_1', token: 'tok_act_1', name: 'Active Regimen', lines: [] }
+          ],
+          starterProtocols: [
+            { id: 'starter_1', token: 'tok_start_1', name: 'Starter Template', isStarter: true, lines: [] }
+          ]
+        });
+
+        assert.ok(html.includes('portal-copy-link-btn'), 'Must have portal-copy-link-btn class');
+        assert.ok(
+          html.includes(`data-share-url="https://${testShop}/apps/protocols/tok_act_1"`),
+          'Active card must have absolute data-share-url'
+        );
+        assert.ok(
+          html.includes(`href="/apps/protocols/tok_act_1"`),
+          'Active card must retain valid href fallback'
+        );
+        assert.ok(
+          html.includes(`data-share-url="https://${testShop}/apps/protocols/tok_start_1"`),
+          'Starter card must have absolute data-share-url'
+        );
+        assert.ok(
+          html.includes(`href="/apps/protocols/tok_start_1"`),
+          'Starter card must retain valid href fallback'
+        );
+      });
+
       it('renders "Use as template" button on starter cards', () => {
         const html = renderPortalLiquid({
           isLoggedIn: true,

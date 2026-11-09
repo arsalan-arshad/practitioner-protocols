@@ -1344,6 +1344,7 @@ export function renderPortalLiquid(options = {}) {
         const protoId = safePortalText(p.id || '');
         const items = typeof p.linesCount === 'number' ? p.linesCount : (p.lines?.length || 0);
         const shareUrl = `/apps/protocols/${token}`;
+        const absoluteShareUrl = shop ? `https://${shop}/apps/protocols/${token}` : shareUrl;
         const handoutUrl = `/apps/protocols/${token}?handout=1`;
 
         let actionButtons = '';
@@ -1351,7 +1352,7 @@ export function renderPortalLiquid(options = {}) {
 
         if (isStarter) {
           actionButtons = `
-            <a href="${shareUrl}" class="portal-btn portal-btn-secondary" style="font-size: 0.8125rem; padding: 0.375rem 0.75rem;">Copy Link</a>
+            <a href="${shareUrl}" data-share-url="${absoluteShareUrl}" class="portal-btn portal-btn-secondary portal-copy-link-btn" style="font-size: 0.8125rem; padding: 0.375rem 0.75rem;">Copy Link</a>
             <a href="${handoutUrl}" target="_blank" rel="noopener" class="portal-btn portal-btn-secondary" style="font-size: 0.8125rem; padding: 0.375rem 0.75rem;">Print Handout</a>
             <button type="button" class="portal-btn portal-btn-secondary portal-duplicate-btn" data-protocol-id="${protoId}" style="font-size: 0.8125rem; padding: 0.375rem 0.75rem;">Use as template</button>`;
         } else if (isArchived) {
@@ -1359,7 +1360,7 @@ export function renderPortalLiquid(options = {}) {
             <button type="button" class="portal-btn portal-btn-secondary portal-restore-btn" data-protocol-id="${protoId}" style="font-size: 0.8125rem; padding: 0.375rem 0.75rem;">Restore</button>`;
         } else {
           actionButtons = `
-            <a href="${shareUrl}" class="portal-btn portal-btn-secondary" style="font-size: 0.8125rem; padding: 0.375rem 0.75rem;">Copy Link</a>
+            <a href="${shareUrl}" data-share-url="${absoluteShareUrl}" class="portal-btn portal-btn-secondary portal-copy-link-btn" style="font-size: 0.8125rem; padding: 0.375rem 0.75rem;">Copy Link</a>
             <a href="${handoutUrl}" target="_blank" rel="noopener" class="portal-btn portal-btn-secondary" style="font-size: 0.8125rem; padding: 0.375rem 0.75rem;">Print Handout</a>
             <button type="button" class="portal-btn portal-btn-secondary portal-edit-btn" data-protocol-id="${protoId}" style="font-size: 0.8125rem; padding: 0.375rem 0.75rem;">Edit</button>
             <button type="button" class="portal-btn portal-btn-secondary portal-archive-btn" data-protocol-id="${protoId}" style="font-size: 0.8125rem; padding: 0.375rem 0.75rem; color: #dc2626;">Archive</button>`;
@@ -1752,6 +1753,57 @@ ${protocolsJson}
   if (closeBtn) closeBtn.addEventListener('click', closeEditor);
   var cancelBtn = document.getElementById('protocol-editor-cancel-btn');
   if (cancelBtn) cancelBtn.addEventListener('click', closeEditor);
+
+  // Copy Link handlers (copies absolute share URL with fallback and visual feedback)
+  function copyTextToClipboard(text) {
+    if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+      return navigator.clipboard.writeText(text);
+    }
+    return new Promise(function(resolve, reject) {
+      try {
+        var textarea = document.createElement('textarea');
+        textarea.value = text;
+        textarea.setAttribute('readonly', '');
+        textarea.style.position = 'fixed';
+        textarea.style.left = '-9999px';
+        textarea.style.top = '0';
+        document.body.appendChild(textarea);
+        textarea.select();
+        var successful = document.execCommand('copy');
+        document.body.removeChild(textarea);
+        if (successful) {
+          resolve();
+        } else {
+          reject(new Error('execCommand copy failed'));
+        }
+      } catch (err) {
+        reject(err);
+      }
+    });
+  }
+
+  var copyButtons = document.querySelectorAll('.portal-copy-link-btn');
+  copyButtons.forEach(function(btn) {
+    btn.addEventListener('click', function(e) {
+      var targetUrl = btn.getAttribute('data-share-url') || btn.getAttribute('href');
+      if (!targetUrl) return;
+      if (targetUrl.indexOf('http://') !== 0 && targetUrl.indexOf('https://') !== 0) {
+        if (typeof window !== 'undefined' && window.location && window.location.origin) {
+          targetUrl = window.location.origin + targetUrl;
+        }
+      }
+      e.preventDefault();
+      var originalText = btn.textContent;
+      copyTextToClipboard(targetUrl).then(function() {
+        btn.textContent = 'Copied!';
+        setTimeout(function() {
+          btn.textContent = originalText;
+        }, 2000);
+      }).catch(function() {
+        window.location.href = btn.getAttribute('href') || targetUrl;
+      });
+    });
+  });
 
   // Edit Protocol handlers
   var editButtons = document.querySelectorAll('.portal-edit-btn');

@@ -110,7 +110,7 @@ export function formatCurrencyMinor(minorUnits, currency = 'USD', locale = 'en-U
   const amount = isNaN(val) ? 0 : val / 100;
   const safeCurrency = (typeof currency === 'string' && currency.length === 3) ? currency.toUpperCase() : 'USD';
   try {
-    return new Intl.NumberFormat(locale, { style: 'currency', currency: safeCurrency }).format(amount);
+    return new Intl.NumberFormat(locale, { style: 'currency', currency: safeCurrency, currencyDisplay: 'code' }).format(amount);
   } catch {
     return `${safeCurrency} ${amount.toFixed(2)}`;
   }
@@ -1412,7 +1412,8 @@ export function renderAdminHtml(options = {}) {
 
   const safeShop = escapeAdminText(shop);
   const portalUrl = safeShop ? `https://${safeShop}/apps/protocols` : '/apps/protocols';
-  const navUrl = safeShop ? `https://${safeShop}/admin/menus` : '#';
+  const shopHandle = safeShop ? safeShop.replace(/\.myshopify\.com$/, '') : '';
+  const navUrl = shopHandle ? `https://admin.shopify.com/store/${shopHandle}/content/menus` : (safeShop ? `https://${safeShop}/admin/menus` : '#');
   const currentTab = ['practitioners', 'starters', 'attribution', 'contacts', 'settings', 'guide'].includes(activeTab)
     ? activeTab
     : 'practitioners';
@@ -1783,7 +1784,7 @@ export function renderAdminHtml(options = {}) {
       <div class="Polaris-Card" style="max-width:540px; width:90%; max-height:90vh; overflow-y:auto; margin:0;">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem; border-bottom:1px solid var(--p-color-border); padding-bottom:0.75rem;">
           <h3 style="margin:0; font-size:1.125rem;">Create Brand Starter Template</h3>
-          <button type="button" onclick="document.getElementById('create-starter-modal').style.display='none'" style="background:none; border:none; font-size:1.25rem; cursor:pointer;">&times;</button>
+          <button type="button" class="admin-starter-modal-close" style="background:none; border:none; font-size:1.25rem; cursor:pointer;">&times;</button>
         </div>
         <form method="POST" action="/api/admin/starters/create" id="admin-create-starter-form">
           <div style="margin-bottom:1rem;">
@@ -1796,12 +1797,14 @@ export function renderAdminHtml(options = {}) {
           </div>
           <div style="margin-bottom:1rem;">
             <label style="display:block; font-weight:600; margin-bottom:0.5rem; font-size:0.875rem;">Add Products to Starter</label>
-            <div style="display:flex; gap:0.5rem; position:relative;">
-              <input type="text" id="admin-starter-search-input" placeholder="Search catalog by product name..." style="flex:1; padding:0.5rem; border:1px solid var(--p-color-border); border-radius:4px; font-size:0.875rem; box-sizing:border-box;">
+            <div style="display:flex; gap:0.5rem; position:relative; flex-wrap:wrap;">
+              <input type="text" id="admin-starter-search-input" placeholder="Search catalog by product name..." style="flex:1; min-width:180px; padding:0.5rem; border:1px solid var(--p-color-border); border-radius:4px; font-size:0.875rem; box-sizing:border-box;">
               <button type="button" id="admin-starter-search-btn" class="Polaris-Button">Search</button>
+              <button type="button" id="admin-starter-picker-btn" class="Polaris-Button Polaris-Button--primary" style="display:none;">Browse Products</button>
               <div id="admin-starter-search-dropdown" style="display:none; position:absolute; top:100%; left:0; right:0; background:#fff; border:1px solid var(--p-color-border); border-radius:4px; max-height:220px; overflow-y:auto; z-index:10000; box-shadow:0 4px 6px -1px rgba(0,0,0,0.1); margin-top:2px;"></div>
             </div>
-            <details style="margin-top:0.75rem; border:1px solid var(--p-color-border); border-radius:4px; padding:0.5rem 0.75rem;">
+            <div id="admin-starter-search-message" style="display:none; margin-top:0.5rem; padding:0.625rem; border-radius:4px; font-size:0.8125rem; line-height:1.4;"></div>
+            <details id="admin-starter-advanced-details" style="margin-top:0.75rem; border:1px solid var(--p-color-border); border-radius:4px; padding:0.5rem 0.75rem;">
               <summary style="cursor:pointer; font-size:0.8125rem; color:var(--p-color-text-subdued); font-weight:600;">Advanced: Enter Variant GID directly</summary>
               <div style="margin-top:0.5rem; display:flex; flex-direction:column; gap:0.5rem;">
                 <div>
@@ -1831,7 +1834,7 @@ export function renderAdminHtml(options = {}) {
             </div>
           </div>
           <div style="display:flex; justify-content:flex-end; gap:0.5rem; margin-top:1.5rem; border-top:1px solid var(--p-color-border); padding-top:1rem;">
-            <button type="button" class="Polaris-Button" onclick="document.getElementById('create-starter-modal').style.display='none'">Cancel</button>
+            <button type="button" class="Polaris-Button admin-starter-modal-close">Cancel</button>
             <button type="submit" class="Polaris-Button Polaris-Button--primary">Save Starter Template</button>
           </div>
         </form>
@@ -1910,7 +1913,8 @@ export function renderAdminHtml(options = {}) {
       <div class="Polaris-Metrics-Grid">
         <div class="Polaris-Metric-Box">
           <div class="Polaris-Metric-Val">${totalRev}</div>
-          <div class="Polaris-Metric-Label">Attributed Revenue</div>
+          <div class="Polaris-Metric-Label">Attributed Revenue (${escapeAdminText(currency)})</div>
+          <div style="font-size:0.75rem; color:var(--p-color-text-subdued); margin-top:0.25rem;">Net line-item revenue in store currency, excludes shipping and taxes</div>
         </div>
         <div class="Polaris-Metric-Box">
           <div class="Polaris-Metric-Val">${totalOrders}</div>
@@ -1931,7 +1935,7 @@ export function renderAdminHtml(options = {}) {
               <th>Protocol</th>
               <th>Orders</th>
               <th>Units</th>
-              <th>Revenue</th>
+              <th>Revenue (${escapeAdminText(currency)})</th>
             </tr>
           </thead>
           <tbody>
@@ -1949,7 +1953,7 @@ export function renderAdminHtml(options = {}) {
               <th>Practice Name</th>
               <th>Orders</th>
               <th>Units</th>
-              <th>Revenue</th>
+              <th>Revenue (${escapeAdminText(currency)})</th>
             </tr>
           </thead>
           <tbody>
@@ -2222,7 +2226,7 @@ export function renderAdminHtml(options = {}) {
         <div class="Polaris-Step-Number">1</div>
         <div class="Polaris-Step-Content">
           <div class="Polaris-Step-Title">Open Shopify Navigation</div>
-          <p class="Polaris-Step-Desc">In your Shopify Admin left navigation, click <strong>Online Store</strong> &rarr; <strong>Navigation</strong> (or click the button below).</p>
+          <p class="Polaris-Step-Desc">In your Shopify Admin left navigation, click <strong>Content</strong> &rarr; <strong>Menus</strong> (or <strong>Online Store</strong> &rarr; <strong>Navigation</strong> on older admin layouts), or click the button below.</p>
         </div>
       </div>
 
@@ -2262,8 +2266,8 @@ export function renderAdminHtml(options = {}) {
       </div>
 
       <div style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--p-color-border);">
-        <a href="${escapeAdminText(navUrl)}" target="_blank" rel="noopener noreferrer" class="Polaris-Button">
-          Open Online Store Navigation in Admin &rarr;
+        <a href="${escapeAdminText(navUrl)}" target="_top" class="Polaris-Button">
+          Open Navigation Menus in Admin &rarr;
         </a>
       </div>
     </div>
@@ -2272,7 +2276,7 @@ export function renderAdminHtml(options = {}) {
     <div class="Polaris-Card">
       <h2 class="Polaris-Card-Title">2. How the App Works: Three User Roles</h2>
       <p style="color: var(--p-color-text-subdued); font-size: 0.875rem; margin-bottom: 1.25rem;">
-        Practitioner Protocols connects your store with healthcare providers, coaches, and their clients:
+        Practitioner Protocols connects your store with professionals such as stylists, trainers, therapists, clinics, and specialists, and their clients:
       </p>
 
       <div class="Polaris-Metrics-Grid" style="grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1.25rem;">
@@ -2286,7 +2290,7 @@ export function renderAdminHtml(options = {}) {
           <ul style="font-size: 0.8125rem; margin: 0; padding-left: 1.25rem; color: var(--p-color-text); line-height: 1.6;">
             <li><strong>Approve Practitioners:</strong> Review registrations in the <em>Practitioners</em> tab and assign professional practice names.</li>
             <li><strong>Starter Templates:</strong> Publish brand-approved protocol templates in <em>Starter Templates</em> that practitioners can clone.</li>
-            <li><strong>Attribution &amp; Commission:</strong> Track protocol sales, calculate commissions, and download RFC 4180 CSV reports in <em>Attribution &amp; Reports</em>.</li>
+            <li><strong>Attribution &amp; Sales Reports:</strong> Track attributed protocol sales, orders, and units, and download RFC 4180 CSV attribution reports in <em>Attribution &amp; Reports</em>.</li>
             <li><strong>Compliance &amp; Settings:</strong> Set disclaimer footers, choose Tag or Company identity mode, and manage store policies in <em>Settings</em>.</li>
           </ul>
         </div>
@@ -2295,14 +2299,14 @@ export function renderAdminHtml(options = {}) {
         <div class="Polaris-Role-Card">
           <div class="Polaris-Role-Title">
             <span class="Polaris-Badge Polaris-Badge--success">Role 2</span>
-            <strong>Practitioner (Provider)</strong>
+            <strong>Practitioner (Specialist)</strong>
           </div>
           <p style="font-size: 0.8125rem; color: var(--p-color-text-subdued); margin: 0 0 0.75rem 0;">Builds protocols on your storefront portal:</p>
           <ul style="font-size: 0.8125rem; margin: 0; padding-left: 1.25rem; color: var(--p-color-text); line-height: 1.6;">
-            <li><strong>Passwordless Login:</strong> Enters their email on <code>/apps/protocols</code> to receive a 6-digit one-time code (OTP). No passwords to remember.</li>
+            <li><strong>Customer Account Sign-In:</strong> Signs in through your store's native Shopify customer account login. A returning signed-in customer goes straight to the portal (or "Request Practitioner Access" to enrol).</li>
             <li><strong>Search Catalog:</strong> Searches all active products directly from your store catalog.</li>
-            <li><strong>Personalize Regimen:</strong> Sets product dosages, instructions, notes, and optional protocol discounts.</li>
-            <li><strong>Share with Clients:</strong> Copies a private protocol link, prints a branded PDF handout, or shares a scannable QR code.</li>
+            <li><strong>Personalize Regimen:</strong> Sets product quantities, usage instructions, notes, and curated recommendations.</li>
+            <li><strong>Share with Clients:</strong> Copies a private protocol link, prints a branded print-ready handout page (or saves as PDF), complete with a scannable QR code.</li>
           </ul>
         </div>
 
@@ -2314,10 +2318,10 @@ export function renderAdminHtml(options = {}) {
           </div>
           <p style="font-size: 0.8125rem; color: var(--p-color-text-subdued); margin: 0 0 0.75rem 0;">Purchases recommended products:</p>
           <ul style="font-size: 0.8125rem; margin: 0; padding-left: 1.25rem; color: var(--p-color-text); line-height: 1.6;">
-            <li><strong>Dedicated Landing Page:</strong> Opens the protocol link to see prescribed items, schedules, and personalized notes under your store branding.</li>
+            <li><strong>Dedicated Landing Page:</strong> Opens the protocol link to see recommended items, schedules, and personalized notes under your store branding.</li>
             <li><strong>1-Click Add All to Cart:</strong> Adds all recommended products and specified quantities with a single tap.</li>
-            <li><strong>Native Shopify Checkout:</strong> Checks out securely via Shopify Checkout with any protocol bundle discount pre-applied.</li>
-            <li><strong>Automated Attribution:</strong> Cart line-item properties attribute the completed order to the prescribing practitioner.</li>
+            <li><strong>Native Shopify Checkout:</strong> Checks out securely via Shopify Checkout with standard store pricing and policies.</li>
+            <li><strong>Automated Attribution:</strong> Cart line-item properties attribute the completed order to the recommending practitioner.</li>
           </ul>
         </div>
       </div>
@@ -2350,10 +2354,10 @@ export function renderAdminHtml(options = {}) {
         </div>
         <ol style="margin: 0; padding-left: 1.25rem; font-size: 0.875rem; line-height: 1.6; color: var(--p-color-text);">
           <li><strong>Access Portal:</strong> In an incognito / private browser window, navigate to <code>${escapeAdminText(portalUrl)}</code>.</li>
-          <li><strong>Sign In &amp; Request Access:</strong> Enter an email to receive a 6-digit one-time code (OTP). Enter your practice name (e.g. <em>"Holistic Care Clinic"</em>) and submit your registration.</li>
+          <li><strong>Sign In &amp; Request Access:</strong> Sign in via your store's Shopify customer account. Enter your practice name (e.g. <em>"Alpine Wellness Studio"</em>) and submit your practitioner request.</li>
           <li><strong>Merchant Approval:</strong> Switch back to this Admin app &rarr; <strong>Practitioners</strong> tab, find the pending registration, and click <strong>Approve</strong>.</li>
-          <li><strong>Build Protocol:</strong> Refresh the portal in your incognito tab to view the active Practitioner Dashboard. Click <strong>+ Create New Protocol</strong>, search products from your store catalog, specify dosages (e.g. <em>"Take 1 capsule twice daily after meals"</em>), and click <strong>Save Protocol</strong>.</li>
-          <li><strong>Share with Clients:</strong> Click <strong>Copy Link</strong> to get the client URL, or click <strong>Print Handout</strong> to generate a clean, printable PDF regimen with an automated QR code!</li>
+          <li><strong>Build Protocol:</strong> Refresh the portal in your incognito tab to view the active Practitioner Dashboard. Click <strong>+ Create New Protocol</strong>, search products from your store catalog, specify directions (e.g. <em>"Take 1 capsule twice daily after meals"</em>), and click <strong>Save Protocol</strong>.</li>
+          <li><strong>Share with Clients:</strong> Click <strong>Copy Link</strong> to copy the client URL to your clipboard, or click <strong>Print Handout</strong> to open a print-ready regimen complete with an automated QR code!</li>
         </ol>
       </div>
 
@@ -2364,7 +2368,7 @@ export function renderAdminHtml(options = {}) {
           <span>The Shopper / Client (Seamless 1-Click Purchase)</span>
         </div>
         <ol style="margin: 0; padding-left: 1.25rem; font-size: 0.875rem; line-height: 1.6; color: var(--p-color-text);">
-          <li><strong>Open Protocol Link:</strong> In a new tab, open the client protocol link. Notice the practitioner's practice header (<em>"Recommended by Holistic Care Clinic"</em>) alongside products, pricing, and directions.</li>
+          <li><strong>Open Protocol Link:</strong> In a new tab, open the client protocol link. Notice the practitioner's practice header (<em>"Recommended by Alpine Wellness Studio"</em>) alongside products, pricing, and directions.</li>
           <li><strong>1-Click Add All to Cart:</strong> Click <strong>Add All to Cart</strong>. All recommended products are added directly into the Shopify cart in a single batch, tagged with hidden attribution properties (<code>_protocol_token</code>).</li>
           <li><strong>(Optional) Opt-In:</strong> Test the <em>"Stay in touch"</em> box at the bottom of the protocol page by entering an email to opt into updates.</li>
           <li><strong>Checkout:</strong> Complete checkout using Shopify's test gateway (Bogus gateway).</li>
@@ -2379,7 +2383,7 @@ export function renderAdminHtml(options = {}) {
         </div>
         <ol style="margin: 0; padding-left: 1.25rem; font-size: 0.875rem; line-height: 1.6; color: var(--p-color-text);">
           <li><strong>View Attribution:</strong> In this Admin app, open the <strong>Attribution &amp; Reports</strong> tab. The order count, units sold, and revenue are immediately attributed to the practitioner and protocol!</li>
-          <li><strong>Export CSV:</strong> Click <strong>Export CSV (RFC 4180)</strong> to download a clean financial accounting spreadsheet for commission payouts.</li>
+          <li><strong>Export CSV:</strong> Click <strong>Export CSV (RFC 4180)</strong> to download an aggregate attribution report of orders, units, and net retail revenue by practice and protocol.</li>
           <li><strong>Review Contacts:</strong> Open the <strong>Contacts</strong> tab to view shoppers who opted in to stay in touch with their prescribing practitioner.</li>
         </ol>
       </div>
@@ -2391,12 +2395,12 @@ export function renderAdminHtml(options = {}) {
 
       <div class="Polaris-Faq-Question">Do practitioners need a Shopify customer or staff account?</div>
       <div class="Polaris-Faq-Answer">
-        No! Practitioners authenticate through the storefront portal using passwordless 6-digit email OTPs. They do not require a Shopify staff account, nor do they ever have access to your Shopify admin or backend settings.
+        Practitioners authenticate through your storefront via standard Shopify customer accounts. They do not require a Shopify staff account, nor do they ever have access to your Shopify admin or backend settings.
       </div>
 
-      <div class="Polaris-Faq-Question">How are commissions tracked and paid?</div>
+      <div class="Polaris-Faq-Question">How is protocol attribution tracked and reported?</div>
       <div class="Polaris-Faq-Answer">
-        When a client adds items to their cart through a protocol link, hidden cart line-item properties tag the products. When Shopify processes payment, the app webhook attributes the order to the practitioner. You can review commission totals in the <em>Attribution &amp; Reports</em> tab and export an RFC 4180 CSV file to process payouts via PayPal, direct deposit, or your preferred payment method.
+        When a client adds items to their cart through a protocol link, hidden cart line-item properties tag the products. When Shopify processes payment, the app webhook attributes the order to the recommending practitioner. You can review aggregate sales, orders, and units in the <em>Attribution &amp; Reports</em> tab and export an RFC 4180 CSV file for external accounting and reconciliation.
       </div>
 
       <div class="Polaris-Faq-Question">Can I create brand templates for practitioners to use?</div>
@@ -2728,8 +2732,37 @@ ${appBridgeHead}  <title>Practitioner Protocols &mdash; Admin</title>
         });
       }
 
+      function resetStarterModalState() {
+        if (starterSearchInput) starterSearchInput.value = '';
+        if (starterSearchDropdown) {
+          starterSearchDropdown.style.display = 'none';
+          starterSearchDropdown.innerHTML = '';
+        }
+        const msgEl = document.getElementById('admin-starter-search-message');
+        if (msgEl) {
+          msgEl.style.display = 'none';
+          msgEl.innerHTML = '';
+        }
+      }
+
+      function closeStarterModal() {
+        resetStarterModalState();
+        const modal = document.getElementById('create-starter-modal');
+        if (modal) modal.style.display = 'none';
+      }
+
+      document.querySelectorAll('.admin-starter-modal-close').forEach(function(el) {
+        el.addEventListener('click', closeStarterModal);
+      });
+
       function performStarterSearch() {
         const q = (starterSearchInput ? starterSearchInput.value : '').trim();
+        const msgEl = document.getElementById('admin-starter-search-message');
+        if (msgEl) {
+          msgEl.style.display = 'none';
+          msgEl.innerHTML = '';
+        }
+
         if (q.length < 2 || !starterSearchDropdown) return;
         starterSearchDropdown.style.display = 'block';
         starterSearchDropdown.innerHTML = '<div style="padding:0.75rem; color:#6b7280; font-size:0.875rem;">Searching...</div>';
@@ -2777,8 +2810,19 @@ ${appBridgeHead}  <title>Practitioner Protocols &mdash; Admin</title>
           })
           .catch(function() {
             if (starterSearchDropdown) {
-              starterSearchDropdown.style.display = 'block';
-              starterSearchDropdown.innerHTML = '<div style="padding:0.75rem; color:#b45309; font-size:0.8125rem; line-height:1.4;">Storefront catalog search is unavailable from the embedded admin iframe without storefront CORS. Please use the <strong>Advanced: Enter Variant GID directly</strong> section below to add product variants.</div>';
+              starterSearchDropdown.style.display = 'none';
+              starterSearchDropdown.innerHTML = '';
+            }
+            if (msgEl) {
+              msgEl.style.display = 'block';
+              msgEl.style.background = '#fef3c7';
+              msgEl.style.border = '1px solid #fcd34d';
+              msgEl.style.color = '#92400e';
+              msgEl.innerHTML = 'Storefront catalog search is unavailable from the embedded admin iframe without storefront CORS. Please use the <strong>Advanced: Enter Variant GID directly</strong> section below (now opened) to add product variants.';
+            }
+            const advDetails = document.getElementById('admin-starter-advanced-details');
+            if (advDetails) {
+              advDetails.open = true;
             }
           });
       }
@@ -2805,8 +2849,7 @@ ${appBridgeHead}  <title>Practitioner Protocols &mdash; Admin</title>
           quantity: 1,
           usageNote: '',
         });
-        if (starterSearchDropdown) starterSearchDropdown.style.display = 'none';
-        if (starterSearchInput) starterSearchInput.value = '';
+        resetStarterModalState();
         updateStarterRows();
       }
 
@@ -2822,6 +2865,22 @@ ${appBridgeHead}  <title>Practitioner Protocols &mdash; Admin</title>
             addVariantToStarter(prod, v, handle);
           });
           starterSearchDropdown.appendChild(vDiv);
+        });
+      }
+
+      const pickerBtn = document.getElementById('admin-starter-picker-btn');
+      if (pickerBtn && typeof window !== 'undefined' && window.shopify && typeof window.shopify.resourcePicker === 'function') {
+        pickerBtn.style.display = 'inline-flex';
+        pickerBtn.addEventListener('click', function() {
+          window.shopify.resourcePicker({ type: 'product', multiple: true }).then(function(selected) {
+            if (!selected || !selected.selection || !selected.selection.length) return;
+            selected.selection.forEach(function(prod) {
+              const vars = prod.variants || [];
+              vars.forEach(function(v) {
+                addVariantToStarter(prod, v, prod.handle);
+              });
+            });
+          }).catch(function() {});
         });
       }
 
@@ -2879,6 +2938,18 @@ ${appBridgeHead}  <title>Practitioner Protocols &mdash; Admin</title>
         let debounceTimer;
         starterSearchInput.addEventListener('input', function() {
           clearTimeout(debounceTimer);
+          if (!starterSearchInput.value.trim()) {
+            const msgEl = document.getElementById('admin-starter-search-message');
+            if (msgEl) {
+              msgEl.style.display = 'none';
+              msgEl.innerHTML = '';
+            }
+            if (starterSearchDropdown) {
+              starterSearchDropdown.style.display = 'none';
+              starterSearchDropdown.innerHTML = '';
+            }
+            return;
+          }
           debounceTimer = setTimeout(performStarterSearch, 300);
         });
       }

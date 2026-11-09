@@ -37,11 +37,13 @@ export function escapeHtml(str) {
  *   },
  *   practiceName?: string,
  *   shareUrl: string,
- *   qrSvg?: string
+ *   qrSvg?: string,
+ *   handoutText?: string,
+ *   footerDisclaimer?: string
  * }} params
  * @returns {string} Complete HTML document string
  */
-export function renderHandoutHtml({ protocol, practiceName = '', shareUrl = '', qrSvg = '' }) {
+export function renderHandoutHtml({ protocol, practiceName = '', shareUrl = '', qrSvg = '', handoutText = '', footerDisclaimer = '' }) {
   if (!protocol || typeof protocol !== 'object') {
     throw new TypeError('Protocol object is required');
   }
@@ -50,6 +52,8 @@ export function renderHandoutHtml({ protocol, practiceName = '', shareUrl = '', 
   const safeTitle = escapeHtml(protocol.name || 'Product Protocol');
   const safeIntro = escapeHtml(protocol.introNote || '');
   const safeUrl = escapeHtml(shareUrl);
+  const safeHandoutText = escapeHtml(handoutText ? String(handoutText).trim() : '');
+  const safeDisclaimer = escapeHtml(footerDisclaimer ? String(footerDisclaimer).trim() : '');
   const activeQrSvg = qrSvg || (shareUrl ? generateQrSvg(shareUrl, { size: 160 }) : '');
 
   const lines = Array.isArray(protocol.lines) ? protocol.lines : [];
@@ -254,12 +258,52 @@ export function renderHandoutHtml({ protocol, practiceName = '', shareUrl = '', 
       word-break: break-all;
       margin-top: 4px;
     }
+    .no-print-bar {
+      margin-bottom: 20px;
+      display: flex;
+      justify-content: flex-end;
+    }
+    .print-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 16px;
+      background: #008060;
+      color: #ffffff;
+      border: none;
+      border-radius: 4px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .print-btn:hover {
+      background: #006e52;
+    }
+    .handout-instructions-box {
+      margin-bottom: 20px;
+      font-size: 13px;
+      color: #374151;
+      background: #f9fafb;
+      padding: 12px 16px;
+      border-radius: 6px;
+      border-left: 3px solid #008060;
+      line-height: 1.5;
+    }
+    .handout-disclaimer {
+      margin-top: 10px;
+      font-size: 11px;
+      color: #9ca3af;
+      line-height: 1.4;
+    }
     @media print {
       body {
         padding: 0;
         max-width: 100%;
       }
-      .instructions-box, .protocol-intro {
+      .no-print-bar, .no-print {
+        display: none !important;
+      }
+      .instructions-box, .protocol-intro, .handout-instructions-box {
         -webkit-print-color-adjust: exact;
         print-color-adjust: exact;
       }
@@ -267,6 +311,10 @@ export function renderHandoutHtml({ protocol, practiceName = '', shareUrl = '', 
   </style>
 </head>
 <body>
+  <div class="no-print-bar">
+    <button type="button" class="print-btn no-print" onclick="window.print()">Print Handout</button>
+  </div>
+
   <div class="handout-header">
     <div class="header-main">
       <div class="practice-label">${safePractice}</div>
@@ -279,6 +327,8 @@ export function renderHandoutHtml({ protocol, practiceName = '', shareUrl = '', 
       <p>Scan with phone camera</p>
     </div>` : ''}
   </div>
+
+  ${safeHandoutText ? `<div class="handout-instructions-box">${safeHandoutText}</div>` : ''}
 
   <div class="instructions-box">
     <div class="step-number">1</div>
@@ -303,6 +353,7 @@ export function renderHandoutHtml({ protocol, practiceName = '', shareUrl = '', 
     <div>Direct Storefront Access:</div>
     ${safeUrl ? `<div class="url-display">${safeUrl}</div>` : ''}
     <div style="margin-top: 8px;">Order directly from the official store at standard retail pricing.</div>
+    ${safeDisclaimer ? `<div class="handout-disclaimer">${safeDisclaimer}</div>` : ''}
   </div>
 </body>
 </html>`;

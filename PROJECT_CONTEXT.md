@@ -1185,15 +1185,15 @@ Run the five spikes in a day or two on a dev store; write the answers into secti
 1. **Storefront Navigation & Onboarding:**
    - Added dedicated "How to Use" tab (`?tab=guide`) to embedded Polaris Admin.
    - Direct Storefront Portal Link: `https://${safeShop}/apps/protocols` with one-click clipboard copy (`.copy-portal-btn`) and fallback support.
-   - Step-by-step merchant setup guide on linking `/apps/protocols` under Shopify Admin &rarr; **Online Store &rarr; Navigation** (`/admin/menus`).
+   - Step-by-step merchant setup guide on linking `/apps/protocols` under Shopify Admin &rarr; **Content &rarr; Menus** (`/content/menus`).
 2. **Three Roles & Complete Workflow Architecture:**
-   - **Role 1 (Merchant / Store Admin):** Practitioner approvals, practice display names, starter templates, commission & attribution reports, compliance/emergency controls.
-   - **Role 2 (Practitioner / Provider):** Passwordless 6-digit email OTP login, catalog search, protocol builder (dosages, notes, discounts), client sharing (link, PDF handout, QR code).
+   - **Role 1 (Merchant / Store Admin):** Practitioner approvals, practice display names, starter templates, sales attribution reports, compliance/emergency controls.
+   - **Role 2 (Practitioner / Specialist):** Customer account login, catalog search, protocol builder (quantities, instructions, notes), client sharing (link, print handout, QR code).
    - **Role 3 (Client / Shopper):** Personalized protocol landing page, 1-click Add All to Cart, native Shopify Checkout, automated order attribution.
 3. **Interactive & Practical Utilities:**
    - 5-Minute End-to-End Walkthrough checklist for testing with test gateway.
    - Practitioner onboarding callout card on default `Practitioners` tab linking to the guide.
-   - Comprehensive FAQ answering staff permissions, stock handling, commission payouts, and identity modes.
+   - Comprehensive FAQ answering staff permissions, stock handling, attribution tracking, and identity modes.
    - Zero-PII barrier preserved, App Bridge token/query preservation on tab links.
 
 

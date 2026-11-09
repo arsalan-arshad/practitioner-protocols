@@ -86,6 +86,23 @@ describe('Print Handout & QR Generator (app/lib/protocols/handout.js)', () => {
       assert.ok(html.includes('<svg xmlns="http://www.w3.org/2000/svg"'));
     });
 
+    it('renders on-screen Print Handout button, handoutText instructions, and footer disclaimer', () => {
+      const shareUrl = 'https://my-brand.myshopify.com/apps/protocols/ghreset2026';
+      const html = renderHandoutHtml({
+        protocol: mockProtocol,
+        practiceName: 'Elite Functional Health',
+        shareUrl,
+        handoutText: 'Please keep this sheet on your refrigerator.',
+        footerDisclaimer: 'Custom practitioner guidelines only.'
+      });
+
+      assert.ok(html.includes('window.print()'), 'Must contain user-initiated window.print()');
+      assert.ok(html.includes('no-print'), 'Must have .no-print utility class');
+      assert.ok(html.includes('Please keep this sheet on your refrigerator.'), 'Must render handoutText');
+      assert.ok(html.includes('Custom practitioner guidelines only.'), 'Must render footerDisclaimer');
+      assert.ok(html.includes('<svg xmlns="http://www.w3.org/2000/svg"'), 'Must render inline SVG QR');
+    });
+
     it('escapes untrusted content in protocol and practice name', () => {
       const maliciousProtocol = {
         name: 'Protocol <img src=x onerror=alert(1)>',

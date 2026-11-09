@@ -3010,6 +3010,29 @@ describe('HTTP Routes & Request Handlers (app/lib/protocols/routes.js)', () => {
         assert.ok(!html.includes('<button type="button" class="protocol-btn protocol-btn-secondary protocol-line-add-btn"'), 'Handout must not have line Add buttons in markup');
         assert.ok(!html.includes('<div class="protocol-practitioner-banner"'), 'Handout must not show professional banner in markup');
         assert.ok(!html.includes("You're signed in as a professional"), 'Handout must not show professional message');
+
+        // Item 1: Inline SVG QR and absolute share URL
+        assert.ok(html.includes('<svg'), 'Handout must contain inline SVG QR code');
+        assert.ok(html.includes(`https://${testShop}/apps/protocols/${handoutProto.token}`), 'Handout must contain absolute share URL');
+        assert.ok(html.includes('practice-label'), 'Handout must render practice-label');
+      });
+
+      it('GET /apps/protocols/<token>?handout=1 enforces cross-shop isolation and returns 404 for another shop\'s token', async () => {
+        const foreignShop = 'other-brand.myshopify.com';
+        const proxyParams = {
+          shop: foreignShop,
+          token: 'tok_handout_test',
+          handout: '1',
+          path_prefix: '/apps/protocols',
+          timestamp: '1729500000'
+        };
+        const sig = calculateAppProxySignature(proxyParams, apiSecret);
+        const url = `https://${foreignShop}/apps/protocols?shop=${foreignShop}&token=tok_handout_test&handout=1&path_prefix=%2Fapps%2Fprotocols&timestamp=1729500000&signature=${sig}`;
+
+        const res = await handleAppProxyRequest(db, new Request(url), { apiSecret });
+        assert.equal(res.status, 404);
+        const text = await res.text();
+        assert.ok(text.includes('Protocol not found'));
       });
 
       describe('Protocol Lifecycle Actions via App Proxy: archive, restore, duplicate (M9b-3b)', () => {

@@ -39,6 +39,7 @@ import {
 } from './catalog.js';
 import { generateShareToken } from './token.js';
 import { renderPortalLiquid } from './portal.js';
+import { renderHandoutHtml } from './handout.js';
 import { ensureOfflineSession } from './exchange.js';
 import {
   saveShopperContact,
@@ -1157,15 +1158,46 @@ export async function handleAppProxyRequest(db, request, options = {}) {
     }
   }
 
+  // If ?handout=1, render the dedicated print-ready handout with QR code
+  if (isHandout) {
+    if (!protocol) {
+      return new Response('Protocol not found', {
+        status: 404,
+        headers: {
+          'Content-Type': 'text/plain; charset=utf-8',
+          'X-Robots-Tag': 'noindex, nofollow'
+        }
+      });
+    }
+
+    const tokenStr = protocol?.token || token || '';
+    const shareUrl = shop && tokenStr ? `https://${shop}/apps/protocols/${encodeURIComponent(tokenStr.trim())}` : '';
+    const handoutHtml = renderHandoutHtml({
+      protocol,
+      practiceName: protocol?.practiceName || '',
+      shareUrl,
+      handoutText,
+      footerDisclaimer
+    });
+
+    return new Response(`{% layout none %}<meta name="robots" content="noindex, nofollow">\n${handoutHtml}`, {
+      status: 200,
+      headers: {
+        'Content-Type': 'application/liquid; charset=utf-8',
+        'X-Robots-Tag': 'noindex, nofollow'
+      }
+    });
+  }
+
   // 6. Render Liquid template
   const liquid = renderProtocolLiquid({
     protocol,
     practiceName: protocol?.practiceName || '',
     shopName: shopDisplayName,
-    isLoggedInPractitioner: isHandout ? false : isLoggedInPractitioner,
-    isHandout,
-    handoutText,
-    footerDisclaimer
+    isLoggedInPractitioner,
+    isHandout: false,
+    handoutText: '',
+    footerDisclaimer: ''
   });
 
   return new Response(liquid, {

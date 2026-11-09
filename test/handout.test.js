@@ -176,6 +176,81 @@ describe('Print Handout & QR Generator (app/lib/protocols/handout.js)', () => {
       assert.ok(html.includes('&#123;&#123; customer.id &#125;&#125;'));
     });
 
+    it('falls back to "Unavailable product" instead of "Item 1" for genuinely unresolvable lines', () => {
+      const unresolvableProto = {
+        name: 'Mystery Regimen',
+        lines: [
+          {
+            quantity: 1,
+            usageNote: 'Take once daily'
+          }
+        ]
+      };
+
+      const html = renderHandoutHtml({
+        protocol: unresolvableProto,
+        practiceName: 'Wellness Center',
+        shareUrl: 'https://example.com/apps/protocols/tok_test'
+      });
+
+      assert.ok(!html.includes('Item 1'), 'Must not render "Item 1" fallback');
+      assert.ok(html.includes('Unavailable product'), 'Must render "Unavailable product" fallback');
+      assert.ok(html.includes('line-row-unavailable'), 'Must apply line-row-unavailable class');
+      assert.ok(html.includes('handout-badge-unavailable'), 'Must render unavailable badge');
+    });
+
+    it('renders "Loading product..." with data attributes and hydration script when productHandle is present', () => {
+      const hydrationProto = {
+        name: 'Hydration Regimen',
+        lines: [
+          {
+            variantGid: 'gid://shopify/ProductVariant/777888',
+            productHandle: 'daily-vitamin-d3',
+            quantity: 2,
+            usageNote: '2 drops morning'
+          }
+        ]
+      };
+
+      const html = renderHandoutHtml({
+        protocol: hydrationProto,
+        practiceName: 'Wellness Center',
+        shareUrl: 'https://example.com/apps/protocols/tok_test'
+      });
+
+      assert.ok(!html.includes('Item 1'), 'Must not render "Item 1"');
+      assert.ok(html.includes('Loading product...'), 'Must render "Loading product..." initial placeholder');
+      assert.ok(html.includes('data-product-handle="daily-vitamin-d3"'), 'Must include data-product-handle');
+      assert.ok(html.includes('data-variant-id="777888"'), 'Must include normalized data-variant-id');
+      assert.ok(html.includes('data-variant-gid="gid://shopify/ProductVariant/777888"'), 'Must include data-variant-gid');
+      assert.ok(html.includes('/products/'), 'Must include client-side hydration script');
+      assert.ok(html.includes('.line-row[data-product-handle]'), 'Script must target data-product-handle rows');
+    });
+
+    it('renders out-of-stock badge and line-row-unavailable when available is false', () => {
+      const outOfStockProto = {
+        name: 'Stack with OOS item',
+        lines: [
+          {
+            title: 'Organic Zinc Drops',
+            quantity: 1,
+            available: false
+          }
+        ]
+      };
+
+      const html = renderHandoutHtml({
+        protocol: outOfStockProto,
+        practiceName: 'Wellness Center',
+        shareUrl: 'https://example.com/apps/protocols/tok_test'
+      });
+
+      assert.ok(html.includes('Organic Zinc Drops'));
+      assert.ok(html.includes('line-row-unavailable'));
+      assert.ok(html.includes('Out of stock'));
+      assert.ok(html.includes('handout-badge-unavailable'));
+    });
+
     it('throws if protocol is missing', () => {
       assert.throws(() => renderHandoutHtml({ protocol: null }), /Protocol object is required/);
     });

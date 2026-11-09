@@ -3108,6 +3108,229 @@ describe('HTTP Routes & Request Handlers (app/lib/protocols/routes.js)', () => {
         assert.ok(text.includes('Protocol not found'));
       });
 
+      it('GET /apps/protocols/<token>?handout=1 with stub variantResolver enriches lines with real titles and does not show Item 1 / Item 2', async () => {
+        const titleProto = {
+          id: 'proto_handout_enriched',
+          shop: testShop,
+          token: 'tok_handout_enriched',
+          name: 'Client Optimal Health Stack',
+          ownerType: 'customer',
+          ownerId: customerGid,
+          createdBy: customerGid,
+          status: 'active'
+        };
+        db.state.protocols.push(titleProto);
+        db.state.lines.push(
+          {
+            id: 'line_enriched_1',
+            protocolId: titleProto.id,
+            position: 0,
+            variantGid: 'gid://shopify/ProductVariant/11111',
+            productHandle: 'snowboard',
+            quantity: 2,
+            usageNote: 'Use twice daily'
+          },
+          {
+            id: 'line_enriched_2',
+            protocolId: titleProto.id,
+            position: 1,
+            variantGid: 'gid://shopify/ProductVariant/22222',
+            productHandle: 'ski-wax',
+            quantity: 1,
+            usageNote: 'Apply once weekly'
+          }
+        );
+
+        const stubResolver = {
+          resolveVariants: async (_shop, gids) => {
+            const map = new Map();
+            map.set('gid://shopify/ProductVariant/11111', {
+              productTitle: 'Snowboard',
+              variantTitle: 'Oxygen',
+              title: 'Snowboard - Oxygen',
+              price: '120.00',
+              currency: 'USD',
+              availableForSale: true,
+              isDeleted: false,
+              isPublished: true
+            });
+            map.set('gid://shopify/ProductVariant/22222', {
+              productTitle: 'Ski Wax',
+              variantTitle: 'Default Title',
+              title: 'Ski Wax',
+              price: '15.00',
+              currency: 'USD',
+              availableForSale: true,
+              isDeleted: false,
+              isPublished: true
+            });
+            return map;
+          }
+        };
+
+        const proxyParams = {
+          shop: testShop,
+          token: titleProto.token,
+          handout: '1',
+          path_prefix: '/apps/protocols',
+          timestamp: '1729500000'
+        };
+        const sig = calculateAppProxySignature(proxyParams, apiSecret);
+        const url = `https://${testShop}/apps/protocols?shop=${testShop}&token=${titleProto.token}&handout=1&path_prefix=%2Fapps%2Fprotocols&timestamp=1729500000&signature=${sig}`;
+
+        const res = await handleAppProxyRequest(db, new Request(url), {
+          apiSecret,
+          variantResolver: stubResolver
+        });
+        assert.equal(res.status, 200);
+        const html = await res.text();
+
+        assert.ok(html.includes('Snowboard - Oxygen'), 'Must show real variant name');
+        assert.ok(html.includes('Ski Wax'), 'Must show real product name');
+        assert.ok(!html.includes('Item 1'), 'Must not show Item 1');
+        assert.ok(!html.includes('Item 2'), 'Must not show Item 2');
+        assert.ok(html.includes('Use twice daily'));
+        assert.ok(html.includes('Apply once weekly'));
+      });
+
+      it('GET /apps/protocols/<token>?handout=1 with production wiring (variantResolver: undefined) renders data-product-handle, Loading product... placeholder, and hydration script without Item 1', async () => {
+        const prodWiringProto = {
+          id: 'proto_handout_prod',
+          shop: testShop,
+          token: 'tok_handout_prod',
+          name: 'Production Health Stack',
+          ownerType: 'customer',
+          ownerId: customerGid,
+          createdBy: customerGid,
+          status: 'active'
+        };
+        db.state.protocols.push(prodWiringProto);
+        db.state.lines.push({
+          id: 'line_prod_1',
+          protocolId: prodWiringProto.id,
+          position: 0,
+          variantGid: 'gid://shopify/ProductVariant/33333',
+          productHandle: 'snowboard-oxygen',
+          quantity: 2,
+          usageNote: 'Take 2 daily'
+        });
+
+        const proxyParams = {
+          shop: testShop,
+          token: prodWiringProto.token,
+          handout: '1',
+          path_prefix: '/apps/protocols',
+          timestamp: '1729500000'
+        };
+        const sig = calculateAppProxySignature(proxyParams, apiSecret);
+        const url = `https://${testShop}/apps/protocols?shop=${testShop}&token=${prodWiringProto.token}&handout=1&path_prefix=%2Fapps%2Fprotocols&timestamp=1729500000&signature=${sig}`;
+
+        // Exactly like production server.js: variantResolver is undefined
+        const res = await handleAppProxyRequest(db, new Request(url), {
+          apiSecret,
+          variantResolver: undefined
+        });
+        assert.equal(res.status, 200);
+        const html = await res.text();
+
+        assert.ok(!html.includes('Item 1'), 'Must not render Item 1 in production wiring');
+        assert.ok(html.includes('Loading product...'), 'Must render Loading product... initial placeholder');
+        assert.ok(html.includes('data-product-handle="snowboard-oxygen"'), 'Must render data-product-handle for client hydration');
+        assert.ok(html.includes('data-variant-id="33333"'), 'Must render normalized variant ID');
+        assert.ok(html.includes('/products/'), 'Must include client-side hydration script');
+        assert.ok(html.includes('window.print()'), 'Must include window.print()');
+      });
+
+      it('GET /apps/protocols/<token>?handout=1 handles unavailable or deleted variants with badge and line-row-unavailable', async () => {
+        const unavailProto = {
+          id: 'proto_handout_unavail',
+          shop: testShop,
+          token: 'tok_handout_unavail',
+          name: 'Discontinued Items Stack',
+          ownerType: 'customer',
+          ownerId: customerGid,
+          createdBy: customerGid,
+          status: 'active'
+        };
+        db.state.protocols.push(unavailProto);
+        db.state.lines.push(
+          {
+            id: 'line_unavail_1',
+            protocolId: unavailProto.id,
+            position: 0,
+            variantGid: 'gid://shopify/ProductVariant/88888',
+            productHandle: 'vintage-herb',
+            quantity: 1,
+            usageNote: '1 drop'
+          },
+          {
+            id: 'line_unavail_2',
+            protocolId: unavailProto.id,
+            position: 1,
+            variantGid: 'gid://shopify/ProductVariant/99999',
+            // Missing productHandle and unresolvable
+            quantity: 1
+          }
+        );
+
+        const stubResolver = {
+          resolveVariants: async (_shop, gids) => {
+            const map = new Map();
+            map.set('gid://shopify/ProductVariant/88888', {
+              productTitle: 'Vintage Herb',
+              variantTitle: 'Default Title',
+              title: 'Vintage Herb',
+              price: '25.00',
+              currency: 'USD',
+              availableForSale: false,
+              isDeleted: false,
+              isPublished: true
+            });
+            // 99999 is not in catalog at all (deleted or missing)
+            return map;
+          }
+        };
+
+        const proxyParams = {
+          shop: testShop,
+          token: unavailProto.token,
+          handout: '1',
+          path_prefix: '/apps/protocols',
+          timestamp: '1729500000'
+        };
+        const sig = calculateAppProxySignature(proxyParams, apiSecret);
+        const url = `https://${testShop}/apps/protocols?shop=${testShop}&token=${unavailProto.token}&handout=1&path_prefix=%2Fapps%2Fprotocols&timestamp=1729500000&signature=${sig}`;
+
+        const res = await handleAppProxyRequest(db, new Request(url), {
+          apiSecret,
+          variantResolver: stubResolver
+        });
+        assert.equal(res.status, 200);
+        const html = await res.text();
+
+        assert.ok(html.includes('line-row-unavailable'), 'Unavailable item must receive line-row-unavailable styling');
+        assert.ok(html.includes('Out of stock'), 'Out of stock item must receive Out of stock badge');
+        assert.ok(html.includes('Vintage Herb'));
+        assert.ok(!html.includes('Item 1'), 'Must not render Item 1');
+        assert.ok(!html.includes('Item 2'), 'Must not render Item 2');
+      });
+
+      it('GET /apps/protocols?handout=1 without token returns 404 Protocol not found', async () => {
+        const proxyParams = {
+          shop: testShop,
+          handout: '1',
+          path_prefix: '/apps/protocols',
+          timestamp: '1729500000'
+        };
+        const sig = calculateAppProxySignature(proxyParams, apiSecret);
+        const url = `https://${testShop}/apps/protocols?shop=${testShop}&handout=1&path_prefix=%2Fapps%2Fprotocols&timestamp=1729500000&signature=${sig}`;
+
+        const res = await handleAppProxyRequest(db, new Request(url), { apiSecret });
+        assert.equal(res.status, 404);
+        const text = await res.text();
+        assert.equal(text, 'Protocol not found');
+      });
+
       describe('Protocol Lifecycle Actions via App Proxy: archive, restore, duplicate (M9b-3b)', () => {
         let lifecycleProto;
         let starterTemplate;

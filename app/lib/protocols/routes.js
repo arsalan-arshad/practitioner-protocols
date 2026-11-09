@@ -870,8 +870,20 @@ export async function handleAppProxyRequest(db, request, options = {}) {
     );
   }
 
+  const isHandout = urlObj.searchParams.get('handout') === '1';
+
   // 4. If no token provided on App Proxy root (/apps/protocols), render Practitioner Portal (M3 / M9b-2)
   if (!token) {
+    if (isHandout) {
+      return new Response('Protocol not found', {
+        status: 404,
+        headers: {
+          'Content-Type': 'text/plain; charset=utf-8',
+          'X-Robots-Tag': 'noindex, nofollow'
+        }
+      });
+    }
+
     if (method === 'GET' && action === 'contacts_csv') {
       if (!customerGid) {
         return Response.json(
@@ -1133,7 +1145,6 @@ export async function handleAppProxyRequest(db, request, options = {}) {
     }
   }
 
-  const isHandout = urlObj.searchParams.get('handout') === '1';
   let handoutText = '';
   let footerDisclaimer = '';
   if (isHandout && shop && db) {

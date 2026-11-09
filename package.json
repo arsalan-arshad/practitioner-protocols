@@ -1,6 +1,6 @@
 {
   "name": "practitioner-protocols",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "description": "Open-source Shopify app that lets professionals share reusable product protocols by link or QR code, with one-tap add-to-cart and per-protocol attribution.",

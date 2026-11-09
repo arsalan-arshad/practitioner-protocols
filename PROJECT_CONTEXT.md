@@ -1,6 +1,6 @@
 # Practitioner Protocols — Project Context (for Claude)
 
-_Snapshot: 2026-11-05 · Live Railway deployment active (`practitioner-protocols-production.up.railway.app`) with internal Postgres & ledger migrations · Production app record "Practitioner Protocols" released (v2, Public distribution) · Production hardening complete · Milestones M9a, M9b-1, M9b-2, M9b-3a & M9b-3b VERIFIED LIVE on dev store · Milestone M11 (Shopper Opt-In & Merchant Contact Hardening) implemented · Pre-submission hardening complete · Spikes S2, S3, S4, S5, S6 resolved; S1 resolved on the Plus dev store only · Brand assets v2 & v3 produced and verified · 566 tests passing across 123 suites._
+_Snapshot: 2026-11-09 · Live Railway deployment active (`practitioner-protocols-production.up.railway.app`) with internal Postgres & ledger migrations · Production app record "Practitioner Protocols" released (v2, Public distribution) · Production hardening complete · Milestones M9a, M9b-1, M9b-2, M9b-3a & M9b-3b VERIFIED LIVE on dev store · Milestone M11 (Shopper Opt-In & Merchant Contact Hardening) implemented · Pre-submission hardening complete · Spikes S2, S3, S4, S5, S6 resolved; S1 resolved on the Plus dev store only · Brand assets v2 & v3 produced and verified · Demo gaps and accuracy fixes branch (`feat/demo-gaps-and-accuracy-fixes`) implemented with Liquid injection defense and App Bridge resource picker · 588 tests passing across 132 suites._
 _Contains NO secrets. Never paste `.env` values or tokens into chat or docs._
 
 ## 1. What this is
@@ -51,6 +51,11 @@ The idea grew out of a client request. The owner decided to build their **own, g
 - Real database-backed admin session-token authentication and UI: Milestone M9a verified live on dev store `ai-agent-app-h9qwnwd8` (embedded `/`, `/admin`, `/app` served with App Bridge session tokens, bootstrap reload, empty states, and cross-shop 403 protection).
 - Practitioner self-enrolment and portal wiring: Milestones M9b-1 (`allowSelfEnrol` setting, migration, pending review table) and M9b-2 (enrol round trip, pending portal state, admin pending row with customer deep link, approval, approved portal, CSRF 415/400 rejections) verified live on dev store `ai-agent-app-h9qwnwd8`; per-customer rate limit, pending cap, `customers/redact` deletion, and `Sec-Fetch-Site` handling are covered by unit tests and not exercised live.
 - Milestone M9b-3 (Product search via Option A, authoring creation/updates in PostgreSQL, remove demo fake resolver from production `/api/proxy`): unblocked.
+- Live dev store verification of demo gap fixes (`feat/demo-gaps-and-accuracy-fixes`):
+  - Storefront printable handout with inline SVG QR code (`?handout=1`).
+  - Browser clipboard copy behavior on protocol and starter template cards (`Copy Link`).
+  - Embedded Admin native Shopify Resource Picker (`shopify.resourcePicker({ type: 'product' })`) without `read_products` scope.
+  - Embedded Admin guide deep link to Shopify Admin `Content > Menus` (`/content/menus`).
 - Add `CODEOWNERS` file (required for the Code Owners rule on `protect-main` branch protection to take effect).
 - Decision on publishing `v0.1.0` GitHub Release.
 - App Store listing screenshots (must be real captures of the finished UI, Shopify rule 4.4.4/4.4.5).
@@ -1185,16 +1190,62 @@ Run the five spikes in a day or two on a dev store; write the answers into secti
 1. **Storefront Navigation & Onboarding:**
    - Added dedicated "How to Use" tab (`?tab=guide`) to embedded Polaris Admin.
    - Direct Storefront Portal Link: `https://${safeShop}/apps/protocols` with one-click clipboard copy (`.copy-portal-btn`) and fallback support.
-   - Step-by-step merchant setup guide on linking `/apps/protocols` under Shopify Admin &rarr; **Content &rarr; Menus** (`/content/menus`).
+   - Step-by-step merchant setup guide on linking `/apps/protocols` under Shopify Admin &rarr; **Online Store &rarr; Navigation** (`/admin/menus`).
 2. **Three Roles & Complete Workflow Architecture:**
-   - **Role 1 (Merchant / Store Admin):** Practitioner approvals, practice display names, starter templates, sales attribution reports, compliance/emergency controls.
-   - **Role 2 (Practitioner / Specialist):** Customer account login, catalog search, protocol builder (quantities, instructions, notes), client sharing (link, print handout, QR code).
+   - **Role 1 (Merchant / Store Admin):** Practitioner approvals, practice display names, starter templates, commission & attribution reports, compliance/emergency controls.
+   - **Role 2 (Practitioner / Provider):** Passwordless 6-digit email OTP login, catalog search, protocol builder (dosages, notes, discounts), client sharing (link, PDF handout, QR code).
    - **Role 3 (Client / Shopper):** Personalized protocol landing page, 1-click Add All to Cart, native Shopify Checkout, automated order attribution.
 3. **Interactive & Practical Utilities:**
    - 5-Minute End-to-End Walkthrough checklist for testing with test gateway.
    - Practitioner onboarding callout card on default `Practitioners` tab linking to the guide.
-   - Comprehensive FAQ answering staff permissions, stock handling, attribution tracking, and identity modes.
+   - Comprehensive FAQ answering staff permissions, stock handling, commission payouts, and identity modes.
    - Zero-PII barrier preserved, App Bridge token/query preservation on tab links.
+
+---
+
+## 46. Demo Gaps & Accuracy Fixes (`feat/demo-gaps-and-accuracy-fixes`, 2026-11-09)
+
+Following a full live dev store demo recording, 7 discrepancies between documentation/guide claims and live behavior were identified and resolved in branch `feat/demo-gaps-and-accuracy-fixes`:
+
+1. **Printable Handout with QR Code (`?handout=1`):**
+   - Wired `handleAppProxyRequest` for `?handout=1` to invoke `renderHandoutHtml` (from `app/lib/protocols/handout.js`), rendering full practice branding, intro note, item usage notes, shop `handoutText`, footer disclaimer, and inline SVG QR code pointing to the absolute storefront share URL (`https://${shop}/apps/protocols/${token}`).
+   - Embedded print-specific CSS (@media print, US Letter and A4 page rules, `@page { size: auto; margin: 12mm; }`, page break protections) with user-initiated "Print" button.
+   - Enforced tenant and ownership isolation: requests for other shops' tokens return 404; inactive protocols return 404.
+
+2. **Storefront Clipboard Copy ("Copy Link"):**
+   - Replaced plain `<a href>` navigation on protocol cards and starter template cards with JavaScript clipboard copy intercepting clicks (`.copy-link-btn`).
+   - Uses `navigator.clipboard.writeText` with transparent fallback to hidden textarea `document.execCommand('copy')`.
+   - Provides momentary visual feedback ("Copied!") before reverting, while preserving valid `href` as fallback for disabled-JS browsers.
+
+3. **Admin Starter Template Modal & Native Resource Picker:**
+   - Moved search error notification (`#admin-starter-search-message`) into normal document flow (`display: block; position: static; margin-top: 0.75rem;`), eliminating overlapping of the "Advanced: Enter Variant GID directly" toggle.
+   - Automatic disclosure: automatically opens `#admin-starter-advanced-fields` whenever search fails or is unavailable.
+   - State reset: clearing the search input hides the error notice; Cancel and X buttons close the modal and reset all field states.
+   - Integrated native Shopify App Bridge resource picker via `shopify.resourcePicker({ type: 'product', multiple: true })` with fallback to `app.resourcePicker`.
+   - Hardened resource picker callback: rejects non-variant product GIDs (`gid://shopify/Product/...`), requires strictly `gid://shopify/ProductVariant/...`, displays in-flow warning if a selected product has no variants, and cleanly handles user cancellation (`undefined`/`null`).
+   - Verified scope constraint: no new scopes (`read_products`) requested; app scope remains strictly `read_orders`. Note: whether `resourcePicker` works live without `read_products` is explicitly documented as unverified pending live test.
+
+4. **Neutral Tone & Copy Accuracy (Anti-Health Claims & Commission Removal):**
+   - Removed all references to "healthcare providers", "patients", "treat", "cure", and health outcome claims across codebase, README, listing copy, and guide.
+   - Replaced health wording with neutral professional language ("professionals such as stylists, trainers, therapists, clinics").
+   - Scrubbed all "commission" and "payout" claims; reworded features accurately to "aggregate attribution reports" and "CSV export of attributed orders by practice and protocol".
+
+5. **Guide Path & Authentic Flow Alignment:**
+   - Corrected navigation guidance in admin "How to Use" guide from legacy `Online Store > Navigation` (`/admin/menus`) to modern Shopify Admin `Content > Menus` (`https://admin.shopify.com/store/${shopHandle}/content/menus`).
+   - Wired deep link button to use App Bridge / `target="_top"` pattern for reliable iframe escape.
+   - Clarified handout format as print-ready HTML page (browser print or save as PDF) rather than server-generated PDF.
+   - Accurately documented Shopify Customer Account login flow, including immediate redirection to "Request Practitioner Access" for authenticated returning customers.
+
+6. **Attribution Currency Clarity:**
+   - Displayed ISO currency code alongside all monetary figures across KPI cards, attribution tables, and RFC 4180 CSV exports.
+   - Clarified metric semantics: "Net line-item revenue in store currency, excludes shipping and taxes" (summed from line items attributed to protocol tokens, excluding shipping and order-level taxes).
+   - Removed redundant currency code from KPI metric label (`Attributed Revenue`), keeping currency code cleanly in the formatted value (`USD 1,253.60`).
+
+7. **Regression Guard & Security Hardening (Review Follow-up):**
+   - **Liquid Injection Neutralization (Blocker 1):** Handout HTML rendered under `Content-Type: application/liquid; charset=utf-8` now escapes `{`, `}`, and `%` as `&#123;`, `&#125;`, `&#37;` using shared `escapeHtml` imported from `proxy.js`. Neutralizes all practitioner and merchant dynamic fields (`protocol.name`, `introNote`, line `usageNote`, `practiceName`, `handoutText`, `footerDisclaimer`, `shareUrl`) to prevent template injection through Shopify's Liquid compiler.
+   - **Standards Mode DOCTYPE Order (Blocker 2):** Removed `<meta name="robots">` prepended before `<!DOCTYPE html>` in `routes.js`. Injected `<meta name="robots" content="noindex, nofollow">` inside `<head>` in `renderHandoutHtml`, ensuring `{% layout none %}` is followed immediately by standards-mode `<!DOCTYPE html>`.
+   - Comprehensive regression tests in `test/handout.test.js`, `test/routes.test.js`, `test/portal.test.js`, and `test/admin.test.js` bringing total passing unit tests to 588 across 132 suites with zero failures.
+
 
 
 

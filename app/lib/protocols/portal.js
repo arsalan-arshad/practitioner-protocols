@@ -1,7 +1,7 @@
 import { validateProtocolInput, ProtocolValidationError } from './validation.js';
 import { canAccessProtocol } from './permissions.js';
 import { generateQrSvg } from './qr.js';
-import { renderHandoutHtml, escapeHtml } from './handout.js';
+import { renderHandoutHtml } from './handout.js';
 
 export { ProtocolValidationError };
 
@@ -771,6 +771,16 @@ function neutralizeLiquid(str) {
     .replace(/%\}/g, '%&#125;');
 }
 
+function basicEscapeHtml(str) {
+  if (str === null || str === undefined) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
 /**
  * Safely HTML-escapes and neutralizes text.
  *
@@ -778,7 +788,7 @@ function neutralizeLiquid(str) {
  * @returns {string}
  */
 function safePortalText(str) {
-  return neutralizeLiquid(escapeHtml(str || ''));
+  return neutralizeLiquid(basicEscapeHtml(str || ''));
 }
 
 /**

@@ -3015,6 +3015,79 @@ describe('HTTP Routes & Request Handlers (app/lib/protocols/routes.js)', () => {
         assert.ok(html.includes('<svg'), 'Handout must contain inline SVG QR code');
         assert.ok(html.includes(`https://${testShop}/apps/protocols/${handoutProto.token}`), 'Handout must contain absolute share URL');
         assert.ok(html.includes('practice-label'), 'Handout must render practice-label');
+
+        // Blocker 2: layout none immediately followed by <!DOCTYPE html>
+        assert.ok(
+          html.startsWith('{% layout none %}\n<!DOCTYPE html>'),
+          'Handout route must start with layout none followed immediately by <!DOCTYPE html>'
+        );
+      });
+
+      it('GET /apps/protocols/<token>?handout=1 strictly neutralizes Liquid tags across all fields (Blocker 1 & 2)', async () => {
+        db.state.settings = [{
+          shop: testShop,
+          identityMode: 'tag',
+          allowSelfEnrol: true,
+          handoutText: 'Take daily {{ shop.email }} {% assign h = 1 %}',
+          footerDisclaimer: 'Disclaimer {{ shop.name }} {% endraw %}'
+        }];
+
+        const injectionProto = {
+          id: 'proto_handout_liq',
+          shop: testShop,
+          token: 'tok_handout_liq',
+          name: 'Skincare {{ shop.currency }} {% assign x = 1 %}',
+          displayName: 'Practice {{ shop.domain }} {% if true %}',
+          ownerType: 'customer',
+          ownerId: customerGid,
+          createdBy: customerGid,
+          status: 'active'
+        };
+        db.state.protocols.push(injectionProto);
+        db.state.lines.push({
+          id: 'line_handout_liq',
+          protocolId: injectionProto.id,
+          position: 0,
+          variantGid: 'gid://shopify/ProductVariant/54321',
+          productHandle: 'restorative-oil',
+          quantity: 1,
+          usageNote: 'Usage {{ customer.id }} {% for a in b %}'
+        });
+
+        const proxyParams = {
+          shop: testShop,
+          token: injectionProto.token,
+          handout: '1',
+          path_prefix: '/apps/protocols',
+          timestamp: '1729500000'
+        };
+        const sig = calculateAppProxySignature(proxyParams, apiSecret);
+        const url = `https://${testShop}/apps/protocols?shop=${testShop}&token=${injectionProto.token}&handout=1&path_prefix=%2Fapps%2Fprotocols&timestamp=1729500000&signature=${sig}`;
+
+        const res = await handleAppProxyRequest(db, new Request(url), { apiSecret });
+        assert.equal(res.status, 200);
+        const html = await res.text();
+
+        // Blocker 2: Starts with layout none followed by <!DOCTYPE html>
+        assert.ok(html.startsWith('{% layout none %}\n<!DOCTYPE html>'));
+
+        // Blocker 1: Strip layout tag and style block, then assert zero unescaped Liquid tags
+        const contentAfterLayout = html.replace('{% layout none %}', '');
+        const bodyWithoutStyle = contentAfterLayout.replace(/<style[\s\S]*?<\/style>/gi, '');
+        assert.ok(!bodyWithoutStyle.includes('{{'), 'Handout must contain zero {{ outside style block');
+        assert.ok(!bodyWithoutStyle.includes('}}'), 'Handout must contain zero }} outside style block');
+        assert.ok(!bodyWithoutStyle.includes('{%'), 'Handout must contain zero {% outside style block');
+        assert.ok(!bodyWithoutStyle.includes('%}'), 'Handout must contain zero %} outside style block');
+
+        // Verify entities rendered
+        assert.ok(html.includes('&#123;&#123; shop.email &#125;&#125;'));
+        assert.ok(html.includes('&#123;&#37; assign h = 1 &#37;&#125;'));
+        assert.ok(html.includes('&#123;&#123; shop.name &#125;&#125;'));
+        assert.ok(html.includes('&#123;&#37; endraw &#37;&#125;'));
+        assert.ok(html.includes('&#123;&#123; shop.currency &#125;&#125;'));
+        assert.ok(html.includes('&#123;&#37; assign x = 1 &#37;&#125;'));
+        assert.ok(html.includes('&#123;&#123; customer.id &#125;&#125;'));
+        assert.ok(html.includes('&#123;&#37; for a in b &#37;&#125;'));
       });
 
       it('GET /apps/protocols/<token>?handout=1 enforces cross-shop isolation and returns 404 for another shop\'s token', async () => {

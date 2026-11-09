@@ -129,6 +129,53 @@ describe('Print Handout & QR Generator (app/lib/protocols/handout.js)', () => {
       assert.ok(html.includes('&lt;script&gt;evil()&lt;/script&gt;'));
     });
 
+    it('strictly neutralizes Liquid delimiters {{, }}, {% and %} in every dynamic field (Blocker 1 & 2)', () => {
+      const liquidInjectionProtocol = {
+        name: 'Protocol {{ shop.name }} {% assign x = 1 %}',
+        introNote: 'Intro {{ customer.email }} {% for i in (1..3) %}',
+        lines: [
+          {
+            title: 'Line Title {{ shop.email }}',
+            variantTitle: 'Variant {% if true %}',
+            quantity: 2,
+            usageNote: 'Usage {% assign p = 2 %} {{ shop.currency }}'
+          }
+        ]
+      };
+
+      const html = renderHandoutHtml({
+        protocol: liquidInjectionProtocol,
+        practiceName: 'Clinic {{ shop.domain }} {% endraw %}',
+        shareUrl: 'https://example.com/apps/protocols/tok?q={{shop.id}}&tag={%print%}',
+        handoutText: 'Handout note {{ shop.name }} {% assign a = 1 %}',
+        footerDisclaimer: 'Disclaimer {{ customer.id }} {% comment %}'
+      });
+
+      // Blocker 2: starts with <!DOCTYPE html>
+      assert.ok(html.startsWith('<!DOCTYPE html>'));
+      assert.ok(html.includes('<meta name="robots" content="noindex, nofollow">'));
+
+      // Blocker 1: Strip <style> block and assert zero unescaped Liquid tags
+      const bodyWithoutStyle = html.replace(/<style[\s\S]*?<\/style>/gi, '');
+      assert.ok(!bodyWithoutStyle.includes('{{'), 'Handout must contain zero {{ outside style block');
+      assert.ok(!bodyWithoutStyle.includes('}}'), 'Handout must contain zero }} outside style block');
+      assert.ok(!bodyWithoutStyle.includes('{%'), 'Handout must contain zero {% outside style block');
+      assert.ok(!bodyWithoutStyle.includes('%}'), 'Handout must contain zero %} outside style block');
+
+      // Assert literal characters appear as escaped entities
+      assert.ok(html.includes('&#123;&#123; shop.name &#125;&#125;'));
+      assert.ok(html.includes('&#123;&#37; assign x = 1 &#37;&#125;'));
+      assert.ok(html.includes('&#123;&#123; customer.email &#125;&#125;'));
+      assert.ok(html.includes('&#123;&#37; for i in (1..3) &#37;&#125;'));
+      assert.ok(html.includes('&#123;&#123; shop.email &#125;&#125;'));
+      assert.ok(html.includes('&#123;&#37; assign p = 2 &#37;&#125;'));
+      assert.ok(html.includes('&#123;&#123; shop.domain &#125;&#125;'));
+      assert.ok(html.includes('&#123;&#37; endraw &#37;&#125;'));
+      assert.ok(html.includes('&#123;&#123;shop.id&#125;&#125;'));
+      assert.ok(html.includes('&#123;&#37;print&#37;&#125;'));
+      assert.ok(html.includes('&#123;&#123; customer.id &#125;&#125;'));
+    });
+
     it('throws if protocol is missing', () => {
       assert.throws(() => renderHandoutHtml({ protocol: null }), /Protocol object is required/);
     });

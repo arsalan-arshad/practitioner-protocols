@@ -1180,7 +1180,7 @@ export async function handleAppProxyRequest(db, request, options = {}) {
       footerDisclaimer
     });
 
-    return new Response(`{% layout none %}<meta name="robots" content="noindex, nofollow">\n${handoutHtml}`, {
+    return new Response(`{% layout none %}\n${handoutHtml}`, {
       status: 200,
       headers: {
         'Content-Type': 'application/liquid; charset=utf-8',

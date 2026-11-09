@@ -1,22 +1,7 @@
 import { generateQrSvg } from './qr.js';
+import { escapeHtml } from './proxy.js';
 
-export { generateQrSvg };
-
-/**
- * Escapes characters for safe HTML insertion.
- *
- * @param {unknown} str
- * @returns {string}
- */
-export function escapeHtml(str) {
-  if (str === null || str === undefined) return '';
-  return String(str)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#039;');
-}
+export { generateQrSvg, escapeHtml };
 
 /**
  * Builds self-contained, print-ready HTML/CSS for US Letter and A4 handouts.
@@ -84,6 +69,7 @@ export function renderHandoutHtml({ protocol, practiceName = '', shareUrl = '', 
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
   <title>${safeTitle} — ${safePractice}</title>
   <style>
     @page {

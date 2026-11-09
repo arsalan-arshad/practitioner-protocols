@@ -1913,7 +1913,7 @@ export function renderAdminHtml(options = {}) {
       <div class="Polaris-Metrics-Grid">
         <div class="Polaris-Metric-Box">
           <div class="Polaris-Metric-Val">${totalRev}</div>
-          <div class="Polaris-Metric-Label">Attributed Revenue (${escapeAdminText(currency)})</div>
+          <div class="Polaris-Metric-Label">Attributed Revenue</div>
           <div style="font-size:0.75rem; color:var(--p-color-text-subdued); margin-top:0.25rem;">Net line-item revenue in store currency, excludes shipping and taxes</div>
         </div>
         <div class="Polaris-Metric-Box">
@@ -2833,8 +2833,8 @@ ${appBridgeHead}  <title>Practitioner Protocols &mdash; Admin</title>
           return;
         }
         const vGid = variant.id ? (String(variant.id).startsWith('gid://') ? String(variant.id) : 'gid://shopify/ProductVariant/' + variant.id) : '';
-        if (!vGid) {
-          alert('Invalid variant');
+        if (!vGid || !vGid.startsWith('gid://shopify/ProductVariant/')) {
+          alert('Invalid variant: must be a product variant GID');
           return;
         }
         if (starterItems.some(function(i) { return i.variantGid === vGid; })) {
@@ -2873,16 +2873,24 @@ ${appBridgeHead}  <title>Practitioner Protocols &mdash; Admin</title>
         pickerBtn.addEventListener('click', function() {
           if (typeof window !== 'undefined' && window.shopify && typeof window.shopify.resourcePicker === 'function') {
             window.shopify.resourcePicker({ type: 'product', multiple: true }).then(function(selected) {
+              if (selected === undefined || selected === null) return;
               const list = Array.isArray(selected) ? selected : (selected && selected.selection ? selected.selection : []);
               if (!list.length) return;
               list.forEach(function(prod) {
-                const vars = prod.variants || [];
+                const vars = Array.isArray(prod.variants) ? prod.variants : [];
                 if (vars.length > 0) {
                   vars.forEach(function(v) {
                     addVariantToStarter(prod, v, prod.handle);
                   });
-                } else if (prod.id) {
-                  addVariantToStarter(prod, { id: prod.id, title: prod.title }, prod.handle);
+                } else {
+                  const msgEl = document.getElementById('admin-starter-search-message');
+                  if (msgEl) {
+                    msgEl.style.display = 'block';
+                    msgEl.style.background = '#fef3c7';
+                    msgEl.style.border = '1px solid #fcd34d';
+                    msgEl.style.color = '#92400e';
+                    msgEl.textContent = 'This product has no selectable variants';
+                  }
                 }
               });
             }).catch(function(err) {

@@ -1478,6 +1478,8 @@ describe('Merchant Admin Layer (app/lib/protocols/admin.js)', () => {
       assert.ok(html.includes('14')); // total orders
       assert.ok(html.includes('38')); // total units
       assert.ok(html.includes('/api/admin/attribution.csv'));
+      assert.ok(html.includes('<div class="Polaris-Metric-Label">Attributed Revenue</div>'), 'KPI card label must not have duplicate currency');
+      assert.ok(!html.includes('<div class="Polaris-Metric-Label">Attributed Revenue (USD)</div>'), 'Duplicate currency code removed from KPI label');
     });
 
     it('renders emergency storewide disable button with warning styling in settings tab', () => {

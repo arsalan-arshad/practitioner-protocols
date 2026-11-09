@@ -348,7 +348,7 @@ export function renderHandoutHtml({ protocol, practiceName = '', shareUrl = '', 
 </head>
 <body>
   <div class="no-print-bar">
-    <button type="button" class="print-btn no-print" onclick="window.print()">Print Handout</button>
+    <button type="button" class="print-btn no-print">Print Handout</button>
   </div>
 
   <div class="handout-header">
@@ -516,11 +516,19 @@ export function renderHandoutHtml({ protocol, practiceName = '', shareUrl = '', 
 
     var printBtn = document.querySelector('.print-btn');
     if (printBtn) {
+      var isPrinting = false;
       printBtn.addEventListener('click', function(e) {
         e.preventDefault();
-        hydrationPromise.then(function() {
-          window.print();
-        });
+        if (isPrinting) return;
+        isPrinting = true;
+        hydrationPromise
+          .catch(function() {})
+          .then(function() {
+            window.print();
+          })
+          .finally(function() {
+            isPrinting = false;
+          });
       });
     }
   })();

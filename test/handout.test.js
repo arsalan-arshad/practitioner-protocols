@@ -96,11 +96,37 @@ describe('Print Handout & QR Generator (app/lib/protocols/handout.js)', () => {
         footerDisclaimer: 'Custom practitioner guidelines only.'
       });
 
-      assert.ok(html.includes('window.print()'), 'Must contain user-initiated window.print()');
+      assert.ok(!html.includes('onclick='), 'Print button must have no inline onclick handler');
+      assert.ok(html.includes('<button type="button" class="print-btn no-print">Print Handout</button>'));
+      const printCallSites = html.match(/window\.print\s*\(/g) || [];
+      assert.equal(printCallSites.length, 1, 'Must contain exactly one window.print( call site');
       assert.ok(html.includes('no-print'), 'Must have .no-print utility class');
       assert.ok(html.includes('Please keep this sheet on your refrigerator.'), 'Must render handoutText');
       assert.ok(html.includes('Custom practitioner guidelines only.'), 'Must render footerDisclaimer');
       assert.ok(html.includes('<svg xmlns="http://www.w3.org/2000/svg"'), 'Must render inline SVG QR');
+    });
+
+    it('ensures Print Handout button has no inline onclick, exactly one window.print( call site, and output contains no "{{" or "{%" anywhere', () => {
+      const shareUrl = 'https://my-brand.myshopify.com/apps/protocols/ghreset2026';
+      const html = renderHandoutHtml({
+        protocol: mockProtocol,
+        practiceName: 'Elite Functional Health',
+        shareUrl,
+        handoutText: 'Please keep this sheet on your refrigerator.',
+        footerDisclaimer: 'Custom practitioner guidelines only.'
+      });
+
+      assert.ok(!html.includes('onclick='), 'Rendered Print button must have no inline onclick attribute');
+      assert.ok(html.includes('<button type="button" class="print-btn no-print">Print Handout</button>'));
+
+      const printMatches = html.match(/window\.print\s*\(/g) || [];
+      assert.equal(printMatches.length, 1, 'Output must contain exactly one window.print( call site');
+
+      // Zero unescaped Liquid delimiters {{ or {% anywhere in entire document (including inside script)
+      assert.ok(!html.includes('{{'), 'Document must contain no {{ anywhere');
+      assert.ok(!html.includes('}}'), 'Document must contain no }} anywhere');
+      assert.ok(!html.includes('{%'), 'Document must contain no {% anywhere');
+      assert.ok(!html.includes('%}'), 'Document must contain no %} anywhere');
     });
 
     it('escapes untrusted content in protocol and practice name', () => {
@@ -161,6 +187,10 @@ describe('Print Handout & QR Generator (app/lib/protocols/handout.js)', () => {
       assert.ok(!bodyWithoutStyle.includes('}}'), 'Handout must contain zero }} outside style block');
       assert.ok(!bodyWithoutStyle.includes('{%'), 'Handout must contain zero {% outside style block');
       assert.ok(!bodyWithoutStyle.includes('%}'), 'Handout must contain zero %} outside style block');
+
+      // Assert zero unescaped Liquid delimiters in the entire document (including inside script)
+      assert.ok(!html.includes('{{'), 'Handout must contain zero {{ anywhere including inside script');
+      assert.ok(!html.includes('{%'), 'Handout must contain zero {% anywhere including inside script');
 
       // Assert literal characters appear as escaped entities
       assert.ok(html.includes('&#123;&#123; shop.name &#125;&#125;'));

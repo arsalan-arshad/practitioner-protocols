@@ -1800,7 +1800,7 @@ export function renderAdminHtml(options = {}) {
             <div style="display:flex; gap:0.5rem; position:relative; flex-wrap:wrap;">
               <input type="text" id="admin-starter-search-input" placeholder="Search catalog by product name..." style="flex:1; min-width:180px; padding:0.5rem; border:1px solid var(--p-color-border); border-radius:4px; font-size:0.875rem; box-sizing:border-box;">
               <button type="button" id="admin-starter-search-btn" class="Polaris-Button">Search</button>
-              <button type="button" id="admin-starter-picker-btn" class="Polaris-Button Polaris-Button--primary" style="display:none;">Browse Products</button>
+              <button type="button" id="admin-starter-picker-btn" class="Polaris-Button Polaris-Button--primary">Browse Products</button>
               <div id="admin-starter-search-dropdown" style="display:none; position:absolute; top:100%; left:0; right:0; background:#fff; border:1px solid var(--p-color-border); border-radius:4px; max-height:220px; overflow-y:auto; z-index:10000; box-shadow:0 4px 6px -1px rgba(0,0,0,0.1); margin-top:2px;"></div>
             </div>
             <div id="admin-starter-search-message" style="display:none; margin-top:0.5rem; padding:0.625rem; border-radius:4px; font-size:0.8125rem; line-height:1.4;"></div>
@@ -2818,7 +2818,7 @@ ${appBridgeHead}  <title>Practitioner Protocols &mdash; Admin</title>
               msgEl.style.background = '#fef3c7';
               msgEl.style.border = '1px solid #fcd34d';
               msgEl.style.color = '#92400e';
-              msgEl.innerHTML = 'Storefront catalog search is unavailable from the embedded admin iframe without storefront CORS. Please use the <strong>Advanced: Enter Variant GID directly</strong> section below (now opened) to add product variants.';
+              msgEl.innerHTML = 'Storefront catalog search is unavailable from the embedded admin iframe without storefront CORS. Please click <strong>Browse Products</strong> above to open the native Shopify picker, or use the <strong>Advanced: Enter Variant GID directly</strong> section below (now opened).';
             }
             const advDetails = document.getElementById('admin-starter-advanced-details');
             if (advDetails) {
@@ -2869,18 +2869,37 @@ ${appBridgeHead}  <title>Practitioner Protocols &mdash; Admin</title>
       }
 
       const pickerBtn = document.getElementById('admin-starter-picker-btn');
-      if (pickerBtn && typeof window !== 'undefined' && window.shopify && typeof window.shopify.resourcePicker === 'function') {
-        pickerBtn.style.display = 'inline-flex';
+      if (pickerBtn) {
         pickerBtn.addEventListener('click', function() {
-          window.shopify.resourcePicker({ type: 'product', multiple: true }).then(function(selected) {
-            if (!selected || !selected.selection || !selected.selection.length) return;
-            selected.selection.forEach(function(prod) {
-              const vars = prod.variants || [];
-              vars.forEach(function(v) {
-                addVariantToStarter(prod, v, prod.handle);
+          if (typeof window !== 'undefined' && window.shopify && typeof window.shopify.resourcePicker === 'function') {
+            window.shopify.resourcePicker({ type: 'product', multiple: true }).then(function(selected) {
+              const list = Array.isArray(selected) ? selected : (selected && selected.selection ? selected.selection : []);
+              if (!list.length) return;
+              list.forEach(function(prod) {
+                const vars = prod.variants || [];
+                if (vars.length > 0) {
+                  vars.forEach(function(v) {
+                    addVariantToStarter(prod, v, prod.handle);
+                  });
+                } else if (prod.id) {
+                  addVariantToStarter(prod, { id: prod.id, title: prod.title }, prod.handle);
+                }
               });
+            }).catch(function(err) {
+              console.warn('[resourcePicker] dismissed or error', err);
             });
-          }).catch(function() {});
+          } else {
+            const adv = document.getElementById('admin-starter-advanced-details');
+            if (adv) adv.open = true;
+            const msgEl = document.getElementById('admin-starter-search-message');
+            if (msgEl) {
+              msgEl.style.display = 'block';
+              msgEl.style.background = '#fef3c7';
+              msgEl.style.border = '1px solid #fcd34d';
+              msgEl.style.color = '#92400e';
+              msgEl.innerHTML = 'Shopify Resource Picker is active when viewed inside Shopify Admin. Please use the <strong>Advanced: Enter Variant GID directly</strong> section below to add variants.';
+            }
+          }
         });
       }
 

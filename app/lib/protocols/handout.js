@@ -1,7 +1,7 @@
 import { generateQrSvg } from './qr.js';
-import { escapeHtml } from './proxy.js';
+import { escapeHtml, normalizeVariantId } from './proxy.js';
 
-export { generateQrSvg, escapeHtml };
+export { generateQrSvg, escapeHtml, normalizeVariantId };
 
 /**
  * Builds self-contained, print-ready HTML/CSS for US Letter and A4 handouts.
@@ -44,19 +44,47 @@ export function renderHandoutHtml({ protocol, practiceName = '', shareUrl = '', 
   const lines = Array.isArray(protocol.lines) ? protocol.lines : [];
 
   const linesMarkup = lines.map((line, idx) => {
-    const itemTitle = escapeHtml(
-      line.title ||
-      line.productTitle ||
-      (line.variantTitle ? `Product (${line.variantTitle})` : `Item ${idx + 1}`)
-    );
+    const rawVariant = line.variantGid || line.variantId || line.id || '';
+    const normVariantId = normalizeVariantId(rawVariant);
+    const productHandle = line.productHandle ? String(line.productHandle).trim() : '';
+
+    const isEnriched = Boolean(line.title || line.productTitle || line.name);
+    const hasHandle = Boolean(productHandle);
+    const isMissingProduct = !isEnriched && !hasHandle;
+    const isAvailable = !isMissingProduct && line.available !== false && line.inStock !== false && line.isDeleted !== true;
+
+    let itemTitle = 'Unavailable product';
+    if (line.title) {
+      itemTitle = line.title;
+    } else if (line.productTitle) {
+      const vTitle = line.variantTitle && line.variantTitle !== 'Default Title' ? ` - ${line.variantTitle}` : '';
+      itemTitle = `${line.productTitle}${vTitle}`;
+    } else if (line.name) {
+      itemTitle = line.name;
+    } else if (line.variantTitle && line.variantTitle !== 'Default Title') {
+      itemTitle = `Product (${line.variantTitle})`;
+    } else if (hasHandle) {
+      itemTitle = 'Loading product...';
+    } else {
+      itemTitle = 'Unavailable product';
+    }
+
     const qty = Number.isInteger(line.quantity) && line.quantity >= 1 ? line.quantity : 1;
     const usage = line.usageNote ? escapeHtml(line.usageNote) : '';
 
+    const statusBadge = isMissingProduct
+      ? `<div class="item-status"><span class="handout-badge-unavailable">Unavailable product</span></div>`
+      : (!isAvailable ? `<div class="item-status"><span class="handout-badge-unavailable">Out of stock</span></div>` : '');
+
     return `
-      <tr class="line-row">
+      <tr class="line-row ${isAvailable ? '' : 'line-row-unavailable'}"
+        data-variant-id="${escapeHtml(normVariantId)}"
+        data-variant-gid="${escapeHtml(line.variantGid || '')}"
+        data-product-handle="${escapeHtml(productHandle)}">
         <td class="col-num">${idx + 1}</td>
         <td class="col-item">
-          <div class="item-title">${itemTitle}</div>
+          <div class="item-title">${escapeHtml(itemTitle)}</div>
+          ${statusBadge}
           ${usage ? `<div class="item-usage">${usage}</div>` : ''}
         </td>
         <td class="col-qty">${qty}</td>
@@ -202,6 +230,28 @@ export function renderHandoutHtml({ protocol, practiceName = '', shareUrl = '', 
       margin-top: 3px;
       font-style: italic;
     }
+    .line-row-unavailable {
+      opacity: 0.65;
+    }
+    .line-row-unavailable .item-title {
+      text-decoration: line-through;
+      color: #6b7280;
+    }
+    .handout-badge-unavailable {
+      display: inline-block;
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      padding: 2px 6px;
+      border-radius: 4px;
+      background: #fee2e2;
+      color: #991b1b;
+      margin-top: 3px;
+    }
+    .item-status {
+      margin-top: 2px;
+    }
     .instructions-box {
       border: 1px dashed #d1d5db;
       background-color: #fafafa;
@@ -298,7 +348,7 @@ export function renderHandoutHtml({ protocol, practiceName = '', shareUrl = '', 
 </head>
 <body>
   <div class="no-print-bar">
-    <button type="button" class="print-btn no-print" onclick="window.print()">Print Handout</button>
+    <button type="button" class="print-btn no-print">Print Handout</button>
   </div>
 
   <div class="handout-header">
@@ -341,6 +391,148 @@ export function renderHandoutHtml({ protocol, practiceName = '', shareUrl = '', 
     <div style="margin-top: 8px;">Order directly from the official store at standard retail pricing.</div>
     ${safeDisclaimer ? `<div class="handout-disclaimer">${safeDisclaimer}</div>` : ''}
   </div>
+
+  <script>
+  (function() {
+    function findRowsByHandle(targetHandle) {
+      var rowsList = document.querySelectorAll('.line-row');
+      var matches = [];
+      for (var i = 0; i < rowsList.length; i++) {
+        if (rowsList[i].getAttribute('data-product-handle') === targetHandle) {
+          matches.push(rowsList[i]);
+        }
+      }
+      return matches;
+    }
+
+    var rows = document.querySelectorAll('.line-row[data-product-handle]');
+    var handlesToFetch = {};
+    rows.forEach(function(row) {
+      var h = row.getAttribute('data-product-handle');
+      if (h && h.trim()) {
+        handlesToFetch[h.trim()] = true;
+      }
+    });
+
+    var uniqueHandles = Object.keys(handlesToFetch);
+    var hydrationPromise = Promise.resolve();
+
+    if (uniqueHandles.length > 0) {
+      hydrationPromise = Promise.all(uniqueHandles.map(function(handle) {
+        return fetch('/products/' + encodeURIComponent(handle) + '.js', {
+          headers: { 'Accept': 'application/json' }
+        })
+        .then(function(res) {
+          if (!res.ok) throw new Error('Product not found: ' + handle);
+          return res.json();
+        })
+        .then(function(product) {
+          var matchingRows = findRowsByHandle(handle);
+          matchingRows.forEach(function(row) {
+            var varId = row.getAttribute('data-variant-id');
+            var varGid = row.getAttribute('data-variant-gid');
+            var variant = null;
+            if (product && Array.isArray(product.variants)) {
+              variant = product.variants.find(function(v) {
+                return String(v.id) === String(varId) || ('gid://shopify/ProductVariant/' + v.id) === varGid;
+              });
+            }
+
+            var titleEl = row.querySelector('.item-title');
+            var itemCol = row.querySelector('.col-item');
+
+            function setBadge(text) {
+              var badgeEl = row.querySelector('.handout-badge-unavailable');
+              if (!badgeEl && itemCol) {
+                var statusDiv = document.createElement('div');
+                statusDiv.className = 'item-status';
+                badgeEl = document.createElement('span');
+                badgeEl.className = 'handout-badge-unavailable';
+                statusDiv.appendChild(badgeEl);
+                var usageEl = row.querySelector('.item-usage');
+                if (usageEl) {
+                  itemCol.insertBefore(statusDiv, usageEl);
+                } else {
+                  itemCol.appendChild(statusDiv);
+                }
+              }
+              if (badgeEl) badgeEl.textContent = text;
+            }
+
+            function removeBadge() {
+              var statusEl = row.querySelector('.item-status');
+              if (statusEl && statusEl.parentNode) {
+                statusEl.parentNode.removeChild(statusEl);
+              }
+            }
+
+            if (!variant) {
+              row.classList.add('line-row-unavailable');
+              if (titleEl) titleEl.textContent = 'Unavailable product';
+              setBadge('Unavailable product');
+              return;
+            }
+
+            var vTitle = variant.title && variant.title !== 'Default Title' ? variant.title : '';
+            var fullTitle = (product.title || 'Product') + (vTitle ? ' - ' + vTitle : '');
+            if (titleEl) titleEl.textContent = fullTitle;
+
+            var isAvail = variant.available === true;
+            if (isAvail) {
+              row.classList.remove('line-row-unavailable');
+              removeBadge();
+            } else {
+              row.classList.add('line-row-unavailable');
+              setBadge('Out of stock');
+            }
+          });
+        })
+        .catch(function() {
+          var matchingRows = findRowsByHandle(handle);
+          matchingRows.forEach(function(row) {
+            row.classList.add('line-row-unavailable');
+            var titleEl = row.querySelector('.item-title');
+            if (titleEl) titleEl.textContent = 'Unavailable product';
+            var itemCol = row.querySelector('.col-item');
+            var badgeEl = row.querySelector('.handout-badge-unavailable');
+            if (!badgeEl && itemCol) {
+              var statusDiv = document.createElement('div');
+              statusDiv.className = 'item-status';
+              badgeEl = document.createElement('span');
+              badgeEl.className = 'handout-badge-unavailable';
+              statusDiv.appendChild(badgeEl);
+              var usageEl = row.querySelector('.item-usage');
+              if (usageEl) {
+                itemCol.insertBefore(statusDiv, usageEl);
+              } else {
+                itemCol.appendChild(statusDiv);
+              }
+            }
+            if (badgeEl) badgeEl.textContent = 'Unavailable product';
+          });
+        });
+      }));
+    }
+
+    var printBtn = document.querySelector('.print-btn');
+    if (printBtn) {
+      var isPrinting = false;
+      printBtn.addEventListener('click', function(e) {
+        e.preventDefault();
+        if (isPrinting) return;
+        isPrinting = true;
+        hydrationPromise
+          .catch(function() {})
+          .then(function() {
+            window.print();
+          })
+          .finally(function() {
+            isPrinting = false;
+          });
+      });
+    }
+  })();
+  </script>
 </body>
 </html>`;
 }

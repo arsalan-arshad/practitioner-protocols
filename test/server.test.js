@@ -966,6 +966,107 @@ describe('Server & Configuration Hardening (server.js, shopify.app.toml, README.
     });
   });
 
+  describe('Public Interactive Showcase (/demo and /try)', () => {
+    const prodListener = createRequestListener({
+      databaseUrl: 'postgres://production.host:5432/db',
+      shopifyApiSecret: 'prod_secret_123',
+    });
+
+    it('GET /demo and GET /try return 200 with Practitioner Portal and showcase bar', async () => {
+      for (const route of ['/demo', '/try']) {
+        const req = createMockReq({ method: 'GET', url: route });
+        const res = createMockRes();
+        await prodListener(req, res);
+
+        assert.equal(res.statusCode, 200);
+        assert.ok(res.body.includes('demo-showcase-bar'), 'Must contain demo showcase bar');
+        assert.ok(res.body.includes('Interactive Demo'), 'Must contain demo badge');
+        assert.ok(res.body.includes('Daily Essentials Protocol'), 'Must contain demo protocol');
+        assert.equal(res.headers['X-Robots-Tag'], 'noindex, nofollow');
+      }
+    });
+
+    it('GET /demo?view=client renders Client Landing Page preview with showcase bar', async () => {
+      const req = createMockReq({ method: 'GET', url: '/demo?view=client' });
+      const res = createMockRes();
+      await prodListener(req, res);
+
+      assert.equal(res.statusCode, 200);
+      assert.ok(res.body.includes('demo-showcase-bar'));
+      assert.ok(res.body.includes('Daily Essentials Protocol'));
+      assert.ok(res.body.includes('Hydrating Daily Cleanser'));
+    });
+
+    it('GET /demo?view=handout renders Printable Handout preview with showcase bar and QR', async () => {
+      const req = createMockReq({ method: 'GET', url: '/demo?view=handout' });
+      const res = createMockRes();
+      await prodListener(req, res);
+
+      assert.equal(res.statusCode, 200);
+      assert.ok(res.body.startsWith('<!DOCTYPE html>'), 'Handout must start with <!DOCTYPE html>');
+      assert.ok(res.body.includes('demo-showcase-bar'));
+      assert.ok(res.body.includes('Print Handout'));
+      assert.ok(res.body.includes('<svg'));
+    });
+
+    it('GET /demo?view=admin renders Polaris Merchant Admin preview with showcase bar', async () => {
+      const req = createMockReq({ method: 'GET', url: '/demo?view=admin' });
+      const res = createMockRes();
+      await prodListener(req, res);
+
+      assert.equal(res.statusCode, 200);
+      assert.ok(res.body.includes('demo-showcase-bar'));
+      assert.ok(res.body.includes('Apex Integrative Wellness'));
+      assert.ok(res.body.includes('Practitioners'));
+
+      const reqAttr = createMockReq({ method: 'GET', url: '/demo?view=admin&tab=attribution' });
+      const resAttr = createMockRes();
+      await prodListener(reqAttr, resAttr);
+      assert.equal(resAttr.statusCode, 200);
+      assert.ok(resAttr.body.includes('Attribution by Protocol'));
+    });
+
+    it('GET /search/suggest.json returns matching demo products', async () => {
+      const req = createMockReq({ method: 'GET', url: '/search/suggest.json?q=cleanser' });
+      const res = createMockRes();
+      await prodListener(req, res);
+
+      assert.equal(res.statusCode, 200);
+      assert.equal(res.headers['Content-Type'], 'application/json');
+      const data = JSON.parse(res.body);
+      assert.ok(data.resources.results.products.length >= 1);
+      assert.equal(data.resources.results.products[0].title, 'Hydrating Daily Cleanser');
+    });
+
+    it('GET /products/:handle.js returns matching demo variant data for hydration', async () => {
+      const req = createMockReq({ method: 'GET', url: '/products/hydrating-daily-cleanser.js' });
+      const res = createMockRes();
+      await prodListener(req, res);
+
+      assert.equal(res.statusCode, 200);
+      assert.equal(res.headers['Content-Type'], 'application/json');
+      const data = JSON.parse(res.body);
+      assert.equal(data.title, 'Hydrating Daily Cleanser');
+      assert.ok(data.variants.length >= 1);
+    });
+
+    it('POST /apps/protocols?action=create with demo referer saves mock protocol', async () => {
+      const req = createMockReq({
+        method: 'POST',
+        url: '/apps/protocols?action=create',
+        headers: {
+          referer: 'https://demo-host.railway.app/demo',
+        },
+      });
+      const res = createMockRes();
+      await prodListener(req, res);
+
+      assert.equal(res.statusCode, 200);
+      const data = JSON.parse(res.body);
+      assert.equal(data.success, true);
+    });
+  });
+
   describe('Production Embedded Merchant Admin (DATABASE_URL configured & App Bridge Session Auth)', () => {
     const apiSecret = 'test_secret_for_prod_admin_123';
     const apiKey = 'test_api_key_prod_456';

@@ -248,6 +248,176 @@ export const DEMO_SETTINGS = {
   handoutText: 'Curated by your specialist. Scan the QR code or visit the link to review and order your personalized routine.',
 };
 
+export const DEMO_CATALOG = [
+  {
+    id: 101,
+    title: 'Hydrating Daily Cleanser',
+    handle: 'hydrating-daily-cleanser',
+    variants: [
+      {
+        id: 101,
+        title: '200ml Bottle',
+        displayTitle: 'Hydrating Daily Cleanser - 200ml Bottle',
+        price: '34.00',
+        priceFormatted: '$34.00',
+        available: true,
+      },
+    ],
+  },
+  {
+    id: 102,
+    title: 'Antioxidant Facial Serum',
+    handle: 'antioxidant-facial-serum',
+    variants: [
+      {
+        id: 102,
+        title: '30ml Dropper',
+        displayTitle: 'Antioxidant Facial Serum - 30ml Dropper',
+        price: '48.50',
+        priceFormatted: '$48.50',
+        available: true,
+      },
+    ],
+  },
+  {
+    id: 103,
+    title: 'Barrier Recovery Lip Balm',
+    handle: 'barrier-recovery-lip-balm',
+    variants: [
+      {
+        id: 103,
+        title: '15ml Tube',
+        displayTitle: 'Barrier Recovery Lip Balm - 15ml Tube',
+        price: '28.00',
+        priceFormatted: '$28.00',
+        available: true,
+      },
+    ],
+  },
+  {
+    id: 104,
+    title: 'Omega-3 EPA/DHA Pure',
+    handle: 'omega-3-epa-dha-pure',
+    variants: [
+      {
+        id: 104,
+        title: '60 Softgels',
+        displayTitle: 'Omega-3 EPA/DHA Pure - 60 Softgels',
+        price: '32.00',
+        priceFormatted: '$32.00',
+        available: true,
+      },
+    ],
+  },
+  {
+    id: 105,
+    title: 'Magnesium Glycinate Complex',
+    handle: 'magnesium-glycinate-complex',
+    variants: [
+      {
+        id: 105,
+        title: '120 Capsules',
+        displayTitle: 'Magnesium Glycinate Complex - 120 Capsules',
+        price: '26.50',
+        priceFormatted: '$26.50',
+        available: true,
+      },
+    ],
+  },
+];
+
+/**
+ * Renders the interactive showcase navigation bar for public /demo and /try routes.
+ *
+ * @param {'portal' | 'client' | 'handout' | 'admin'} [currentView='portal']
+ * @param {string} [basePath='/demo']
+ * @returns {string} HTML markup
+ */
+export function renderDemoShowcaseBar(currentView = 'portal', basePath = '/demo') {
+  return `
+<style>
+  .demo-showcase-bar {
+    background: #111827;
+    color: #f3f4f6;
+    padding: 0.65rem 1.25rem;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    font-size: 0.875rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    border-bottom: 2px solid #008060;
+    position: sticky;
+    top: 0;
+    z-index: 99999;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.15);
+  }
+  .demo-showcase-left {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+  }
+  .demo-showcase-badge {
+    background: #008060;
+    color: #ffffff;
+    font-size: 0.6875rem;
+    font-weight: 700;
+    padding: 0.15rem 0.5rem;
+    border-radius: 9999px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .demo-showcase-title {
+    font-weight: 600;
+    color: #ffffff;
+    font-size: 0.9375rem;
+  }
+  .demo-showcase-nav {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    flex-wrap: wrap;
+  }
+  .demo-showcase-link {
+    color: #9ca3af;
+    text-decoration: none;
+    padding: 0.35rem 0.65rem;
+    border-radius: 5px;
+    font-weight: 500;
+    font-size: 0.8125rem;
+    transition: all 0.12s ease;
+  }
+  .demo-showcase-link:hover {
+    background: #1f2937;
+    color: #ffffff;
+  }
+  .demo-showcase-link.active {
+    background: #008060;
+    color: #ffffff;
+    font-weight: 600;
+  }
+  @media print {
+    .demo-showcase-bar {
+      display: none !important;
+    }
+  }
+</style>
+<div class="demo-showcase-bar">
+  <div class="demo-showcase-left">
+    <span class="demo-showcase-badge">Interactive Demo</span>
+    <span class="demo-showcase-title">Practitioner Protocols</span>
+  </div>
+  <nav class="demo-showcase-nav" aria-label="Demo role selector">
+    <a href="${basePath}?view=portal" class="demo-showcase-link ${currentView === 'portal' ? 'active' : ''}">Practitioner Portal</a>
+    <a href="${basePath}?view=client" class="demo-showcase-link ${currentView === 'client' ? 'active' : ''}">Client Landing Page</a>
+    <a href="${basePath}?view=handout" class="demo-showcase-link ${currentView === 'handout' ? 'active' : ''}">Printable Handout</a>
+    <a href="${basePath}?view=admin" class="demo-showcase-link ${currentView === 'admin' ? 'active' : ''}">Merchant Admin</a>
+  </nav>
+</div>
+`;
+}
+
 /**
  * Validates server configuration before startup.
  * Refuses to start in production mode (DATABASE_URL set) while admin session-token
@@ -493,7 +663,7 @@ export function renderFriendlyRootHtml() {
   <div class="root-card">
     <h1>Practitioner Protocols</h1>
     <p>Practitioner Protocols runs inside your Shopify admin. Open it from your Shopify admin's Apps list.</p>
-    <p style="font-size: 0.875rem;"><a href="/privacy">Privacy Policy</a></p>
+    <p style="font-size: 0.875rem;"><a href="/demo">Explore Interactive Demo &rarr;</a> &bull; <a href="/privacy">Privacy Policy</a></p>
   </div>
 </body>
 </html>`;
@@ -1018,6 +1188,183 @@ export function createRequestListener(options = {}) {
         }
       }
 
+      // 0. Interactive Demo Sandbox (/demo and /try) - accessible in both Demo and Production
+      if (pathname === '/demo' || pathname === '/try') {
+        const basePath = pathname;
+        const view = (url.searchParams.get('view') || 'portal').toLowerCase();
+        const navBar = renderDemoShowcaseBar(view, basePath);
+
+        let content = '';
+        let csp = "default-src 'self' 'unsafe-inline' https:; font-src 'self' data: https:; img-src 'self' data: https:;";
+
+        if (view === 'client') {
+          const liquid = renderProtocolLiquid({
+            protocol: { ...DEMO_PROTOCOL, status: 'active' },
+            practiceName: 'Apex Integrative Wellness',
+            isLoggedInPractitioner: url.searchParams.get('preview') === 'practitioner',
+          });
+          content = `${navBar}\n${liquid}`;
+        } else if (view === 'handout') {
+          const shareUrl = `https://${DEMO_SHOP}/apps/protocols/${DEMO_PROTOCOL.token}`;
+          const qrSvg = generateQrSvg(shareUrl, { size: 180 });
+          const rawHtml = renderHandoutHtml({
+            protocol: DEMO_PROTOCOL,
+            practiceName: 'Apex Integrative Wellness',
+            shareUrl,
+            qrSvg,
+          });
+          content = rawHtml.replace('<body>', `<body>\n${navBar}`);
+        } else if (view === 'admin') {
+          const activeTab = url.searchParams.get('tab') || 'practitioners';
+          const month = url.searchParams.get('month');
+          if (month) {
+            DEMO_REPORT.month = month;
+          }
+          const adminHtml = renderAdminHtml({
+            shop: DEMO_SHOP,
+            apiKey: '',
+            profiles: DEMO_PROFILES,
+            starters: DEMO_STARTERS,
+            report: DEMO_REPORT,
+            settings: DEMO_SETTINGS,
+            activeTab,
+          });
+          content = `${navBar}\n${adminHtml}`;
+          csp = buildAdminCsp(DEMO_SHOP);
+        } else {
+          // Default: Practitioner Portal
+          const isApproved = url.searchParams.get('approved') !== 'false';
+          const isLoggedIn = url.searchParams.get('login') !== 'false';
+
+          const portalHtml = renderPortalLiquid({
+            shop: DEMO_SHOP,
+            isLoggedIn,
+            isApproved,
+            practiceName: 'Apex Integrative Wellness',
+            activeProtocols: [
+              {
+                id: DEMO_PROTOCOL.id,
+                token: DEMO_PROTOCOL.token,
+                name: DEMO_PROTOCOL.name,
+                introNote: DEMO_PROTOCOL.introNote,
+                lines: DEMO_PROTOCOL.lines,
+                linesCount: DEMO_PROTOCOL.lines.length,
+                retailTotal: '$110.50',
+              },
+            ],
+            starterProtocols: DEMO_STARTERS,
+            contacts: [
+              {
+                id: 'contact_demo_1',
+                email: 'jane.shopper@example.com',
+                firstName: 'Jane',
+                protocolName: 'Daily Essentials Protocol',
+                protocolToken: DEMO_PROTOCOL.token,
+                consentAt: new Date().toISOString(),
+              },
+            ],
+          });
+          content = `${navBar}\n${portalHtml}`;
+        }
+
+        res.writeHead(200, {
+          'Content-Type': 'text/html; charset=utf-8',
+          'Content-Security-Policy': csp,
+          'X-Content-Type-Options': 'nosniff',
+          'Referrer-Policy': 'strict-origin-when-cross-origin',
+          'X-Robots-Tag': 'noindex, nofollow',
+        });
+        res.end(content);
+        return;
+      }
+
+      // Search suggest endpoint for demo / try preview (/search/suggest.json)
+      if (pathname === '/search/suggest.json') {
+        const q = (url.searchParams.get('q') || '').toLowerCase().trim();
+        const matches = DEMO_CATALOG.filter(
+          (p) => !q || p.title.toLowerCase().includes(q) || p.variants.some((v) => v.displayTitle?.toLowerCase().includes(q))
+        );
+        res.writeHead(200, {
+          'Content-Type': 'application/json',
+          'X-Robots-Tag': 'noindex, nofollow',
+        });
+        res.end(JSON.stringify({
+          resources: {
+            results: {
+              products: matches.map((p) => ({
+                id: p.id,
+                title: p.title,
+                handle: p.handle,
+                variants: p.variants.map((v) => ({
+                  id: v.id,
+                  title: v.title,
+                  price: v.price,
+                  available: v.available !== false,
+                })),
+              })),
+            },
+          },
+        }));
+        return;
+      }
+
+      // Product hydration endpoint for demo / try preview (/products/:handle.js)
+      if (pathname.startsWith('/products/') && pathname.endsWith('.js')) {
+        const handle = pathname.slice('/products/'.length, -'.js'.length);
+        const product = DEMO_CATALOG.find((p) => p.handle === handle) || {
+          id: 999,
+          title: handle.replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()),
+          handle,
+          variants: [
+            {
+              id: 999,
+              title: 'Standard',
+              price: 2900,
+              available: true,
+            },
+          ],
+        };
+
+        res.writeHead(200, {
+          'Content-Type': 'application/json',
+          'X-Robots-Tag': 'noindex, nofollow',
+        });
+        res.end(JSON.stringify({
+          id: product.id,
+          title: product.title,
+          handle: product.handle,
+          variants: product.variants.map((v) => ({
+            id: v.id,
+            title: v.title,
+            price: typeof v.price === 'number' ? v.price : Math.round(parseFloat(v.price) * 100),
+            available: v.available !== false,
+          })),
+        }));
+        return;
+      }
+
+      // Mock protocol mutation endpoint when called from /demo or /try
+      if (
+        pathname === '/apps/protocols' &&
+        (req.headers?.referer?.includes('/demo') || req.headers?.referer?.includes('/try')) &&
+        (url.searchParams.get('action') === 'create' || url.searchParams.get('action') === 'update')
+      ) {
+        res.writeHead(200, {
+          'Content-Type': 'application/json',
+          'X-Robots-Tag': 'noindex, nofollow',
+        });
+        res.end(JSON.stringify({
+          success: true,
+          message: 'Protocol saved in demo sandbox',
+          protocol: {
+            id: 'proto_demo_custom',
+            token: 'tok_demo_custom_' + Date.now().toString(36),
+            name: 'Demo Saved Protocol',
+          },
+        }));
+        return;
+      }
+
       // In production mode (DATABASE_URL configured), demo routes return 404, never demo content
       if (databaseUrl) {
         if (
@@ -1151,46 +1498,23 @@ export function createRequestListener(options = {}) {
       // Demo search endpoint for local preview
       if (pathname === '/apps/protocols' && url.searchParams.get('action') === 'search') {
         const q = (url.searchParams.get('q') || '').toLowerCase().trim();
-        const demoCatalog = [
-          {
-            id: 'gid://shopify/Product/101',
-            title: 'Hydrating Daily Cleanser',
-            variants: [
-              { id: 'gid://shopify/ProductVariant/101', title: '200ml Bottle', displayTitle: 'Hydrating Daily Cleanser - 200ml Bottle', price: '34.00', priceFormatted: '$34.00' }
-            ]
-          },
-          {
-            id: 'gid://shopify/Product/102',
-            title: 'Antioxidant Facial Serum',
-            variants: [
-              { id: 'gid://shopify/ProductVariant/102', title: '30ml Dropper', displayTitle: 'Antioxidant Facial Serum - 30ml Dropper', price: '48.50', priceFormatted: '$48.50' }
-            ]
-          },
-          {
-            id: 'gid://shopify/Product/103',
-            title: 'Barrier Recovery Lip Balm',
-            variants: [
-              { id: 'gid://shopify/ProductVariant/103', title: '15ml Tube', displayTitle: 'Barrier Recovery Lip Balm - 15ml Tube', price: '28.00', priceFormatted: '$28.00' }
-            ]
-          },
-          {
-            id: 'gid://shopify/Product/104',
-            title: 'Omega-3 EPA/DHA Pure',
-            variants: [
-              { id: 'gid://shopify/ProductVariant/104', title: '60 Softgels', displayTitle: 'Omega-3 EPA/DHA Pure - 60 Softgels', price: '32.00', priceFormatted: '$32.00' }
-            ]
-          },
-          {
-            id: 'gid://shopify/Product/105',
-            title: 'Magnesium Glycinate Complex',
-            variants: [
-              { id: 'gid://shopify/ProductVariant/105', title: '120 Capsules', displayTitle: 'Magnesium Glycinate Complex - 120 Capsules', price: '26.50', priceFormatted: '$26.50' }
-            ]
-          }
-        ];
-        const matches = demoCatalog.filter(p => !q || p.title.toLowerCase().includes(q) || p.variants.some(v => v.displayTitle.toLowerCase().includes(q)));
+        const matches = DEMO_CATALOG.filter(
+          (p) => !q || p.title.toLowerCase().includes(q) || p.variants.some((v) => v.displayTitle?.toLowerCase().includes(q))
+        );
         res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ products: matches }));
+        res.end(JSON.stringify({
+          products: matches.map((p) => ({
+            id: `gid://shopify/Product/${p.id}`,
+            title: p.title,
+            variants: p.variants.map((v) => ({
+              id: `gid://shopify/ProductVariant/${v.id}`,
+              title: v.title,
+              displayTitle: v.displayTitle,
+              price: v.price,
+              priceFormatted: v.priceFormatted,
+            })),
+          })),
+        }));
         return;
       }
 

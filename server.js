@@ -337,9 +337,9 @@ export function renderDemoShowcaseBar(currentView = 'portal', basePath = '/demo'
   return `
 <style>
   .demo-showcase-bar {
-    background: #111827;
-    color: #f3f4f6;
-    padding: 0.65rem 1.25rem;
+    background: #0f172a;
+    color: #f8fafc;
+    padding: 0.625rem 1.5rem;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     font-size: 0.875rem;
     display: flex;
@@ -350,20 +350,25 @@ export function renderDemoShowcaseBar(currentView = 'portal', basePath = '/demo'
     border-bottom: 2px solid #008060;
     position: sticky;
     top: 0;
-    z-index: 99999;
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.15);
+    left: 0;
+    right: 0;
+    width: 100%;
+    box-sizing: border-box;
+    z-index: 999999;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.06);
   }
   .demo-showcase-left {
     display: flex;
     align-items: center;
-    gap: 0.6rem;
+    gap: 0.65rem;
+    white-space: nowrap;
   }
   .demo-showcase-badge {
     background: #008060;
     color: #ffffff;
     font-size: 0.6875rem;
     font-weight: 700;
-    padding: 0.15rem 0.5rem;
+    padding: 0.2rem 0.55rem;
     border-radius: 9999px;
     text-transform: uppercase;
     letter-spacing: 0.05em;
@@ -380,22 +385,41 @@ export function renderDemoShowcaseBar(currentView = 'portal', basePath = '/demo'
     flex-wrap: wrap;
   }
   .demo-showcase-link {
-    color: #9ca3af;
+    color: #94a3b8;
     text-decoration: none;
-    padding: 0.35rem 0.65rem;
-    border-radius: 5px;
+    padding: 0.4rem 0.75rem;
+    border-radius: 6px;
     font-weight: 500;
     font-size: 0.8125rem;
-    transition: all 0.12s ease;
+    white-space: nowrap;
+    transition: all 0.15s ease;
   }
   .demo-showcase-link:hover {
-    background: #1f2937;
+    background: #1e293b;
     color: #ffffff;
   }
   .demo-showcase-link.active {
     background: #008060;
     color: #ffffff;
     font-weight: 600;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+  }
+  @media (max-width: 768px) {
+    .demo-showcase-bar {
+      padding: 0.5rem 0.75rem;
+      gap: 0.5rem;
+    }
+    .demo-showcase-nav {
+      width: 100%;
+      justify-content: flex-start;
+      overflow-x: auto;
+      padding-bottom: 2px;
+    }
+    .demo-showcase-link {
+      font-size: 0.75rem;
+      padding: 0.3rem 0.55rem;
+      flex-shrink: 0;
+    }
   }
   @media print {
     .demo-showcase-bar {
@@ -416,6 +440,39 @@ export function renderDemoShowcaseBar(currentView = 'portal', basePath = '/demo'
   </nav>
 </div>
 `;
+}
+
+/**
+ * Wraps HTML fragments into a complete, standards-compliant HTML5 document for public demo previews.
+ */
+function renderDemoHtmlShell({ title, navBar, contentHtml, extraStyles = '' }) {
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>${title}</title>
+  <style>
+    *, *::before, *::after {
+      box-sizing: border-box;
+    }
+    html, body {
+      margin: 0;
+      padding: 0;
+      background-color: #f8fafc;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      color: #111827;
+      min-height: 100vh;
+    }
+    ${extraStyles}
+  </style>
+</head>
+<body>
+${navBar}
+${contentHtml}
+</body>
+</html>`;
 }
 
 /**
@@ -1203,7 +1260,11 @@ export function createRequestListener(options = {}) {
             practiceName: 'Apex Integrative Wellness',
             isLoggedInPractitioner: url.searchParams.get('preview') === 'practitioner',
           });
-          content = `${navBar}\n${liquid}`;
+          content = renderDemoHtmlShell({
+            title: 'Daily Essentials Protocol — Client Storefront Demo',
+            navBar,
+            contentHtml: liquid,
+          });
         } else if (view === 'handout') {
           const shareUrl = `https://${DEMO_SHOP}/apps/protocols/${DEMO_PROTOCOL.token}`;
           const qrSvg = generateQrSvg(shareUrl, { size: 180 });
@@ -1213,7 +1274,44 @@ export function createRequestListener(options = {}) {
             shareUrl,
             qrSvg,
           });
-          content = rawHtml.replace('<body>', `<body>\n${navBar}`);
+          const demoHandoutStyle = `
+<style id="demo-handout-layout">
+  html, body {
+    margin: 0 !important;
+    padding: 0 !important;
+    max-width: 100% !important;
+    background-color: #f1f5f9 !important;
+  }
+  .demo-handout-sheet {
+    max-width: 800px;
+    margin: 28px auto 40px auto;
+    padding: 32px 36px;
+    background: #ffffff;
+    border-radius: 8px;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.08), 0 2px 4px -2px rgba(0, 0, 0, 0.05);
+  }
+  @media print {
+    html, body {
+      background-color: #ffffff !important;
+    }
+    .demo-showcase-bar {
+      display: none !important;
+    }
+    .demo-handout-sheet {
+      box-shadow: none !important;
+      padding: 0 !important;
+      margin: 0 !important;
+      border-radius: 0 !important;
+      max-width: 100% !important;
+      background: transparent !important;
+    }
+  }
+</style>
+`;
+          content = rawHtml
+            .replace('</head>', `${demoHandoutStyle}</head>`)
+            .replace('<body>', `<body>\n${navBar}\n<div class="demo-handout-sheet">`)
+            .replace('</body>', `</div>\n</body>`);
         } else if (view === 'admin') {
           const activeTab = url.searchParams.get('tab') || 'practitioners';
           const month = url.searchParams.get('month');
@@ -1229,7 +1327,10 @@ export function createRequestListener(options = {}) {
             settings: DEMO_SETTINGS,
             activeTab,
           });
-          content = `${navBar}\n${adminHtml}`;
+          const adminOverrideStyle = `<style>html, body { margin: 0 !important; padding: 0 !important; }</style>`;
+          content = adminHtml
+            .replace('</head>', `${adminOverrideStyle}</head>`)
+            .replace('<body>', `<body>\n${navBar}`);
           csp = buildAdminCsp(DEMO_SHOP);
         } else {
           // Default: Practitioner Portal
@@ -1264,7 +1365,11 @@ export function createRequestListener(options = {}) {
               },
             ],
           });
-          content = `${navBar}\n${portalHtml}`;
+          content = renderDemoHtmlShell({
+            title: 'Practitioner Portal — Interactive Demo',
+            navBar,
+            contentHtml: portalHtml,
+          });
         }
 
         res.writeHead(200, {

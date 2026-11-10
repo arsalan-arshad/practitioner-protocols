@@ -979,6 +979,7 @@ describe('Server & Configuration Hardening (server.js, shopify.app.toml, README.
         await prodListener(req, res);
 
         assert.equal(res.statusCode, 200);
+        assert.ok(res.body.startsWith('<!DOCTYPE html>'), 'Must start with <!DOCTYPE html>');
         assert.ok(res.body.includes('demo-showcase-bar'), 'Must contain demo showcase bar');
         assert.ok(res.body.includes('Interactive Demo'), 'Must contain demo badge');
         assert.ok(res.body.includes('Daily Essentials Protocol'), 'Must contain demo protocol');
@@ -992,6 +993,7 @@ describe('Server & Configuration Hardening (server.js, shopify.app.toml, README.
       await prodListener(req, res);
 
       assert.equal(res.statusCode, 200);
+      assert.ok(res.body.startsWith('<!DOCTYPE html>'), 'Must start with <!DOCTYPE html>');
       assert.ok(res.body.includes('demo-showcase-bar'));
       assert.ok(res.body.includes('Daily Essentials Protocol'));
       assert.ok(res.body.includes('Hydrating Daily Cleanser'));
@@ -1005,6 +1007,7 @@ describe('Server & Configuration Hardening (server.js, shopify.app.toml, README.
       assert.equal(res.statusCode, 200);
       assert.ok(res.body.startsWith('<!DOCTYPE html>'), 'Handout must start with <!DOCTYPE html>');
       assert.ok(res.body.includes('demo-showcase-bar'));
+      assert.ok(res.body.includes('demo-handout-sheet'));
       assert.ok(res.body.includes('Print Handout'));
       assert.ok(res.body.includes('<svg'));
     });
@@ -1015,6 +1018,7 @@ describe('Server & Configuration Hardening (server.js, shopify.app.toml, README.
       await prodListener(req, res);
 
       assert.equal(res.statusCode, 200);
+      assert.ok(res.body.startsWith('<!DOCTYPE html>'), 'Must start with <!DOCTYPE html>');
       assert.ok(res.body.includes('demo-showcase-bar'));
       assert.ok(res.body.includes('Apex Integrative Wellness'));
       assert.ok(res.body.includes('Practitioners'));

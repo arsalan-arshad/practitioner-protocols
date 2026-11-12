@@ -10,7 +10,7 @@
 
 > **Open-Source (MIT)** | Built for the Shopify Merchant & Developer Community | Open for PRs & Discussions
 >
-> 🚀 **Live Interactive Demo:** [https://practitioner-protocols-production.up.railway.app/demo](https://practitioner-protocols-production.up.railway.app/demo) — Test-drive all 4 roles (Practitioner Portal, Client Storefront Page, Printable QR Handout, and Merchant Admin) live with zero setup.
+> 🚀 **Live Interactive Demo:** [https://practationer.arsalandev.studio/demo](https://practationer.arsalandev.studio/demo) — Test-drive all 4 roles (Practitioner Portal, Client Storefront Page, Printable QR Handout, and Merchant Admin) live with zero setup.
 >
 > ⚙️ **Status: Complete Engine, Admin & Storefront Modules Verified (606/606 Unit Tests Passing across 133 Suites)** | **Live PostgreSQL Integration (11 integration tests run against a live PostgreSQL instance (they skip with a notice when none is reachable))** | **Live Railway Hosting with Postgres** | **Dev Store Spikes Verified (S2, S3, S4, S5 Answered; S1 Answered on Plus Dev Store Only; S6 Answered on Dev Store)** | **Milestones M9a, M9b-1, M9b-2, M9b-3a & M9b-3b Verified Live on Dev Store**
 
@@ -35,7 +35,7 @@
 ### Live Interactive Demo Sandbox
 Test-drive the complete application live without requiring a Shopify development store, login, or credentials:
 
-👉 **[https://practitioner-protocols-production.up.railway.app/demo](https://practitioner-protocols-production.up.railway.app/demo)** (or `/try`)
+👉 **[https://practationer.arsalandev.studio/demo](https://practationer.arsalandev.studio/demo)** (or `/try`)
 
 The live demo provides an interactive top showcase bar with instant role switching:
 - **Practitioner Portal** (`/demo?view=portal`) — View active protocols, client roster, starter templates, and open the interactive protocol editor modal with live product search and variant hydration.

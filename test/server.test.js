@@ -682,7 +682,14 @@ describe('Server & Configuration Hardening (server.js, shopify.app.toml, README.
 
     it('sets client_id to the production Practitioner Protocols app record', () => {
       assert.ok(tomlContent.includes('client_id = "840a22df2708a4a51a443180b8c332db"'));
-      assert.ok(tomlContent.includes('application_url = "https://practitioner-protocols-production.up.railway.app"'));
+      assert.ok(tomlContent.includes('application_url = "https://practitioner.arsalandev.studio"'));
+    });
+
+    it('points application_url, app proxy and auth redirects at the custom domain only', () => {
+      assert.ok(tomlContent.includes('url = "https://practitioner.arsalandev.studio/api/proxy"'));
+      assert.ok(tomlContent.includes('"https://practitioner.arsalandev.studio/api/auth/callback"'));
+      assert.ok(tomlContent.includes('"https://practitioner.arsalandev.studio/auth/callback"'));
+      assert.ok(!tomlContent.includes('railway.app'), 'no Railway hostname may remain in shopify.app.toml');
     });
 
     it('declares compliance_topics array for mandatory GDPR webhooks', () => {

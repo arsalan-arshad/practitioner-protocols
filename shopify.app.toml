@@ -1,7 +1,7 @@
 # Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
 
 client_id = "840a22df2708a4a51a443180b8c332db"
-application_url = "https://practitioner-protocols-production.up.railway.app"
+application_url = "https://practitioner.arsalandev.studio"
 embedded = true
 name = "Practitioner Protocols"
 
@@ -10,7 +10,7 @@ name = "Practitioner Protocols"
 scopes = "read_orders"
 
 [app_proxy]
-url = "https://practitioner-protocols-production.up.railway.app/api/proxy"
+url = "https://practitioner.arsalandev.studio/api/proxy"
 subpath = "protocols"
 prefix = "apps"
 
@@ -35,8 +35,9 @@ api_version = "2026-01"
 
 [auth]
 redirect_urls = [
-  "https://practitioner-protocols-production.up.railway.app/api/auth",
-  "https://practitioner-protocols-production.up.railway.app/api/auth/callback"
+  "https://practitioner.arsalandev.studio/api/auth",
+  "https://practitioner.arsalandev.studio/api/auth/callback",
+  "https://practitioner.arsalandev.studio/auth/callback"
 ]
 
 [build]

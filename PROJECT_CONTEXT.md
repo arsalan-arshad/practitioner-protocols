@@ -1270,6 +1270,38 @@ In modern Shopify embedded admin apps running inside an iframe on `admin.shopify
    - Added unit test in `test/admin.test.js` verifying zero `alert()` calls in the starter modal script and asserting in-page error message rendering.
    - 591 unit tests passing across 132 suites (`npm test`). Zero failures.
 
+---
+
+## 48. Multi-Platform Expansion: Universal Core & WooCommerce Adapter (2026-11-17)
+
+To capture the substantial market of independent health & wellness clinics operating on WordPress/WooCommerce and bypass App Store single-platform submission restrictions, a dedicated WooCommerce platform adapter was built directly alongside the core protocol engine in `04-practitioner-protocols`:
+
+1. **1-Tap WooCommerce Cart Permalink Engine (`app/lib/woocommerce/cart.js`):**
+   - Implemented `buildWooCartUrl` generating native multi-product cart and checkout permalinks (`/cart/?add-to-cart=ID1,ID2&quantity[ID1]=1&quantity[ID2]=2&protocol_token=TOKEN`).
+   - Implemented `buildWooStoreApiBatchPayload` creating standardized batch request arrays for headless storefronts interacting with `/wp-json/wc/store/v1/batch`.
+   - Normalization and sanitization of store URLs via `normalizeWooStoreUrl`.
+
+2. **WooCommerce Catalog & Store API Resolver (`app/lib/woocommerce/catalog.js`):**
+   - Created `normalizeWooProduct` standardizing Store API products and minor-unit price structures (e.g. `3400` minor units to `$34.00`) into standard protocol lines.
+   - Implemented `createFakeWooCatalogResolver` for offline mock catalog search and variant lookups.
+
+3. **HMAC Signature Verification & Attribution Listener (`app/lib/woocommerce/webhooks.js`):**
+   - Implemented `verifyWooWebhookSignature` validating `X-WC-Webhook-Signature` HMAC-SHA256 Base64 digests.
+   - Implemented `parseWooOrderAttribution` extracting `_protocol_token` line-item metadata from order payloads.
+   - Enforces strict Zero-PII barrier: customer names, emails, billing details, and notes are completely stripped.
+
+4. **WordPress Companion Plugin (`plugins/woocommerce/`):**
+   - Packaged `practitioner-protocols.php` capturing `?protocol_token=` into WooCommerce customer sessions and writing `_protocol_token` into order line item metadata during checkout.
+   - Standard `readme.txt` plugin metadata for WordPress.org directory distribution.
+
+5. **Server Endpoints & Live Demo Showcase:**
+   - Added `GET /api/woocommerce/cart-url` and `POST /api/woocommerce/webhook` in `server.js`.
+   - Added `view=woocommerce` in `renderDemoShowcaseBar` and `/demo` rendering a live 1-tap cart link builder and headless batch preview.
+
+6. **Automated Verification:**
+   - Added 14 unit and integration tests in `test/woocommerce.test.js`.
+   - Total test suite expanded to **621 unit tests passing across 141 suites** (`npm test`) with zero failures.
+
 
 
 

@@ -12,7 +12,7 @@
 >
 > 🚀 **Live Interactive Demo:** [https://practitioner.arsalandev.studio/demo](https://practitioner.arsalandev.studio/demo) — Test-drive all 4 roles (Practitioner Portal, Client Storefront Page, Printable QR Handout, and Merchant Admin) live with zero setup.
 >
-> ⚙️ **Status: Complete Engine, Admin & Storefront Modules Verified (606/606 Unit Tests Passing across 133 Suites)** | **Live PostgreSQL Integration (11 integration tests run against a live PostgreSQL instance (they skip with a notice when none is reachable))** | **Live Railway Hosting with Postgres** | **Dev Store Spikes Verified (S2, S3, S4, S5 Answered; S1 Answered on Plus Dev Store Only; S6 Answered on Dev Store)** | **Milestones M9a, M9b-1, M9b-2, M9b-3a & M9b-3b Verified Live on Dev Store**
+> ⚙️ **Status: Complete Engine, Admin, Storefront & WooCommerce Modules Verified (621/621 Unit Tests Passing across 141 Suites)** | **Live PostgreSQL Integration (11 integration tests run against a live PostgreSQL instance (they skip with a notice when none is reachable))** | **Live Railway Hosting with Postgres** | **Dev Store Spikes Verified (S2, S3, S4, S5 Answered; S1 Answered on Plus Dev Store Only; S6 Answered on Dev Store)** | **Milestones M9a, M9b-1, M9b-2, M9b-3a & M9b-3b Verified Live on Dev Store**
 
 <p align="center">
   <img src="assets/listing/feature-image-1600x900.png" alt="A curated list card of generic unbranded wellness products converging into a single coral QR code link node on deep teal background." width="720">
@@ -42,6 +42,7 @@ The live demo provides an interactive top showcase bar with instant role switchi
 - **Client Landing Page** (`/demo?view=client`) — Experience the client-facing recommendation page with dosages, usage notes, and 1-tap "Add all to cart".
 - **Printable QR Handout** (`/demo?view=handout`) — View and print self-contained US Letter and A4 clinical routines with vector QR codes.
 - **Merchant Admin** (`/demo?view=admin`) — Navigate the embedded Polaris merchant dashboard across Practitioners, Starter Templates, Attribution Reports, and Settings.
+- **WooCommerce 1-Tap Cart** (`/demo?view=woocommerce`) — Preview native multi-product WooCommerce cart permalinks, Store API batch payloads, and the companion WordPress plugin.
 
 ---
 

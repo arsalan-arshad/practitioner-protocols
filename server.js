@@ -39,6 +39,15 @@ import {
   handleAdminMarketingOptInRequest
 } from './app/lib/protocols/routes.js';
 import { createFakeVariantResolver } from './app/lib/protocols/catalog.js';
+import {
+  buildWooCartUrl,
+  buildWooStoreApiBatchPayload,
+  normalizeWooStoreUrl,
+} from './app/lib/woocommerce/cart.js';
+import {
+  verifyWooWebhookSignature,
+  parseWooOrderAttribution,
+} from './app/lib/woocommerce/webhooks.js';
 
 // Neutral retail demo data for previewing without live database (clean-room, zero health claims)
 export const DEMO_SHOP = 'practitioner-store.myshopify.com';
@@ -437,6 +446,7 @@ export function renderDemoShowcaseBar(currentView = 'portal', basePath = '/demo'
     <a href="${basePath}?view=client" class="demo-showcase-link ${currentView === 'client' ? 'active' : ''}">Client Landing Page</a>
     <a href="${basePath}?view=handout" class="demo-showcase-link ${currentView === 'handout' ? 'active' : ''}">Printable Handout</a>
     <a href="${basePath}?view=admin" class="demo-showcase-link ${currentView === 'admin' ? 'active' : ''}">Merchant Admin</a>
+    <a href="${basePath}?view=woocommerce" class="demo-showcase-link ${currentView === 'woocommerce' ? 'active' : ''}">WooCommerce 1-Tap</a>
   </nav>
 </div>
 `;
@@ -1332,6 +1342,65 @@ export function createRequestListener(options = {}) {
             .replace('</head>', `${adminOverrideStyle}</head>`)
             .replace('<body>', `<body>\n${navBar}`);
           csp = buildAdminCsp(DEMO_SHOP);
+        } else if (view === 'woocommerce') {
+          const sampleStoreUrl = url.searchParams.get('store_url') || 'https://wellness-clinic.com';
+          const wooLines = [
+            { variantId: 201, quantity: 1, title: 'Gentle Hydrating Cleanser', price: '$32.00' },
+            { variantId: 202, quantity: 1, title: 'Barrier Repair Emulsion', price: '$46.00' },
+            { variantId: 203, quantity: 1, title: 'Mineral UV Shield SPF 50+', price: '$38.00' },
+          ];
+          const sampleToken = 'tok_essentials_demo123';
+          const cartUrl = buildWooCartUrl({ storeUrl: sampleStoreUrl, lines: wooLines, token: sampleToken, destination: 'cart' });
+          const checkoutUrl = buildWooCartUrl({ storeUrl: sampleStoreUrl, lines: wooLines, token: sampleToken, destination: 'checkout' });
+          const batchPayload = buildWooStoreApiBatchPayload({ lines: wooLines, token: sampleToken });
+
+          const wooHtml = `
+<div style="max-width: 960px; margin: 32px auto; padding: 0 20px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; color: #1e293b;">
+  <div style="background: #ffffff; border-radius: 12px; border: 1px solid #e2e8f0; padding: 32px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05);">
+    <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; border-bottom: 1px solid #f1f5f9; padding-bottom: 20px; margin-bottom: 24px;">
+      <div>
+        <span style="background: #7f54b3; color: white; font-size: 11px; font-weight: 700; padding: 4px 10px; border-radius: 999px; text-transform: uppercase; letter-spacing: 0.05em;">WooCommerce Adapter</span>
+        <h1 style="margin: 8px 0 4px 0; font-size: 24px; color: #0f172a;">1-Tap Multi-Product Cart & Checkout Permalinks</h1>
+        <p style="margin: 0; color: #64748b; font-size: 14px;">Direct recommendation routines for independent clinics and wellness brands running on WooCommerce.</p>
+      </div>
+      <div style="text-align: right;">
+        <span style="font-size: 13px; color: #10b981; font-weight: 600;">● Zero-PII Guaranteed</span>
+      </div>
+    </div>
+
+    <div style="margin-bottom: 24px;">
+      <h3 style="font-size: 16px; margin-bottom: 8px; color: #334155;">1. Generated WooCommerce 1-Tap Links</h3>
+      <p style="font-size: 13px; color: #64748b; margin-top: 0;">Clicking either link instantly pre-loads all recommended products into the WooCommerce session and binds the <code>_protocol_token</code> attribution:</p>
+      
+      <div style="background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 8px; padding: 14px; margin-bottom: 12px; word-break: break-all;">
+        <div style="font-size: 12px; font-weight: 600; color: #475569; margin-bottom: 4px;">Standard Cart URL:</div>
+        <a href="${cartUrl}" target="_blank" rel="noopener noreferrer" style="color: #7f54b3; font-family: monospace; font-size: 13px; text-decoration: none; font-weight: 500;">${cartUrl}</a>
+      </div>
+
+      <div style="background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 8px; padding: 14px; word-break: break-all;">
+        <div style="font-size: 12px; font-weight: 600; color: #475569; margin-bottom: 4px;">Direct Checkout URL (Skip Cart):</div>
+        <a href="${checkoutUrl}" target="_blank" rel="noopener noreferrer" style="color: #7f54b3; font-family: monospace; font-size: 13px; text-decoration: none; font-weight: 500;">${checkoutUrl}</a>
+      </div>
+    </div>
+
+    <div style="margin-bottom: 24px;">
+      <h3 style="font-size: 16px; margin-bottom: 8px; color: #334155;">2. Headless Storefront Batch Payload (/wp-json/wc/store/v1/batch)</h3>
+      <p style="font-size: 13px; color: #64748b; margin-top: 0;">For modern decoupled/Next.js/Astro storefronts connecting via the WooCommerce Store API:</p>
+      <pre style="background: #0f172a; color: #f8fafc; padding: 16px; border-radius: 8px; font-size: 12px; overflow-x: auto; margin: 0;">${JSON.stringify(batchPayload, null, 2)}</pre>
+    </div>
+
+    <div>
+      <h3 style="font-size: 16px; margin-bottom: 8px; color: #334155;">3. WordPress Companion Plugin (Ready to Deploy)</h3>
+      <p style="font-size: 13px; color: #64748b; margin-top: 0;">Source available in <code>plugins/woocommerce/practitioner-protocols.php</code>. Simply upload to any WooCommerce WordPress site to capture protocol attributions seamlessly.</p>
+    </div>
+  </div>
+</div>
+`;
+          content = renderDemoHtmlShell({
+            title: 'WooCommerce 1-Tap Cart Adapter — Interactive Demo',
+            navBar,
+            contentHtml: wooHtml,
+          });
         } else {
           // Default: Practitioner Portal
           const isApproved = url.searchParams.get('approved') !== 'false';
@@ -1715,6 +1784,59 @@ export function createRequestListener(options = {}) {
         res.writeHead(webRes.status, Object.fromEntries(webRes.headers.entries()));
         const text = await webRes.text();
         res.end(text);
+        return;
+      }
+
+      // 7. WooCommerce Endpoints: Cart URL Generator & Webhook Attribution
+      if (pathname === '/api/woocommerce/cart-url') {
+        const storeUrl = url.searchParams.get('storeUrl') || url.searchParams.get('store_url') || '';
+        const token = url.searchParams.get('token') || '';
+        const linesParam = url.searchParams.get('lines') || '';
+        if (!storeUrl || !token) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Missing required storeUrl or token parameter' }));
+          return;
+        }
+        let lines = [];
+        try {
+          lines = linesParam.startsWith('[') ? JSON.parse(linesParam) : linesParam.split(',').map((id) => ({ variantId: id.trim(), quantity: 1 }));
+        } catch {
+          lines = [];
+        }
+        if (lines.length === 0) {
+          lines = [{ variantId: 101, quantity: 1 }];
+        }
+        const cartUrl = buildWooCartUrl({ storeUrl, lines, token, destination: 'cart' });
+        const checkoutUrl = buildWooCartUrl({ storeUrl, lines, token, destination: 'checkout' });
+        const batchPayload = buildWooStoreApiBatchPayload({ lines, token });
+        res.writeHead(200, { 'Content-Type': 'application/json', 'X-Robots-Tag': 'noindex, nofollow' });
+        res.end(JSON.stringify({ cartUrl, checkoutUrl, batchPayload }));
+        return;
+      }
+
+      if (pathname === '/api/woocommerce/webhook' && req.method === 'POST') {
+        const signature = req.headers['x-wc-webhook-signature'] || '';
+        const wooSecret = options.woocommerceWebhookSecret || process.env.WOOCOMMERCE_WEBHOOK_SECRET || '';
+        let rawBody = '';
+        for await (const chunk of req) {
+          rawBody += chunk;
+        }
+        if (wooSecret && !verifyWooWebhookSignature(rawBody, signature, wooSecret)) {
+          res.writeHead(401, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Invalid WooCommerce webhook signature' }));
+          return;
+        }
+        let order;
+        try {
+          order = JSON.parse(rawBody);
+        } catch {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Invalid JSON payload' }));
+          return;
+        }
+        const parsed = parseWooOrderAttribution(order);
+        res.writeHead(200, { 'Content-Type': 'application/json', 'X-Robots-Tag': 'noindex, nofollow' });
+        res.end(JSON.stringify({ status: 'success', attributionsCount: parsed.attributions.length, attributions: parsed.attributions }));
         return;
       }
 

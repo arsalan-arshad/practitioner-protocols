@@ -1388,6 +1388,15 @@ export function createRequestListener(options = {}) {
       </div>
     </div>
 
+    <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 20px; margin-bottom: 24px;">
+      <h3 style="font-size: 15px; margin: 0 0 12px 0; color: #0f172a;">🚀 Quick Setup Guide (3 Steps — Under 2 Minutes):</h3>
+      <ol style="margin: 0; padding-left: 20px; font-size: 13px; color: #334155; line-height: 1.6;">
+        <li><strong>Download the Companion Plugin:</strong> Click the purple button in Section 3 below to get <code>practitioner-protocols-wc.zip</code>.</li>
+        <li><strong>Upload to WordPress:</strong> Go to <em>WordPress Admin &rarr; Plugins &rarr; Add New &rarr; Upload Plugin</em>, select the zip, and click <em>Activate</em>. Zero database setup or API keys required.</li>
+        <li><strong>Share 1-Tap Links or Print Handouts:</strong> Practitioners can now share 1-tap cart routines or print QR sheets for clients. When clients buy, WooCommerce automatically records clinic attribution.</li>
+      </ol>
+    </div>
+
     <div style="margin-bottom: 24px;">
       <h3 style="font-size: 16px; margin-bottom: 8px; color: #334155;">1. Generated WooCommerce 1-Tap Links</h3>
       <p style="font-size: 13px; color: #64748b; margin-top: 0;">Clicking either link instantly pre-loads all recommended products into the WooCommerce session and binds the <code>_protocol_token</code> attribution:</p>

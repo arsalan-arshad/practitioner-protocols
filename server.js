@@ -9,6 +9,7 @@
  */
 
 import http from 'node:http';
+import fs from 'node:fs';
 import crypto from 'node:crypto';
 import { URL, URLSearchParams, fileURLToPath } from 'node:url';
 import pg from 'pg';
@@ -935,6 +936,25 @@ export function createRequestListener(options = {}) {
         return;
       }
 
+      // Download WooCommerce companion plugin .zip
+      if (pathname === '/download/practitioner-protocols.zip' || pathname === '/download/practitioner-protocols-wc.zip') {
+        const zipPath = fileURLToPath(new URL('./plugins/practitioner-protocols-wc.zip', import.meta.url));
+        try {
+          const zipBuffer = await fs.promises.readFile(zipPath);
+          res.writeHead(200, {
+            'Content-Type': 'application/zip',
+            'Content-Disposition': 'attachment; filename="practitioner-protocols-wc.zip"',
+            'Content-Length': zipBuffer.length,
+          });
+          res.end(zipBuffer);
+          return;
+        } catch {
+          res.writeHead(404, { 'Content-Type': 'text/plain' });
+          res.end('File not found');
+          return;
+        }
+      }
+
       // Security: Add X-Robots-Tag: noindex, nofollow to every response except /health
       if (typeof res.setHeader === 'function') {
         res.setHeader('X-Robots-Tag', 'noindex, nofollow');
@@ -1391,7 +1411,10 @@ export function createRequestListener(options = {}) {
 
     <div>
       <h3 style="font-size: 16px; margin-bottom: 8px; color: #334155;">3. WordPress Companion Plugin (Ready to Deploy)</h3>
-      <p style="font-size: 13px; color: #64748b; margin-top: 0;">Source available in <code>plugins/woocommerce/practitioner-protocols.php</code>. Simply upload to any WooCommerce WordPress site to capture protocol attributions seamlessly.</p>
+      <p style="font-size: 13px; color: #64748b; margin-top: 0; margin-bottom: 14px;">Source available in <code>plugins/woocommerce/practitioner-protocols.php</code>. Simply upload the zip to any WooCommerce site to capture protocol attributions seamlessly with zero setup.</p>
+      <a href="/download/practitioner-protocols.zip" style="display: inline-flex; align-items: center; gap: 8px; background: #7f54b3; color: #ffffff; padding: 10px 18px; border-radius: 6px; text-decoration: none; font-weight: 600; font-size: 13px; box-shadow: 0 1px 2px rgba(0,0,0,0.15);">
+        ⬇️ Download Companion WordPress Plugin (.zip)
+      </a>
     </div>
   </div>
 </div>

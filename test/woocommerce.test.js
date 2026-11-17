@@ -320,6 +320,38 @@ describe('WooCommerce Adapter Layer', () => {
       assert.ok(json.checkoutUrl.includes('/checkout/'));
       assert.equal(json.batchPayload.requests.length, 2);
     });
+
+    it('serves downloadable companion WordPress plugin zip at /download/practitioner-protocols.zip', async () => {
+      const { createRequestListener } = await import('../server.js');
+      const listener = createRequestListener();
+
+      let statusCode = 0;
+      let headers = {};
+      let buffer = null;
+
+      const req = {
+        url: '/download/practitioner-protocols.zip',
+        method: 'GET',
+        headers: { host: 'localhost:3000' },
+      };
+      const res = {
+        writeHead(code, h) {
+          statusCode = code;
+          headers = h || {};
+        },
+        setHeader() {},
+        end(data) {
+          buffer = data;
+        },
+      };
+
+      await listener(req, res);
+      assert.equal(statusCode, 200);
+      assert.equal(headers['Content-Type'], 'application/zip');
+      assert.ok(headers['Content-Disposition'].includes('practitioner-protocols-wc.zip'));
+      assert.ok(Buffer.isBuffer(buffer));
+      assert.ok(buffer.length > 500, 'Zip buffer must contain data');
+    });
   });
 
 });
